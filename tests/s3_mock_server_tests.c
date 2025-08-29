@@ -437,6 +437,14 @@ TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
 /* Total hack to flip the bytes. */
 static void s_after_prepare_upload_part_finish(struct aws_s3_request *request, struct aws_http_message *message) {
     (void)message;
+    if (request->num_times_prepared == 0 && message != NULL) {
+        aws_http_message_add_header(message, before_finish_header);
+        struct aws_http_header throttle_header = {
+            .name = aws_byte_cursor_from_c_str("force_throttle"),
+            .value = aws_byte_cursor_from_c_str("true"),
+        };
+        aws_http_message_add_header(message, throttle_header);
+    }
     if (request->num_times_prepared > 0) {
         /* mock that the body buffer was messed up in memory */
         request->request_body.buffer[1]++;
@@ -458,7 +466,7 @@ static void s_after_prepare_upload_part_finish_retry_before_finish_sending(
         };
         aws_http_message_add_header(message, throttle_header);
     }
-    if (request->num_times_prepared > 0) {
+    if (request->num_times_prepared > 0 && request->request_body.buffer != NULL) {
         /* mock that the body buffer was messed up in memory */
         request->request_body.buffer[1]++;
     }
@@ -621,6 +629,9 @@ TEST_CASE(multipart_upload_checksum_fio_with_retry_mock_server) {
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->after_prepare_upload_part_finish =
+        s_after_prepare_upload_part_finish_retry_before_finish_sending;
     struct aws_s3_file_io_options fio_opts = {
         .should_stream = true,
         .direct_io = true,

@@ -534,7 +534,7 @@ TEST_CASE(part_streaming_stream_from_large_file_test) {
     size_t file_length = MB_TO_BYTES(100);
 
     ASSERT_SUCCESS(s_part_streaming_test_setup(
-        allocator, &fixture, "s3_part_streaming_stream_read_large.txt", file_length, KB_TO_BYTES(16)));
+        allocator, &fixture, "s3_part_streaming_stream_read_large.txt", file_length, KB_TO_BYTES(64)));
     /* Test reading from unaligned offset */
     struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
         allocator, fixture.parallel_read_stream, fixture.ticket, 0, file_length, true);
@@ -753,7 +753,7 @@ TEST_CASE(part_streaming_stream_file_deleted_during_read_test) {
     size_t file_length = MB_TO_BYTES(1);
 
     ASSERT_SUCCESS(s_part_streaming_test_setup(
-        allocator, &fixture, "s3_part_streaming_stream_delete_test.txt", file_length, KB_TO_BYTES(16)));
+        allocator, &fixture, "s3_part_streaming_stream_delete_test.txt", file_length, KB_TO_BYTES(64)));
 
     /* Create the part streaming stream */
     struct aws_input_stream *part_streaming_stream = aws_part_streaming_input_stream_new(
