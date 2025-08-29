@@ -961,7 +961,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
-    if (byte_buf && stream || !byte_buf && !stream) {
+    if ((byte_buf && stream) || (!byte_buf && !stream)) {
         /* Should pass one and only one of them. */
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
