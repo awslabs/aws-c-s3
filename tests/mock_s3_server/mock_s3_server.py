@@ -70,7 +70,7 @@ class ResponseConfig:
     def _resolve_file_path(self, wrapper, request_type):
         if self.json_path is None:
             if self.forced_throttle:
-                # force the throttle to happend, instead of just 50%.
+                # force the throttle to happen, for triggering retries.
                 response_file = os.path.join(
                     base_dir, request_type.name, f"throttle.json")
                 self.json_path = response_file
