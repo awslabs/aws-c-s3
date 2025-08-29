@@ -326,16 +326,6 @@ struct aws_s3_file_io_options {
     bool should_stream;
 
     /**
-     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
-     * Notes:
-     * - Only supported on linux.
-     * - Only supports upload for now.
-     * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
-     * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
-     */
-    bool direct_io;
-
-    /**
      * The estimated disk throughput. Only be applied when `streaming_upload` is true.
      * in gigabits per second (Gbps).
      *
@@ -345,6 +335,16 @@ struct aws_s3_file_io_options {
      * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
      **/
     double disk_throughput;
+
+    /**
+     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
+     * Notes:
+     * - Only supported on linux.
+     * - Only supports upload for now.
+     * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
+     * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
+     */
+    bool direct_io;
 };
 
 /**
