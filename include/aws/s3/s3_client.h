@@ -339,7 +339,7 @@ struct aws_s3_file_io_options {
     /**
      * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
      * Notes:
-     * - Only supported on linux.
+     * - Only supported on linux for now.
      * - Only supports upload for now.
      * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
      * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
