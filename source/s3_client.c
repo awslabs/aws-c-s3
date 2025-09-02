@@ -421,6 +421,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->threaded_data.request_queue);
 
     aws_atomic_init_int(&client->stats.num_requests_in_flight, 0);
+    aws_atomic_init_int(&client->stats.num_requests_streaming_request_body, 0);
 
     for (uint32_t i = 0; i < (uint32_t)AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
         aws_atomic_init_int(&client->stats.num_requests_network_io[i], 0);
@@ -1806,6 +1807,7 @@ static bool s_s3_client_should_update_meta_request(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
     uint32_t num_requests_in_flight,
+    uint32_t num_requests_streaming,
     const uint32_t max_requests_in_flight,
     const uint32_t max_requests_prepare) {
 
@@ -1817,27 +1819,20 @@ static bool s_s3_client_should_update_meta_request(
         }
     }
 
-    if (meta_request->fio_opts.should_stream) {
-        /**
-         * When upload with streaming, the prepare stage will not read into buffer.
-         * Prevent the number of request in flight to be larger han the max_active_connections.
-         * So that the request will not staying in the queue to wait for the connection available.
-         * Prevents the credentials to be expired during waiting for too long.
-         */
-        if (num_requests_in_flight >= aws_s3_client_get_max_active_connections(client, meta_request)) {
-            return false;
-        }
-    }
     /**
-     * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
-     * be in the preparation stage.
-     * Or total number of requests tracked by the client is more than the max tracked ("in flight")
-     * requests.
+     * If number of being-prepared + already-prepared-and-queued + num-requests-streaming-request-body requests is more
+     * than the max that can be in the preparation stage.
+     *
+     * num-requests-streaming-request-body tracks the requests streaming the request body after the request starts.
+     * Limit the number of request preparing based on it because the requests are also reading from the source. Avoiding
+     * more than expected requests to read from the source.
+     *
+     * Or total number of requests tracked by the client is more than the max tracked ("in flight") requests.
      *
      * We cannot create more requests for this meta request.
      */
-    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >=
-        max_requests_prepare) {
+    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size +
+         num_requests_streaming) >= max_requests_prepare) {
         return false;
     }
     if (num_requests_in_flight >= max_requests_in_flight) {
@@ -2015,6 +2010,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_requests_work_remaining);
 
     uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_request_body);
 
     const uint32_t pass_flags[] = {
         AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE,
@@ -2037,7 +2033,12 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
             if (!s_s3_client_should_update_meta_request(
-                    client, meta_request, num_requests_in_flight, max_requests_in_flight, max_requests_prepare)) {
+                    client,
+                    meta_request,
+                    num_requests_in_flight,
+                    num_requests_streaming,
+                    max_requests_in_flight,
+                    max_requests_prepare)) {
 
                 /* Move the meta request to be processed from next loop. */
                 aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
@@ -2067,6 +2068,18 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     num_requests_in_flight =
                         (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
 
+                    /**
+                     * When upload with streaming, the prepare stage will not read into buffer.
+                     * But it should prevent more requests to be preapred so that the request will not staying in the
+                     * queue to wait for the connection available. Prevents the credentials to be expired during waiting
+                     * for too long.
+                     */
+                    if (meta_request->fio_opts.should_stream) {
+                        /* If the request is a streaming request, update the states to track the request that is
+                         * streaming request body. */
+                        aws_atomic_fetch_add(&client->stats.num_requests_streaming_request_body, 1);
+                    }
+
                     s_acquire_mem_and_prepare_request(
                         client, request, s_s3_client_prepare_callback_queue_request, client);
                 }
@@ -2091,6 +2104,9 @@ static void s_s3_client_meta_request_finished_request(
         /* BEGIN CRITICAL SECTION */
         aws_s3_client_lock_synced_data(client);
         aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
+        if (meta_request->fio_opts.should_stream) {
+            aws_atomic_fetch_sub(&client->stats.num_requests_streaming_request_body, 1);
+        }
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
         /* END CRITICAL SECTION */

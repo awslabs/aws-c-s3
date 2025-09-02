@@ -356,6 +356,9 @@ struct aws_s3_client {
 
         /* Number of requests currently scheduled to be streamed the response body or are actively being streamed. */
         struct aws_atomic_var num_requests_streaming_response;
+
+        /* Number of overall requests currently streaming the request body instead of buffering. */
+        struct aws_atomic_var num_requests_streaming_request_body;
     } stats;
 
     struct {
