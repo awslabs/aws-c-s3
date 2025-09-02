@@ -319,7 +319,7 @@ enum aws_s3_recv_file_options {
 struct aws_s3_file_io_options {
     /**
      * Skip buffering the part in memory before sending the request.
-     * If set, set the `disk_throughput` to be reasonable align with the available disk throughput.
+     * If set, set the `disk_throughput_gbps` to be reasonable align with the available disk throughput.
      * Otherwise, the transfer may fail with connection starvation.
      * Default to false.
      **/
@@ -334,7 +334,7 @@ struct aws_s3_file_io_options {
      * 1. Disk is busy with other applications
      * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
      **/
-    double disk_throughput;
+    double disk_throughput_gbps;
 
     /**
      * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
