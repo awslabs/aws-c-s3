@@ -157,9 +157,18 @@ struct aws_s3_request {
     /* Owning meta request. */
     struct aws_s3_meta_request *meta_request;
 
+    /* The buffer size to be allocated for the request, defaults the part size. */
+    size_t buffer_size;
     /* Request body to use when sending the request. The contents of this body will be re-used if a request is
      * retried.*/
     struct aws_byte_buf request_body;
+
+    /* Set when the request will be streaming from file directly instead of the request_body. */
+    bool fio_streaming;
+    /* If file I/O options configure streaming. The request body will be streaming from this. If a request is retried,
+     * this stream will be recreated. */
+    struct aws_input_stream *request_body_stream;
+    uint64_t content_length;
 
     /**
      * Ticket to acquire the buffer.

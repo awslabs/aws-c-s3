@@ -132,6 +132,7 @@ static int s_part_streaming_input_stream_read(struct aws_input_stream *stream, s
         }
 
         AWS_LOGF_TRACE(AWS_LS_S3_GENERAL, "id=%p: Waiting for background load to complete", (void *)impl);
+        /* TODO: the HTTP interface doesn't support async streaming, we have to block the thread here. */
         if (!aws_future_bool_wait(impl->loading_future, s_max_timeout_ns)) {
             /* Timeout */
             AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "id=%p: Timeout waiting for background load", (void *)impl);
@@ -231,21 +232,24 @@ static int s_part_streaming_input_stream_get_length(struct aws_input_stream *str
 static void s_part_streaming_input_stream_destroy(void *user_data) {
     struct aws_s3_part_streaming_input_stream_impl *impl = user_data;
 
+    if (impl->loading_future) {
+        AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "id=%p: Waiting for pending load to complete before destroy", (void *)impl);
+        if (aws_future_bool_is_done(impl->loading_future)) {
+            aws_future_bool_release(impl->loading_future);
+        } else {
+            /* If there is a loading future, wait for it to complete.
+             * Don't block the thead, to avoid dead lock when the future needs the thread to complete.*/
+            /* TODO: probably better to cancel the future, but we don't support cancel yet */
+            aws_future_bool_register_callback(impl->loading_future, s_part_streaming_input_stream_destroy, impl);
+            return;
+        }
+    }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
         "id=%p: Destroying part streaming input stream - total_read=%zu, total_length=%zu",
         (void *)impl,
         impl->total_length_read,
         impl->total_length);
-
-    if (impl->loading_future) {
-        /* If there is a loading future, wait for it to complete. */
-        /* TODO: probably better to cancel the future, but we don't support cancel yet */
-        AWS_LOGF_DEBUG(AWS_LS_S3_GENERAL, "id=%p: Waiting for pending load to complete before destroy", (void *)impl);
-        aws_future_bool_wait(impl->loading_future, s_max_timeout_ns);
-        aws_future_bool_release(impl->loading_future);
-    }
-
     aws_parallel_input_stream_release(impl->para_stream);
     aws_s3_buffer_ticket_release(impl->ticket);
     aws_mem_release(impl->allocator, impl);
