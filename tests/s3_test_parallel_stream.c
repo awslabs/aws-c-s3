@@ -61,9 +61,11 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg) {
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read) {
     (void)file_name;
     (void)reading_elg;
+    (void)direct_io_read;
 
     struct aws_parallel_input_stream_from_file_failure_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_failure_impl));

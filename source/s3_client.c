@@ -183,14 +183,15 @@ uint32_t aws_s3_client_get_max_active_connections(
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
     }
-    if (meta_request && meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput > 0) {
+    if (meta_request && meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps > 0) {
         return aws_min_u32(
-            s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput),
+            s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput_gbps),
             max_active_connections);
     }
-    if (client->fio_opts.should_stream && client->fio_opts.disk_throughput > 0) {
+    if (client->fio_opts.should_stream && client->fio_opts.disk_throughput_gbps > 0) {
         return aws_min_u32(
-            s_get_ideal_connection_number_from_throughput(client->fio_opts.disk_throughput), max_active_connections);
+            s_get_ideal_connection_number_from_throughput(client->fio_opts.disk_throughput_gbps),
+            max_active_connections);
     }
 
     return max_active_connections;

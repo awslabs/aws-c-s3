@@ -123,16 +123,24 @@ int aws_parallel_input_stream_get_length(struct aws_parallel_input_stream *strea
  * Creates a new parallel input stream that reads from a file.
  * This stream uses an event loop group to perform file I/O operations asynchronously.
  *
+ * Notes for direct_io_read:
+ * - checking `aws_file_path_read_from_offset_direct_io` for detail
+ * - For `AWS_ERROR_UNSUPPORTED_OPERATION`, fallback to reading with cache with warnings, instead of fail.
+ * - If alignment required, it's callers' responsibility to align with the page size.
+ *
  * @param allocator The allocator to use for memory allocation
  * @param file_name The name of the file to read from
  * @param reading_elg The event loop group to use for file I/O operations
+ * @param direct_io_read Whether to use direct I/O for reading the file.
+ *
  * @return A new parallel input stream that reads from the specified file
  */
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg);
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read);
 
 /**
  * Get the shutdown future from the parallel input stream.

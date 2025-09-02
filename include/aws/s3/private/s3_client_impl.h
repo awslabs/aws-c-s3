@@ -171,7 +171,8 @@ struct aws_s3_client_vtable {
     struct aws_parallel_input_stream *(*parallel_input_stream_new_from_file)(
         struct aws_allocator *allocator,
         struct aws_byte_cursor file_name,
-        struct aws_event_loop_group *reading_elg);
+        struct aws_event_loop_group *reading_elg,
+        bool direct_io_read);
 
     struct aws_http_stream *(*http_connection_make_request)(
         struct aws_http_connection *client_connection,
