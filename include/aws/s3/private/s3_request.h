@@ -292,9 +292,9 @@ struct aws_s3_request *aws_s3_request_new(
     uint32_t part_number,
     uint32_t flags);
 
-/* Sets part boundary information on the request. */
+/* Gets the size of the part payload. returns metarequest part size if accurate size is not available. */
 AWS_S3_API
-void aws_s3_request_set_part_boundary(struct aws_s3_request *request, uint64_t part_start, uint64_t part_end);
+uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request);
 
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */
