@@ -174,9 +174,6 @@ struct aws_s3_request {
      * ex for unknown content length we dont know what the end will be until we finish reading data. */
     uint64_t part_range_end;
 
-    /* Number of bytes in this part. */
-    uint64_t part_size;
-
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
      * However, must currently be a valid part number (ie: greater than 0) if the response body is to be streamed to the
      * caller.

@@ -47,7 +47,8 @@ struct aws_s3_request *aws_s3_request_new(
 
 uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request) {
     /* +1 cause range end is inclusive */
-    return request->part_range_end - request->part_range_start + 1;
+    uint64_t size = request->part_range_end - request->part_range_start + 1
+    return size > 0 ? size ? : request->meta_request->part_size;
 }
 
 static void s_populate_metrics_from_message(struct aws_s3_request *request, struct aws_http_message *message) {
