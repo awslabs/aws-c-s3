@@ -11,6 +11,7 @@
 #include "aws/s3/private/s3_default_meta_request.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_parallel_input_stream.h"
+#include "aws/s3/private/s3_request.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/private/s3express_credentials_provider_impl.h"
