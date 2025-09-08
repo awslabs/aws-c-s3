@@ -1908,7 +1908,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = meta_request->part_size,
+            .size = aws_s3_request_get_part_size(request),
         };
 
         struct aws_s3_reserve_memory_payload *payload =

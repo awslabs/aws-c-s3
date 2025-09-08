@@ -592,6 +592,10 @@ static bool s_s3_auto_ranged_put_update(
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
+                size_t request_body_size =
+                    s_compute_request_body_size(meta_request, request->part_number, &request->part_range_start);
+                request->part_range_end = request->part_range_start + request_body_size - 1;
+
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
                  * but ultimately it gets marked no-op and we don't send it */
                 request->was_previously_uploaded = request_previously_uploaded;
