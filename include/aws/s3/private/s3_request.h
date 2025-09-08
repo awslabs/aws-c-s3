@@ -292,7 +292,9 @@ struct aws_s3_request *aws_s3_request_new(
     uint32_t part_number,
     uint32_t flags);
 
-/* Gets the size of the part payload. returns metarequest part size if accurate size is not available. */
+/* Gets the size of the part payload.
+ * returns metarequest part size if accurate size is not available for request that have part size body or response or 0
+ * otherwise. */
 AWS_S3_API
 uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request);
 
