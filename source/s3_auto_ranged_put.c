@@ -322,6 +322,34 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .pause = s_s3_auto_ranged_put_pause,
 };
 
+/**
+ * Helper to compute request body size.
+ * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
+ * part.
+ */
+static size_t s_compute_request_body_size(
+    const struct aws_s3_meta_request *meta_request,
+    uint32_t part_number,
+    uint64_t *offset_out) {
+    AWS_PRECONDITION(meta_request);
+
+    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    size_t request_body_size = meta_request->part_size;
+    /* Last part--adjust size to match remaining content length. */
+    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->total_num_parts_from_content_length) {
+        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+
+        if (content_remainder > 0) {
+            request_body_size = content_remainder;
+        }
+    }
+    /* The part_number starts at 1 */
+    *offset_out = (part_number - 1) * meta_request->part_size;
+
+    return request_body_size;
+}
+
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
@@ -750,34 +778,6 @@ static bool s_s3_auto_ranged_put_update(
     }
 
     return work_remaining;
-}
-
-/**
- * Helper to compute request body size.
- * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
- * part.
- */
-static size_t s_compute_request_body_size(
-    const struct aws_s3_meta_request *meta_request,
-    uint32_t part_number,
-    uint64_t *offset_out) {
-    AWS_PRECONDITION(meta_request);
-
-    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-
-    size_t request_body_size = meta_request->part_size;
-    /* Last part--adjust size to match remaining content length. */
-    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->total_num_parts_from_content_length) {
-        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
-
-        if (content_remainder > 0) {
-            request_body_size = content_remainder;
-        }
-    }
-    /* The part_number starts at 1 */
-    *offset_out = (part_number - 1) * meta_request->part_size;
-
-    return request_body_size;
 }
 
 static int s_verify_part_matches_checksum(
