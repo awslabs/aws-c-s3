@@ -46,11 +46,9 @@ struct aws_s3_request *aws_s3_request_new(
 }
 
 uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request) {
-    /* Note: this is still somewhat suboptimal as 0-0 is a valid 1 byte range, but 
+    /* Note: this is still somewhat suboptimal as 0-0 is a valid 1 byte range, but
      * we will overallocate for it */
-    bool is_range_set = 
-        request->part_range_end != request->part_range_start || 
-        request->part_range_start != 0;
+    bool is_range_set = request->part_range_end != request->part_range_start || request->part_range_start != 0;
 
     if (is_range_set) {
         /* +1 cause range end is inclusive */
