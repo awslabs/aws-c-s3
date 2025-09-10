@@ -353,7 +353,9 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.first_part_size,
                     request->part_number,
                     &request->part_range_start,
-                    &request->part_range_end);
+                    &request->part_range_end,
+                    meta_request->object_part_size,
+                    meta_request->object_part_number);
 
                 ++auto_ranged_get->synced_data.num_parts_requested;
                 goto has_work_remaining;

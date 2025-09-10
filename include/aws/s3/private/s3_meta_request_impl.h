@@ -198,7 +198,7 @@ struct aws_s3_meta_request {
 
         /* The next expected streaming part number needed to continue streaming part bodies. (For example, this will
          * initially be 1 for part 1, and after that part is received, it will be 2, then 3, etc.. )*/
-        uint32_t next_streaming_part;
+        // uint32_t next_streaming_part;
 
         /* Number of parts scheduled for delivery. */
         uint32_t num_parts_delivery_sent;

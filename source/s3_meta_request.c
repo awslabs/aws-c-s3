@@ -357,7 +357,7 @@ int aws_s3_meta_request_init_base(
         meta_request->request_body_using_async_writes = true;
     }
 
-    meta_request->synced_data.next_streaming_part = 1;
+    // meta_request->synced_data.next_streaming_part = 1;
 
     meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
@@ -2135,14 +2135,14 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
 
     AWS_FATAL_ASSERT(*top_request);
 
-    if ((*top_request)->part_number != meta_request->synced_data.next_streaming_part) {
-        return NULL;
-    }
+    // if ((*top_request)->part_number != meta_request->synced_data.next_streaming_part) {
+    //     return NULL;
+    // }
 
     struct aws_s3_request *request = NULL;
     aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
 
-    ++meta_request->synced_data.next_streaming_part;
+    // ++meta_request->synced_data.next_streaming_part;
 
     return request;
 }
