@@ -253,9 +253,9 @@ static bool s_s3_auto_ranged_get_update(
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
                                 AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
-                        /* Note: our current default logic is to do part 1, discover size and then abort if payload its too huge
-                         * We optimistically reserve part size for it */
-                        request->part_range_start = 0; 
+                        /* Note: our current default logic is to do part 1, discover size and then abort if payload its
+                         * too huge We optimistically reserve part size for it */
+                        request->part_range_start = 0;
                         request->part_range_end = meta_request->part_size;
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
