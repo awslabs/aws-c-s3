@@ -572,7 +572,9 @@ void aws_s3_calculate_auto_ranged_get_part_range(
     uint64_t first_part_size,
     uint32_t part_number,
     uint64_t *out_part_range_start,
-    uint64_t *out_part_range_end) {
+    uint64_t *out_part_range_end,
+    uint64_t object_part_size,
+    uint32_t object_part_number) {
     AWS_PRECONDITION(out_part_range_start);
     AWS_PRECONDITION(out_part_range_end);
 
@@ -592,10 +594,18 @@ void aws_s3_calculate_auto_ranged_get_part_range(
         *out_part_range_start = object_range_start;
         *out_part_range_end = *out_part_range_start + first_part_size - 1;
     } else {
-        /* Else, find the next part by adding the object range + total number of whole parts before this one + initial
-         * part size*/
-        *out_part_range_start = object_range_start + ((uint64_t)(part_index - 1)) * part_size_uint64 + first_part_size;
-        *out_part_range_end = *out_part_range_start + part_size_uint64 - 1; /* range-end is inclusive */
+        if (object_part_number != 0 && object_part_size != 0 && object_range_start == 0) {
+            uint32_t object_part_index = part_index % object_part_number;
+            uint32_t in_object_part_index = part_index / object_part_number;
+            *out_part_range_start = object_part_index * object_part_size + in_object_part_index * part_size_uint64;
+            *out_part_range_end = *out_part_range_start + part_size_uint64 - 1; /* range-end is inclusive */
+        } else {
+            /* Else, find the next part by adding the object range + total number of whole parts before this one +
+             * initial part size*/
+            *out_part_range_start =
+                object_range_start + ((uint64_t)(part_index - 1)) * part_size_uint64 + first_part_size;
+            *out_part_range_end = *out_part_range_start + part_size_uint64 - 1; /* range-end is inclusive */
+        }
     }
 
     /* Cap the part's range end using the object's range end. */

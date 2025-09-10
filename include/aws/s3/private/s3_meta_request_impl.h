@@ -140,6 +140,9 @@ struct aws_s3_meta_request {
     /* Initial HTTP Message that this meta request is based on. */
     struct aws_http_message *initial_request_message;
 
+    uint64_t object_part_size;
+    uint32_t object_part_number;
+
     /* The meta request's outgoing body comes from one of these:
      * 1) request_body_async_stream: if set, then async stream 1 part at a time
      * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel

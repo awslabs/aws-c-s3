@@ -731,6 +731,10 @@ struct aws_s3_checksum_config {
  * 4) If you're not sure when each chunk of data will be available, use `send_using_async_writes`.
  */
 struct aws_s3_meta_request_options {
+
+    uint64_t object_part_size;
+    uint32_t object_part_number;
+
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
 

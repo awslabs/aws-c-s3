@@ -535,7 +535,9 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
                 (uint64_t)request_response_body_size /*first_part_size*/,
                 part_number,
                 &request->part_range_start,
-                &request->part_range_end);
+                &request->part_range_end,
+                0,
+                0);
 
             aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
 
@@ -573,7 +575,9 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
                 (uint64_t)request_response_body_size /*first_part_size*/,
                 part_number,
                 &request->part_range_start,
-                &request->part_range_end);
+                &request->part_range_end,
+                0,
+                0);
 
             aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
 
@@ -603,7 +607,9 @@ static int s_test_s3_meta_request_body_streaming(struct aws_allocator *allocator
             (uint64_t)request_response_body_size /*first_part_size*/,
             part_range1_start,
             &request->part_range_start,
-            &request->part_range_end);
+            &request->part_range_end,
+            0,
+            0);
 
         aws_byte_buf_init_copy(&request->send_data.response_body, allocator, &response_body_source_buffer);
 

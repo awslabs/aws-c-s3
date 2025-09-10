@@ -421,7 +421,9 @@ static int s_validate_part_ranges(
             aligned_first_part_size,
             i + 1,
             &part_range_start,
-            &part_range_end);
+            &part_range_end,
+            0,
+            0);
 
         ASSERT_TRUE(part_range_start == part_ranges[i * 2]);
         ASSERT_TRUE(part_range_end == part_ranges[i * 2 + 1]);
@@ -470,13 +472,29 @@ static int s_test_s3_get_num_parts_and_get_part_range(struct aws_allocator *allo
 
         uint64_t part_range_start, part_range_end;
         aws_s3_calculate_auto_ranged_get_part_range(
-            object_range_start, object_range_end, part_size, first_part_size, 1, &part_range_start, &part_range_end);
+            object_range_start,
+            object_range_end,
+            part_size,
+            first_part_size,
+            1,
+            &part_range_start,
+            &part_range_end,
+            0,
+            0);
 
         ASSERT_INT_EQUALS(part_range_start, part_ranges[0]);
         ASSERT_INT_EQUALS(part_range_end, part_ranges[1]);
 
         aws_s3_calculate_auto_ranged_get_part_range(
-            object_range_start, object_range_end, part_size, first_part_size, 2, &part_range_start, &part_range_end);
+            object_range_start,
+            object_range_end,
+            part_size,
+            first_part_size,
+            2,
+            &part_range_start,
+            &part_range_end,
+            0,
+            0);
 
         ASSERT_INT_EQUALS(part_range_start, part_ranges[2]);
         ASSERT_INT_EQUALS(part_range_end, part_ranges[3]);

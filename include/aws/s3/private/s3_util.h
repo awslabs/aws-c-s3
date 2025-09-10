@@ -293,7 +293,9 @@ void aws_s3_calculate_auto_ranged_get_part_range(
     uint64_t first_part_size,
     uint32_t part_number,
     uint64_t *out_part_range_start,
-    uint64_t *out_part_range_end);
+    uint64_t *out_part_range_end,
+    uint64_t object_part_size,
+    uint32_t object_part_number);
 
 /* Match the retry-able S3 error code to CRT error code, return AWS_ERROR_UNKNOWN when not matched. */
 AWS_S3_API
