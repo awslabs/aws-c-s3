@@ -180,8 +180,6 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
     meta_request->type = options->type;
-    meta_request->object_part_number = options->object_part_number;
-    meta_request->object_part_size = options->object_part_size;
 
     /* Deep copy the file io options. */
     if (options->fio_opts) {
@@ -1722,12 +1720,14 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d)",
+                    "id=%p Meta request cannot recover from error %d (%s). (request=%p, response status=%d, request "
+                    "id=%s)",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
                     (void *)request,
-                    response_status);
+                    response_status,
+                    request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A");
             }
 
         } else {
@@ -1743,13 +1743,15 @@ void aws_s3_meta_request_send_request_finish_default(
             } else {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d). Try to setup a "
+                    "id=%p Request failed from error %d (%s). (request=%p, response status=%d, request id=%s). Try to "
+                    "setup a "
                     "retry.",
                     (void *)meta_request,
                     error_code,
                     aws_error_str(error_code),
                     (void *)request,
-                    response_status);
+                    response_status,
+                    request->send_data.request_id ? aws_string_c_str(request->send_data.request_id) : "N/A");
             }
 
             /* Otherwise, set this up for a retry if the meta request is active. */
