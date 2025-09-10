@@ -1897,7 +1897,10 @@ void s_acquire_mem_and_prepare_request(
     aws_s3_meta_request_prepare_request_callback_fn *callback,
     void *user_data) {
 
-    if (request->ticket == NULL && request->should_allocate_buffer_from_pool) {
+    size_t request_size = (size_t)aws_s3_request_get_part_size(request);
+    AWS_ASSERT(request_size != 0); /* Note: 0 request size is invalid in all cases. */
+
+    if (request->ticket == NULL && request->should_allocate_buffer_from_pool && request_size > 0) {
 
         if (request->send_data.metrics) {
             struct aws_s3_request_metrics *metric = request->send_data.metrics;
@@ -1910,7 +1913,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = (size_t)aws_s3_request_get_part_size(request),
+            .size = request_size,
         };
 
         struct aws_s3_reserve_memory_payload *payload =
