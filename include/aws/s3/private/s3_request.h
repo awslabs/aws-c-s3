@@ -129,6 +129,8 @@ struct aws_s3_request_metrics {
         uint64_t part_range_start;
         /* Last byte of this part. */
         uint64_t part_range_end;
+        /* Part number that this request refers to. */
+        uint32_t part_number;
     } part_info_metrics;
 
     struct aws_ref_count ref_count;
