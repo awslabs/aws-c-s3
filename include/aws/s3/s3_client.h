@@ -1601,6 +1601,18 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 AWS_S3_API
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
 
+/* Get the beginning range of this part from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_range_start(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_start);
+
+/* Get the last byte of this part from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_range_end(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_end);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
