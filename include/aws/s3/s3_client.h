@@ -1619,6 +1619,10 @@ void aws_s3_request_metrics_get_part_range_end(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_part_range_end);
 
+/* Get the part number from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 

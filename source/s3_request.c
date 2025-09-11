@@ -80,6 +80,7 @@ static void s_populate_metrics_from_message(struct aws_s3_request *request, stru
     /* Copy part range information from request to metrics */
     request->send_data.metrics->part_info_metrics.part_range_start = request->part_range_start;
     request->send_data.metrics->part_info_metrics.part_range_end = request->part_range_end;
+    request->send_data.metrics->part_info_metrics.part_number = request->part_number;
 
     (void)err;
 }
@@ -588,4 +589,10 @@ void aws_s3_request_metrics_get_part_range_end(
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(out_part_range_end);
     *out_part_range_end = metrics->part_info_metrics.part_range_end;
+}
+
+void aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_part_number);
+    *out_part_number = metrics->part_info_metrics.part_number;
 }
