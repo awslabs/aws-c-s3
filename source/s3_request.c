@@ -77,6 +77,10 @@ static void s_populate_metrics_from_message(struct aws_s3_request *request, stru
     request->send_data.metrics->req_resp_info_metrics.operation_name =
         aws_string_new_from_string(request->send_data.metrics->allocator, request->operation_name);
 
+    /* Copy part range information from request to metrics */
+    request->send_data.metrics->part_info_metrics.part_range_start = request->part_range_start;
+    request->send_data.metrics->part_info_metrics.part_range_end = request->part_range_end;
+
     (void)err;
 }
 
@@ -568,4 +572,20 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics) {
     AWS_PRECONDITION(metrics);
     return metrics->crt_info_metrics.retry_attempt;
+}
+
+void aws_s3_request_metrics_get_part_range_start(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_start) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_part_range_start);
+    *out_part_range_start = metrics->part_info_metrics.part_range_start;
+}
+
+void aws_s3_request_metrics_get_part_range_end(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_end) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_part_range_end);
+    *out_part_range_end = metrics->part_info_metrics.part_range_end;
 }
