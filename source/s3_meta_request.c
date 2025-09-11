@@ -180,6 +180,8 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
     meta_request->type = options->type;
+    meta_request->object_part_number = options->object_part_number;
+    meta_request->object_part_size = options->object_part_size;
 
     /* Deep copy the file io options. */
     if (options->fio_opts) {
