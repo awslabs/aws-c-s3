@@ -17,6 +17,8 @@ static void s_para_from_file_failure_destroy(struct aws_parallel_input_stream *s
     struct aws_parallel_input_stream_from_file_failure_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_failure_impl, base);
 
+    aws_future_void_set_result(stream->shutdown_future);
+    aws_future_void_release(stream->shutdown_future);
     aws_mem_release(stream->alloc, impl);
 }
 
@@ -59,9 +61,11 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg) {
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read) {
     (void)file_name;
     (void)reading_elg;
+    (void)direct_io_read;
 
     struct aws_parallel_input_stream_from_file_failure_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_failure_impl));

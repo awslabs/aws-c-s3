@@ -52,6 +52,7 @@ AWS_S3_API
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
+    struct aws_input_stream *stream,
     struct aws_http_message *out_message,
     struct aws_s3_upload_request_checksum_context *checksum_context);
 
@@ -86,6 +87,18 @@ struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *buffer,
+    uint32_t part_number,
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5,
+    struct aws_s3_upload_request_checksum_context *checksum_context);
+
+/* Same as `aws_s3_upload_part_message_new`, but instead of taking the loaded buffer, taking the input stream for
+ * streaming I/O. */
+AWS_S3_API
+struct aws_http_message *aws_s3_upload_part_message_new_streaming(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_input_stream *input_stream,
     uint32_t part_number,
     const struct aws_string *upload_id,
     bool should_compute_content_md5,

@@ -357,6 +357,60 @@ error_clean_up:
  * Create a new put object request from an existing put object request.  Currently just optionally adds part information
  * for a multipart upload.
  **/
+struct aws_http_message *aws_s3_upload_part_message_new_streaming(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_input_stream *input_stream,
+    uint32_t part_number,
+    const struct aws_string *upload_id,
+    bool should_compute_content_md5,
+    struct aws_s3_upload_request_checksum_context *checksum_context) {
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(base_message);
+    AWS_PRECONDITION(part_number > 0);
+
+    struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
+        allocator,
+        base_message,
+        g_s3_upload_part_excluded_headers,
+        AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
+        true /*exclude_x_amz_meta*/);
+
+    if (message == NULL) {
+        return NULL;
+    }
+
+    if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, part_number, false, message)) {
+        goto error_clean_up;
+    }
+    /* Acquire the extra refcount on the input stream, since the assign_body will transfer the ownership of the input
+     * stream to the message, while here we still want to the ownership of the input stream separately. */
+    aws_input_stream_acquire(input_stream);
+    if (aws_s3_message_util_assign_body(allocator, NULL /*body_buf*/, input_stream, message, checksum_context) ==
+        NULL) {
+        goto error_clean_up;
+    }
+
+    if (should_compute_content_md5) {
+        if (!checksum_context || checksum_context->location == AWS_SCL_NONE) {
+            /* MD5 is not supported for streaming. */
+            AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Content MD5 is not supported for file I/O streaming.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error_clean_up;
+        }
+    }
+
+    return message;
+
+error_clean_up:
+    aws_http_message_release(message);
+    return NULL;
+}
+
+/**
+ * Create a new put object request from an existing put object request.  Currently just optionally adds part information
+ * for a multipart upload.
+ **/
 struct aws_http_message *aws_s3_upload_part_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -385,7 +439,7 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         goto error_clean_up;
     }
 
-    if (aws_s3_message_util_assign_body(allocator, buffer, message, checksum_context) == NULL) {
+    if (aws_s3_message_util_assign_body(allocator, buffer, NULL /*body_stream*/, message, checksum_context) == NULL) {
         goto error_clean_up;
     }
 
@@ -436,7 +490,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
     if (buffer != NULL) {
         /* part copy does not have a ChecksumAlgorithm member, it will use the same algorithm as the create
          * multipart upload request specifies */
-        if (aws_s3_message_util_assign_body(allocator, buffer, message, NULL /*checksum_context*/) == NULL) {
+        if (aws_s3_message_util_assign_body(
+                allocator, buffer, NULL /*body_stream*/, message, NULL /*checksum_context*/) == NULL) {
             goto error_clean_up;
         }
 
@@ -781,7 +836,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
 
         AWS_LOGF_TRACE(
             AWS_LS_S3_GENERAL, "Payload for Complete MPU is:\n" PRInSTR "\n", AWS_BYTE_BUF_PRI(*body_buffer));
-        aws_s3_message_util_assign_body(allocator, body_buffer, message, NULL);
+        aws_s3_message_util_assign_body(allocator, body_buffer, NULL /*body_stream*/, message, NULL);
     }
 
     return message;
@@ -894,31 +949,43 @@ done:
     return ret_code;
 }
 
-/* Assign a buffer to an HTTP message, creating a stream and setting the content-length header */
+/* Assign a buffer to an HTTP message:
+ - from a buffer to create a stream and setting the content-length and checksum headers
+ - from a stream directly and setting the content-length and checksum headers
+ */
 struct aws_input_stream *aws_s3_message_util_assign_body(
     struct aws_allocator *allocator,
     struct aws_byte_buf *byte_buf,
+    struct aws_input_stream *stream,
     struct aws_http_message *out_message,
     struct aws_s3_upload_request_checksum_context *checksum_context) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(out_message);
-    AWS_PRECONDITION(byte_buf);
-
-    struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(byte_buf);
+    if ((byte_buf && stream) || (!byte_buf && !stream)) {
+        /* Should pass one and only one of them. */
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
     struct aws_http_headers *headers = aws_http_message_get_headers(out_message);
-
+    struct aws_byte_buf content_encoding_header_buf;
+    AWS_ZERO_STRUCT(content_encoding_header_buf);
     if (headers == NULL) {
         return NULL;
     }
 
-    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &buffer_byte_cursor);
-    struct aws_byte_buf content_encoding_header_buf;
-    AWS_ZERO_STRUCT(content_encoding_header_buf);
-
+    struct aws_input_stream *input_stream = stream;
+    if (byte_buf) {
+        AWS_ASSERT(stream == NULL);
+        struct aws_byte_cursor buffer_byte_cursor = aws_byte_cursor_from_buf(byte_buf);
+        input_stream = aws_input_stream_new_from_cursor(allocator, &buffer_byte_cursor);
+    }
     if (input_stream == NULL) {
         goto error_clean_up;
     }
-
+    int64_t original_content_length = 0;
+    if (aws_input_stream_get_length(input_stream, &original_content_length)) {
+        goto error_clean_up;
+    }
     if (checksum_context && checksum_context->algorithm != AWS_SCA_NONE) {
         if (aws_s3_upload_request_checksum_context_should_add_trailer(checksum_context)) {
             /* aws-chunked encode the payload and add related headers */
@@ -961,7 +1028,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
                 decoded_content_length_buffer,
                 sizeof(decoded_content_length_buffer),
                 "%" PRIu64,
-                (uint64_t)buffer_byte_cursor.len);
+                (uint64_t)original_content_length);
             struct aws_byte_cursor decode_content_length_cursor =
                 aws_byte_cursor_from_array(decoded_content_length_buffer, strlen(decoded_content_length_buffer));
             if (aws_http_headers_set(headers, g_decoded_content_length_header_name, decode_content_length_cursor)) {
@@ -975,17 +1042,29 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
             aws_input_stream_release(input_stream);
             input_stream = chunk_stream;
         } else if (aws_s3_upload_request_checksum_context_should_add_header(checksum_context)) {
+            if (byte_buf == NULL) {
+                /* Streaming don't support HEADER checksum */
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Streaming upload does not support checksum calculation in header, "
+                    "use trailer checksum instead.");
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                goto error_clean_up;
+            }
             /* Calculate the checksum directly from memory and add it to the header. */
             if (s_calculate_and_add_checksum_to_header_helper(
-                    allocator, buffer_byte_cursor, out_message, checksum_context)) {
+                    allocator, aws_byte_cursor_from_buf(byte_buf), out_message, checksum_context)) {
                 goto error_clean_up;
             }
         } else if (aws_s3_upload_request_checksum_context_should_calculate(checksum_context)) {
-            /* In case checksums still wanted, and we can calculate it directly from the buffer in memory to
-             * out_checksum */
-            if (s_calculate_in_memory_checksum_helper(allocator, buffer_byte_cursor, checksum_context)) {
+            /* The checksum won't be uploaded, but we still need it for the upload review callback */
+            struct aws_input_stream *checksum_stream =
+                aws_checksum_stream_new_with_context(allocator, input_stream, checksum_context);
+            if (!checksum_stream) {
                 goto error_clean_up;
             }
+            aws_input_stream_release(input_stream);
+            input_stream = checksum_stream;
         }
     }
 
@@ -1009,7 +1088,7 @@ struct aws_input_stream *aws_s3_message_util_assign_body(
     return input_stream;
 
 error_clean_up:
-    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer .");
+    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Failed to assign body for s3 request http message, from body buffer.");
     aws_input_stream_release(input_stream);
     aws_byte_buf_clean_up(&content_encoding_header_buf);
     return NULL;

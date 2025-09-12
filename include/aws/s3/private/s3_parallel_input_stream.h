@@ -14,16 +14,21 @@ AWS_PUSH_SANE_WARNING_LEVEL
 
 struct aws_byte_buf;
 struct aws_future_bool;
+struct aws_future_void;
 struct aws_input_stream;
 struct aws_s3_meta_request;
 struct aws_s3_request;
 
 struct aws_event_loop_group;
 
+/**
+ * This should be private, but keep it public for providing your own implementation.
+ */
 struct aws_parallel_input_stream {
     const struct aws_parallel_input_stream_vtable *vtable;
     struct aws_allocator *alloc;
     struct aws_ref_count ref_count;
+    struct aws_future_void *shutdown_future;
 
     void *impl;
 };
@@ -118,16 +123,34 @@ int aws_parallel_input_stream_get_length(struct aws_parallel_input_stream *strea
  * Creates a new parallel input stream that reads from a file.
  * This stream uses an event loop group to perform file I/O operations asynchronously.
  *
+ * Notes for direct_io_read:
+ * - checking `aws_file_path_read_from_offset_direct_io` for detail
+ * - For `AWS_ERROR_UNSUPPORTED_OPERATION`, fallback to reading with cache with warnings, instead of fail.
+ * - If alignment required, it's callers' responsibility to align with the page size.
+ *
  * @param allocator The allocator to use for memory allocation
  * @param file_name The name of the file to read from
  * @param reading_elg The event loop group to use for file I/O operations
+ * @param direct_io_read Whether to use direct I/O for reading the file.
+ *
  * @return A new parallel input stream that reads from the specified file
  */
 AWS_S3_API
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg);
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read);
+
+/**
+ * Get the shutdown future from the parallel input stream.
+ * The future will be completed when every refcount on the stream has been released.
+ * And all the resource has been released.
+ * Don't hold any refcount of the stream while waiting on the future, otherwise, deadlock can happen.
+ * You need to release the future after using it.
+ */
+AWS_S3_API
+struct aws_future_void *aws_parallel_input_stream_get_shutdown_future(struct aws_parallel_input_stream *stream);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

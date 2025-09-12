@@ -163,6 +163,7 @@ struct aws_s3_tester_meta_request_options {
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
+    struct aws_s3_file_io_options *fio_opts;
 
     /* Optional, when enabled, the test will run against local server instead. */
     bool mock_server;
@@ -198,7 +199,7 @@ struct aws_s3_tester_meta_request_options {
         /* Get the part from S3, starts from 1. 0 means not set. */
         int part_number;
         bool file_on_disk;
-        enum aws_s3_recv_file_option recv_file_option;
+        enum aws_s3_recv_file_options recv_file_option;
         uint64_t recv_file_position;
         bool recv_file_delete_on_failure;
         /* If larger than 0, create a pre-exist file with the length */
@@ -494,7 +495,8 @@ int aws_s3_tester_check_s3express_creds_for_default_mock_response(struct aws_cre
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg);
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

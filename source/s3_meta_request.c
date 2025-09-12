@@ -29,6 +29,9 @@
 #include <errno.h>
 #include <inttypes.h>
 
+#define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
+#define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
+
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
@@ -177,12 +180,30 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
     meta_request->type = options->type;
+
+    /* Deep copy the file io options. */
+    if (options->fio_opts) {
+        meta_request->fio_opts = *options->fio_opts;
+    } else if (client != NULL) {
+        meta_request->fio_opts = client->fio_opts;
+    }
+
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
     if (part_size == SIZE_MAX) {
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
+    if (meta_request->fio_opts.should_stream && options->checksum_config &&
+        options->checksum_config->location == AWS_SCL_HEADER) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Invalid meta request configuration - Cannot use checksum via header with streaming upload.",
+            (void *)meta_request);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         goto error;
     }
@@ -307,9 +328,24 @@ int aws_s3_meta_request_init_base(
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream = client->vtable->parallel_input_stream_new_from_file(
-            allocator, options->send_filepath, client->body_streaming_elg);
+            allocator, options->send_filepath, client->body_streaming_elg, meta_request->fio_opts.direct_io);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
+        }
+        if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.should_stream) {
+            /* TODO: aws_system_info_page_size */
+            size_t page_size = aws_system_info_page_size();
+            if (part_size % page_size != 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Invalid meta request configuration - direct_io without streaming upload requires part size "
+                    "to be aligned with page size. part size is:%zu, while page size is:%zu",
+                    (void *)meta_request,
+                    part_size,
+                    page_size);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                goto error;
+            }
         }
 
     } else if (options->send_async_stream != NULL) {
@@ -2219,8 +2255,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
      * hold. So that, the downstream high level language doesn't need to wait for shutdown to clean related resource
      * (eg: input stream) */
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
-    meta_request->request_body_parallel_stream =
+
+    if (meta_request->request_body_parallel_stream) {
+        struct aws_future_void *shutdown_future =
+            aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
         aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+        aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
+        aws_future_void_release(shutdown_future);
+    }
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */

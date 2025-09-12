@@ -1538,6 +1538,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .checksum_config = &checksum_config,
         .resume_token = options->put_options.resume_token,
         .object_size_hint = options->object_size_hint,
+        .fio_opts = options->fio_opts,
     };
 
     if (options->mock_server) {
@@ -1716,6 +1717,23 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream = aws_input_stream_new_tester(allocator, &stream_options.base);
                 ASSERT_NOT_NULL(input_stream);
             }
+            struct aws_byte_buf *out_encoded_checksum = NULL;
+            if (options->put_options.full_object_checksum != AWS_TEST_FOC_NONE) {
+                ASSERT_NOT_NULL(input_stream);
+                struct aws_byte_buf data;
+                int64_t out_length = 0;
+                aws_input_stream_get_length(input_stream, &out_length);
+                aws_byte_buf_init(&data, allocator, (size_t)out_length);
+                /* Read everything into the buf */
+                aws_input_stream_read(input_stream, &data);
+                /* Seek back to beginning for upload. */
+                aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
+                /* Get the checksum from the buf */
+                out_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
+                ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
+                    allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, out_encoded_checksum));
+                aws_byte_buf_clean_up(&data);
+            }
 
             /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
             if (options->put_options.file_on_disk) {
@@ -1738,6 +1756,21 @@ int aws_s3_tester_send_meta_request_with_options(
                     test_object_path,
                     upload_size_bytes,
                     options->sse_type);
+            }
+
+            if (options->put_options.full_object_checksum == AWS_TEST_FOC_HEADER) {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                const struct aws_byte_cursor header_name =
+                    aws_get_http_header_name_from_checksum_algorithm(options->checksum_algorithm);
+                ASSERT_SUCCESS(
+                    aws_http_headers_set(headers, header_name, aws_byte_cursor_from_buf(out_encoded_checksum)));
+                aws_byte_buf_clean_up(out_encoded_checksum);
+                aws_mem_release(allocator, out_encoded_checksum);
+            } else if (options->put_options.full_object_checksum == AWS_TEST_FOC_CALLBACK) {
+                /* Set the full object checksum via the callback. */
+                checksum_config.full_object_checksum_callback = s_full_object_checksum_callback;
+                out_encoded_checksum->allocator = allocator;
+                checksum_config.user_data = out_encoded_checksum;
             }
 
             if (options->put_options.content_length) {
@@ -1767,37 +1800,6 @@ int aws_s3_tester_send_meta_request_with_options(
                     .value = options->put_options.content_encoding,
                 };
                 aws_http_message_add_header(message, content_encoding_header);
-            }
-
-            if (options->put_options.full_object_checksum != AWS_TEST_FOC_NONE) {
-                struct aws_http_headers *headers = aws_http_message_get_headers(message);
-                ASSERT_NOT_NULL(input_stream);
-                struct aws_byte_buf data;
-                int64_t out_length = 0;
-                aws_input_stream_get_length(input_stream, &out_length);
-                aws_byte_buf_init(&data, allocator, (size_t)out_length);
-                /* Read everything into the buf */
-                aws_input_stream_read(input_stream, &data);
-                /* Seek back to beginning for upload. */
-                aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
-                /* Get the checksum from the buf */
-                struct aws_byte_buf *out_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
-                ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
-                    allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, out_encoded_checksum));
-                aws_byte_buf_clean_up(&data);
-                if (options->put_options.full_object_checksum == AWS_TEST_FOC_HEADER) {
-                    const struct aws_byte_cursor header_name =
-                        aws_get_http_header_name_from_checksum_algorithm(options->checksum_algorithm);
-                    ASSERT_SUCCESS(
-                        aws_http_headers_set(headers, header_name, aws_byte_cursor_from_buf(out_encoded_checksum)));
-                    aws_byte_buf_clean_up(out_encoded_checksum);
-                    aws_mem_release(allocator, out_encoded_checksum);
-                } else {
-                    /* Set the full object checksum via the callback. */
-                    checksum_config.full_object_checksum_callback = s_full_object_checksum_callback;
-                    out_encoded_checksum->allocator = allocator;
-                    checksum_config.user_data = out_encoded_checksum;
-                }
             }
             if (options->put_options.if_none_match_header.ptr != NULL) {
                 struct aws_http_header if_none_match_header = {

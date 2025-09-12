@@ -20,8 +20,6 @@ TIMEOUT = 120  # this must be higher than any response's "delay" setting
 
 VERBOSE = False
 
-# Flags to keep between requests
-SHOULD_THROTTLE = True
 RETRY_REQUEST_COUNT = 0
 
 
@@ -70,10 +68,9 @@ class ResponseConfig:
                 self.forced_throttle = True
 
     def _resolve_file_path(self, wrapper, request_type):
-        global SHOULD_THROTTLE
         if self.json_path is None:
             if self.forced_throttle:
-                # force the throttle to happend, instead of just 50%.
+                # force the throttle to happen, for triggering retries.
                 response_file = os.path.join(
                     base_dir, request_type.name, f"throttle.json")
                 self.json_path = response_file
@@ -85,16 +82,6 @@ class ResponseConfig:
                     response_file, "not exist, using the default response")
                 response_file = os.path.join(
                     base_dir, request_type.name, f"default.json")
-            if "throttle" in response_file:
-                # We throttle the request half the time to make sure it succeeds after a retry
-                if SHOULD_THROTTLE is False:
-                    wrapper.info("Skipping throttling")
-                    response_file = os.path.join(
-                        base_dir, request_type.name, f"default.json")
-                else:
-                    wrapper.info("Throttling")
-                # Flip the flag
-                SHOULD_THROTTLE = not SHOULD_THROTTLE
             self.json_path = response_file
 
     def resolve_response(self, wrapper, request_type, chunked=False, head_request=False):
@@ -381,16 +368,6 @@ async def send_mock_s3_response(wrapper, request_type, path, generate_body=False
         wrapper.info(response_file, "not exist, using the default response")
         response_file = os.path.join(
             base_dir, request_type.name, f"default.json")
-    if "throttle" in response_file:
-        # We throttle the request half the time to make sure it succeeds after a retry
-        if wrapper.should_throttle is False:
-            wrapper.info("Skipping throttling")
-            response_file = os.path.join(
-                base_dir, request_type.name, f"default.json")
-        else:
-            wrapper.info("Throttling")
-        # Flip the flag
-        wrapper.should_throttle = not wrapper.should_throttle
     await send_response_from_json(wrapper, response_file, generate_body=generate_body, generate_body_size=generate_body_size, head_request=head_request)
 
 
