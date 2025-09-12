@@ -495,7 +495,8 @@ int aws_s3_tester_check_s3express_creds_for_default_mock_response(struct aws_cre
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file_failure_tester(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg);
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read);
 
 extern struct aws_s3_client_vtable g_aws_s3_client_mock_vtable;
 

@@ -79,6 +79,8 @@ struct aws_parallel_input_stream_from_file_impl {
 
     struct aws_string *file_path;
     struct aws_event_loop_group *reading_elg;
+
+    bool direct_io_read;
 };
 
 static void s_parallel_from_file_destroy(struct aws_parallel_input_stream *stream) {
@@ -104,56 +106,6 @@ struct read_task_impl {
     struct aws_byte_buf *dest;
 };
 
-/* TODO: move the platform specific code to aws-c-common. file.c */
-static int s_read_from_file_impl(
-    struct aws_string *file_path,
-    struct aws_byte_buf *output_buf,
-    uint64_t offset,
-    size_t length,
-    bool *out_eof_reached,
-    bool direct_io) {
-    /* TODO: support direct io */
-    (void)direct_io;
-    int rt_code = AWS_OP_ERR;
-    FILE *file_stream = aws_fopen_safe(file_path, s_readonly_bytes_mode);
-    if (file_stream == NULL) {
-        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to open file %s", aws_string_c_str(file_path));
-        return AWS_OP_ERR;
-    }
-
-    /* seek to the right position and then read */
-    if (aws_fseek(file_stream, (int64_t)offset, SEEK_SET)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_GENERAL,
-            "Failed to seek to position %" PRIu64 " in file %s",
-            offset,
-            aws_string_c_str(file_path));
-        goto cleanup;
-    }
-
-    size_t actually_read = fread(output_buf->buffer + output_buf->len, 1, length, file_stream);
-    if (actually_read == 0 && ferror(file_stream)) {
-        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to read %zu bytes from file %s", length, aws_string_c_str(file_path));
-        aws_raise_error(aws_translate_and_raise_io_error(errno));
-        goto cleanup;
-    }
-    /* If we cannot fill the length ask for, which means we hit the EOF. */
-    *out_eof_reached = (actually_read < length);
-    output_buf->len += actually_read;
-    AWS_LOGF_TRACE(
-        AWS_LS_S3_GENERAL,
-        "Successfully read %zu bytes from file %s at position %" PRIu64 "",
-        actually_read,
-        aws_string_c_str(file_path),
-        offset);
-    rt_code = AWS_OP_SUCCESS;
-cleanup:
-    if (file_stream != NULL) {
-        fclose(file_stream);
-    }
-    return rt_code;
-}
-
 static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task_status;
     struct read_task_impl *read_task = arg;
@@ -162,15 +114,46 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
     struct aws_future_bool *end_future = read_task->end_future;
     bool eof_reached = false;
-
-    if (s_read_from_file_impl(
-            impl->file_path, read_task->dest, read_task->offset, read_task->length, &eof_reached, false)) {
-        /* If reading from file failed, set the error on the future and return */
-        aws_future_bool_set_error(end_future, aws_last_error());
-    } else {
-        aws_future_bool_set_result(end_future, eof_reached);
+    size_t actually_read = 0;
+    int error_code = AWS_ERROR_SUCCESS;
+    if (impl->direct_io_read) {
+        /* Try direct IO. */
+        if (aws_file_path_read_from_offset_direct_io(
+                impl->file_path, read_task->offset, read_task->length, read_task->dest, &actually_read)) {
+            if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
+                /* Direct IO not supported, fallback to normal read */
+                /* Log the warning */
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_GENERAL,
+                    "Direct IO not supported, fallback to normal read. File path: %s",
+                    aws_string_c_str(impl->file_path));
+                /* Set direct IO to be false to avoid extra checks. */
+                impl->direct_io_read = false;
+                aws_reset_error();
+            } else {
+                error_code = aws_last_error();
+                goto finish;
+            }
+        } else {
+            /* Succeed. */
+            goto finish;
+        }
     }
 
+    if (aws_file_path_read_from_offset(
+            impl->file_path, read_task->offset, read_task->length, read_task->dest, &actually_read)) {
+        error_code = aws_last_error();
+    }
+
+finish:
+    if (error_code != AWS_ERROR_SUCCESS) {
+        aws_future_bool_set_error(end_future, error_code);
+    } else {
+        /* If the reading length is smaller than expected, and no error raised, we encountered the EOS. */
+        /* The length is guaranteed to be not larger than the available space in the buffer.  */
+        eof_reached = (actually_read < read_task->length);
+        aws_future_bool_set_result(end_future, eof_reached);
+    }
     aws_future_bool_release(end_future);
     aws_mem_release(stream->alloc, task);
     aws_mem_release(stream->alloc, read_task);
@@ -239,7 +222,8 @@ static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     struct aws_allocator *allocator,
     struct aws_byte_cursor file_name,
-    struct aws_event_loop_group *reading_elg) {
+    struct aws_event_loop_group *reading_elg,
+    bool direct_io_read) {
 
     struct aws_parallel_input_stream_from_file_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_parallel_input_stream_from_file_impl));
@@ -247,6 +231,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     aws_parallel_input_stream_init_base(&impl->base, allocator, &s_parallel_input_stream_from_file_vtable, impl);
     impl->file_path = aws_string_new_from_cursor(allocator, &file_name);
     impl->reading_elg = aws_event_loop_group_acquire(reading_elg);
+    impl->direct_io_read = direct_io_read;
 
     if (!aws_path_exists(impl->file_path)) {
         /* If file path not exists, raise error from errno. */
