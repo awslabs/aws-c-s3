@@ -25,6 +25,7 @@
 #define KB_TO_BYTES(kb) ((kb) * 1024)
 #define MB_TO_BYTES(mb) ((mb) * 1024 * 1024)
 #define GB_TO_BYTES(gb) ((gb) * 1024 * 1024 * 1024ULL)
+#define TB_TO_BYTES(tb) ((tb) * 1024 * 1024 * 1024 * 1024ULL)
 
 #define MS_TO_NS(ms) ((uint64_t)(ms) * 1000000)
 #define SEC_TO_NS(ms) ((uint64_t)(ms) * 1000000000)
@@ -154,6 +155,11 @@ AWS_S3_API
 /* TODO: now this is hard-coded as 8MB, but maybe something else is better. */
 extern const size_t g_streaming_buffer_size;
 
+AWS_S3_API
+extern const double g_default_throughput_target_gbps;
+
+AWS_S3_API
+extern const uint64_t g_streaming_object_size_threshold;
 /**
  * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
  */

@@ -157,6 +157,7 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
+    bool should_default_streaming,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -184,8 +185,16 @@ int aws_s3_meta_request_init_base(
     /* Deep copy the file io options. */
     if (options->fio_opts) {
         meta_request->fio_opts = *options->fio_opts;
-    } else if (client != NULL) {
+    } else if (client != NULL && client->fio_options_set) {
         meta_request->fio_opts = client->fio_opts;
+    } else {
+        /* Take a default options. */
+        meta_request->fio_opts.should_stream = should_default_streaming;
+    }
+
+    if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput == 0) {
+        /* If disk throughput is not set, set it to the default. */
+        meta_request->fio_opts.disk_throughput = g_default_throughput_target_gbps;
     }
 
     /* Set up reference count. */
@@ -333,7 +342,6 @@ int aws_s3_meta_request_init_base(
             goto error;
         }
         if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.should_stream) {
-            /* TODO: aws_system_info_page_size */
             size_t page_size = aws_system_info_page_size();
             if (part_size % page_size != 0) {
                 AWS_LOGF_ERROR(
