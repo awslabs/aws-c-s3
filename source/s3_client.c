@@ -79,7 +79,6 @@ const uint32_t g_max_num_connections = 10000;
  */
 static const size_t s_default_part_size = 8 * 1024 * 1024;
 static const uint64_t s_default_max_part_size = 5368709120ULL;
-static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
@@ -385,6 +384,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     if (client_config->fio_opts) {
         client->fio_opts = *client_config->fio_opts;
+        client->fio_options_set = true;
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -589,7 +589,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->throughput_target_gbps > 0.0) {
         *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
     } else {
-        *((double *)&client->throughput_target_gbps) = s_default_throughput_target_gbps;
+        *((double *)&client->throughput_target_gbps) = g_default_throughput_target_gbps;
     }
 
     *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
@@ -1205,7 +1205,6 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     "Could not create meta request."
                     "the send file path %s is invalid",
                     aws_string_c_str(file_path));
-                aws_raise_error(AWS_ERROR_FILE_INVALID_PATH);
             } else if (aws_file_get_length(file, (int64_t *)&content_length)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,

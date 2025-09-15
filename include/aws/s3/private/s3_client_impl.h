@@ -239,6 +239,7 @@ struct aws_s3_client {
     const uint64_t max_part_size;
 
     /* File I/O options. */
+    bool fio_options_set;
     struct aws_s3_file_io_options fio_opts;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta

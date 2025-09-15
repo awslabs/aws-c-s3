@@ -321,6 +321,7 @@ struct aws_s3_file_io_options {
      * Skip buffering the part in memory before sending the request.
      * If set, set the `disk_throughput` to be reasonable align with the available disk throughput.
      * Otherwise, the transfer may fail with connection starvation.
+     *
      * Default to false.
      **/
     bool should_stream;
@@ -333,6 +334,8 @@ struct aws_s3_file_io_options {
      * Notes: There are possibilities that cannot reach the all available disk throughput:
      * 1. Disk is busy with other applications
      * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
+     *
+     * Note: When `streaming_upload` is true, this default to 10 Gbps.
      **/
     double disk_throughput;
 
@@ -475,7 +478,7 @@ struct aws_s3_client_config {
      * Optional.
      * If set, this controls how the client interact with file I/O.
      * Read `aws_s3_file_io_options` for details.
-     *  Notes: Only applies when AWS_S3_META_REQUEST_TYPE_PUT_OBJECT is set.
+     *  Notes: Only applies to meta requests with `send_filepath` set.
      *  TODO: adapt it to `recv_filepath`.
      *
      * eg:
@@ -820,6 +823,9 @@ struct aws_s3_meta_request_options {
      * Read `aws_s3_file_io_options` for details.
      *  Notes: Only applies when `send_filepath` is set.
      *  TODO: adapt it to `recv_filepath`.
+     *
+     * Note: if both client and meta request don't set this, for objects larger than 2TiB, this will be set to a default
+     * options with `should_stream` to be True and others follow the default to avoid memory issues.
      *
      * eg:
      * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in
