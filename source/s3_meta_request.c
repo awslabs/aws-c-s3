@@ -192,9 +192,9 @@ int aws_s3_meta_request_init_base(
         meta_request->fio_opts.should_stream = should_default_streaming;
     }
 
-    if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput == 0) {
+    if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps == 0) {
         /* If disk throughput is not set, set it to the default. */
-        meta_request->fio_opts.disk_throughput = g_default_throughput_target_gbps;
+        meta_request->fio_opts.disk_throughput_gbps = g_default_throughput_target_gbps;
     }
 
     /* Set up reference count. */
