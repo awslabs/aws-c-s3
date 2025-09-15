@@ -166,12 +166,12 @@ struct aws_s3_request {
      */
     struct aws_s3_buffer_ticket *ticket;
 
-    /* Beginning range of this part. */
-    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
+    /* Beginning range of this part.  */
     uint64_t part_range_start;
 
-    /* Last byte of this part.*/
-    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
+    /* Last byte of this part.
+     * Note: this is available on both put and get, but in put case it can be optimistic,
+     * ex for unknown content length we dont know what the end will be until we finish reading data. */
     uint64_t part_range_end;
 
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)
@@ -291,6 +291,11 @@ struct aws_s3_request *aws_s3_request_new(
     enum aws_s3_request_type request_type,
     uint32_t part_number,
     uint32_t flags);
+
+/* Gets the size of the part payload.
+ * Range is inclusive (i.e. 0-0 range has 1 byte size). In case of misconfigured range returns 0. */
+AWS_S3_API
+uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request);
 
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */

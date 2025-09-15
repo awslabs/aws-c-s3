@@ -45,6 +45,14 @@ struct aws_s3_request *aws_s3_request_new(
     return request;
 }
 
+uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request) {
+    uint64_t result = 0;
+    if (aws_sub_u64_checked(request->part_range_end, request->part_range_start, &result) != AWS_OP_SUCCESS) {
+        return 0;
+    }
+    return result + 1;
+}
+
 static void s_populate_metrics_from_message(struct aws_s3_request *request, struct aws_http_message *message) {
     struct aws_byte_cursor out_path;
     AWS_ZERO_STRUCT(out_path);

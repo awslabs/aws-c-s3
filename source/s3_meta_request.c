@@ -1429,7 +1429,7 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         /* Make sure that request is get, since puts can also have ticket allocated, which is used for request body. */
-        if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->ticket != NULL) {
+        if (successful_response && request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;
