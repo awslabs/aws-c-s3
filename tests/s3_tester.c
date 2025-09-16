@@ -1055,6 +1055,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         NULL,
         0,
         false,
+        false,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
