@@ -1169,10 +1169,79 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
     request->is_noop = request->part_number >
                            1 && /* allow first part to have 0 length to support empty unknown content length objects. */
                        request->request_body.len == 0;
-    if (s_s3_new_upload_part_info_after_body(request, meta_request, is_body_stream_at_end)) {
-        error_code = aws_last_error_or_unknown();
-        goto on_done;
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    --auto_ranged_put->synced_data.num_parts_pending_read;
+
+    auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
+    struct aws_s3_mpu_part_info *previously_uploaded_info = NULL;
+    if (request->was_previously_uploaded) {
+        aws_array_list_get_at(
+            &auto_ranged_put->synced_data.part_list, &previously_uploaded_info, request->part_number - 1);
+        AWS_ASSERT(previously_uploaded_info != NULL && previously_uploaded_info->was_previously_uploaded == true);
+        /* Already uploaded, set the noop to be true. */
+        request->is_noop = true;
     }
+    if (!request->is_noop) {
+        /* The part can finish out of order. Resize array-list to be long enough to hold this part,
+         * filling any intermediate slots with NULL. */
+        aws_array_list_ensure_capacity(&auto_ranged_put->synced_data.part_list, request->part_number);
+        while (aws_array_list_length(&auto_ranged_put->synced_data.part_list) < request->part_number) {
+            struct aws_s3_mpu_part_info *null_part = NULL;
+            aws_array_list_push_back(&auto_ranged_put->synced_data.part_list, &null_part);
+        }
+        /* Add part to array-list */
+        struct aws_s3_mpu_part_info *part =
+            aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
+        part->checksum_context =
+            aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        part->size = request->request_body.len;
+        aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
+    }
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    if (previously_uploaded_info) {
+        /* Part was previously uploaded, check that it matches what we just read.
+         * (Yes it's weird that we keep a pointer to the part_info even after
+         * releasing the lock that protects part_list. But it's the resizable
+         * part_list that needs lock protection. A previously uploaded part_info is const,
+         * and it's on the heap, so it's safe to keep the pointer around) */
+        if (request->request_body.len != previously_uploaded_info->size) {
+            error_code = AWS_ERROR_S3_RESUME_FAILED;
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Failed resuming upload, previous upload used different part size.",
+                (void *)meta_request);
+            goto on_done;
+        }
+        struct aws_s3_upload_request_checksum_context *context = previously_uploaded_info->checksum_context;
+        if (context) {
+            if (!aws_s3_upload_request_checksum_context_should_calculate(context)) {
+                struct aws_byte_cursor previous_calculated_checksum =
+                    aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
+                /* if previously uploaded part had a checksum, compare it to what we just skipped */
+                if (s_verify_part_matches_checksum(
+                        meta_request->allocator,
+                        aws_byte_cursor_from_buf(&request->request_body),
+                        meta_request->checksum_config.checksum_algorithm,
+                        previous_calculated_checksum) != AWS_OP_SUCCESS) {
+                    error_code = aws_last_error_or_unknown();
+                    goto on_done;
+                }
+            }
+        }
+    }
+
+    /* We throttle the number of parts that can be "pending read"
+     * (e.g. only 1 at a time if reading from async-stream).
+     * Now that read is complete, poke the client to see if it can give us more work.
+     *
+     * Poking now gives measurable speedup (1%) for async streaming,
+     * vs waiting until all the part-prep steps are complete (still need to sign, etc) */
+    aws_s3_client_schedule_process_work(meta_request->client);
 
 on_done:
     s_s3_prepare_upload_part_finish(part_prep, error_code);
