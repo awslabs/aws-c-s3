@@ -7144,6 +7144,7 @@ static int s_test_s3_get_object_multipart_mrap(struct aws_allocator *allocator, 
     return s_s3_get_object_mrap_helper(allocator, true /*multipart*/);
 }
 
+/* NOTE: MRAP doesn't support MPU. https://github.com/aws/aws-sdk-java-v2/discussions/3969 */
 static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -7196,12 +7197,6 @@ AWS_TEST_CASE(test_s3_put_object_less_than_part_size_mrap, s_test_s3_put_object_
 static int s_test_s3_put_object_less_than_part_size_mrap(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     return s_s3_put_object_mrap_helper(allocator, false /*multipart*/);
-}
-/* Test multi-part put object through MRAP (multi-region access point) */
-AWS_TEST_CASE(test_s3_put_object_multipart_mrap, s_test_s3_put_object_multipart_mrap)
-static int s_test_s3_put_object_multipart_mrap(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-    return s_s3_put_object_mrap_helper(allocator, true /*multipart*/);
 }
 
 static struct aws_http_message *s_put_object_request_new(

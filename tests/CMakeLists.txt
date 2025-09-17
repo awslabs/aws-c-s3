@@ -171,7 +171,6 @@ if(ENABLE_MRAP_TESTS)
     add_net_test_case(test_s3_get_object_less_than_part_size_mrap)
     add_net_test_case(test_s3_get_object_multipart_mrap)
     add_net_test_case(test_s3_put_object_less_than_part_size_mrap)
-    add_net_test_case(test_s3_put_object_multipart_mrap)
 endif()
 
 add_net_test_case(test_s3_round_trip)
