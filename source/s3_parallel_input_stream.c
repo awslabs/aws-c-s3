@@ -44,6 +44,14 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_release(struct aws_p
     return NULL;
 }
 
+int aws_parallel_input_stream_get_length(struct aws_parallel_input_stream *stream, int64_t *out_length) {
+    if (stream->vtable->get_length) {
+        return stream->vtable->get_length(stream, out_length);
+    } else {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+}
+
 struct aws_future_bool *aws_parallel_input_stream_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
@@ -68,7 +76,7 @@ struct aws_parallel_input_stream_from_file_impl {
     struct aws_event_loop_group *reading_elg;
 };
 
-static void s_para_from_file_destroy(struct aws_parallel_input_stream *stream) {
+static void s_parallel_from_file_destroy(struct aws_parallel_input_stream *stream) {
     struct aws_parallel_input_stream_from_file_impl *impl =
         AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
 
@@ -102,6 +110,7 @@ static int s_read_from_file_impl(
     int rt_code = AWS_OP_ERR;
     FILE *file_stream = aws_fopen_safe(file_path, s_readonly_bytes_mode);
     if (file_stream == NULL) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Failed to open file %s", aws_string_c_str(file_path));
         return AWS_OP_ERR;
     }
 
@@ -158,7 +167,7 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
     aws_mem_release(impl->base.alloc, read_task);
 }
 
-struct aws_future_bool *s_para_from_file_read(
+struct aws_future_bool *s_parallel_from_file_read(
     struct aws_parallel_input_stream *stream,
     uint64_t offset,
     size_t max_length,
@@ -199,9 +208,23 @@ struct aws_future_bool *s_para_from_file_read(
     return future;
 }
 
+int s_parallel_from_file_get_length(struct aws_parallel_input_stream *stream, int64_t *length) {
+    struct aws_parallel_input_stream_from_file_impl *impl =
+        AWS_CONTAINER_OF(stream, struct aws_parallel_input_stream_from_file_impl, base);
+    FILE *file = aws_fopen_safe(impl->file_path, s_readonly_bytes_mode);
+    if (!file) {
+        return AWS_OP_ERR;
+    }
+
+    int ret_val = aws_file_get_length(file, length);
+    fclose(file);
+    return ret_val;
+}
+
 static struct aws_parallel_input_stream_vtable s_parallel_input_stream_from_file_vtable = {
-    .destroy = s_para_from_file_destroy,
-    .read = s_para_from_file_read,
+    .destroy = s_parallel_from_file_destroy,
+    .read = s_parallel_from_file_read,
+    .get_length = s_parallel_from_file_get_length,
 };
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
@@ -219,7 +242,7 @@ struct aws_parallel_input_stream *aws_parallel_input_stream_new_from_file(
     if (!aws_path_exists(impl->file_path)) {
         /* If file path not exists, raise error from errno. */
         aws_translate_and_raise_io_error(errno);
-        s_para_from_file_destroy(&impl->base);
+        s_parallel_from_file_destroy(&impl->base);
         return NULL;
     }
 
