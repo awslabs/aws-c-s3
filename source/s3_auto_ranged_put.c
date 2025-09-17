@@ -1011,52 +1011,21 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     return message_future;
 }
 
-/* Completion callback for reading this part's chunk of the body stream */
-static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
-    struct aws_s3_prepare_upload_part_job *part_prep = user_data;
-    struct aws_s3_request *request = part_prep->request;
-    struct aws_s3_meta_request *meta_request = request->meta_request;
+/* When preparing the request for the first time, after the request finished reading the body or setting up the body
+ * stream, create the new part info and push to the list. */
+static int s_s3_new_upload_part_info_after_body(
+    struct aws_s3_request *request,
+    struct aws_s3_meta_request *meta_request,
+    bool is_body_stream_at_end) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    bool has_content_length = auto_ranged_put->has_content_length != 0;
 
-    int error_code = aws_future_bool_get_error(part_prep->asyncstep_read_part);
-
-    /* If reading failed, the prepare-upload-part job has failed */
-    if (error_code != AWS_ERROR_SUCCESS) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Failed reading request body, error %d (%s) req len %zu req cap %zu",
-            (void *)meta_request,
-            error_code,
-            aws_error_str(error_code),
-            request->request_body.len,
-            request->request_body.capacity);
-        goto on_done;
-    }
-    /* Reading succeeded. */
-    bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
-
-    uint64_t offset = 0;
-    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-    /* If Content-Length is defined, check that we read the expected amount */
-    if (has_content_length && (request->request_body.len < request_body_size)) {
-        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Request body is smaller than 'Content-Length' header said it would be",
-            (void *)meta_request);
-        goto on_done;
-    }
-    request->is_noop = request->part_number >
-                           1 && /* allow first part to have 0 length to support empty unknown content length objects. */
-                       request->request_body.len == 0;
-
+    int error_code = AWS_ERROR_SUCCESS;
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
+    auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
     --auto_ranged_put->synced_data.num_parts_pending_read;
 
-    auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
     struct aws_s3_mpu_part_info *previously_uploaded_info = NULL;
     if (request->was_previously_uploaded) {
         aws_array_list_get_at(
@@ -1065,6 +1034,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         /* Already uploaded, set the noop to be true. */
         request->is_noop = true;
     }
+
     if (!request->is_noop) {
         /* The part can finish out of order. Resize array-list to be long enough to hold this part,
          * filling any intermediate slots with NULL. */
@@ -1123,7 +1093,55 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
      * Poking now gives measurable speedup (1%) for async streaming,
      * vs waiting until all the part-prep steps are complete (still need to sign, etc) */
     aws_s3_client_schedule_process_work(meta_request->client);
+on_done:
+    if (error_code) {
+        return aws_raise_error(error_code);
+    }
+    return AWS_OP_SUCCESS;
+}
 
+/* Completion callback for reading this part's chunk of the body stream */
+static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
+    struct aws_s3_prepare_upload_part_job *part_prep = user_data;
+    struct aws_s3_request *request = part_prep->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    bool has_content_length = auto_ranged_put->has_content_length != 0;
+
+    int error_code = aws_future_bool_get_error(part_prep->asyncstep_read_part);
+
+    /* If reading failed, the prepare-upload-part job has failed */
+    if (error_code != AWS_ERROR_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Failed reading request body, error %d (%s) req len %zu req cap %zu",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code),
+            request->request_body.len,
+            request->request_body.capacity);
+        goto on_done;
+    }
+    /* Reading succeeded. */
+    bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
+
+    uint64_t offset = 0;
+    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+    /* If Content-Length is defined, check that we read the expected amount */
+    if (has_content_length && (request->request_body.len < request_body_size)) {
+        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Request body is smaller than 'Content-Length' header said it would be",
+            (void *)meta_request);
+        goto on_done;
+    }
+    request->is_noop = request->part_number >
+                           1 && /* allow first part to have 0 length to support empty unknown content length objects. */
+                       request->request_body.len == 0;
+    if (s_s3_new_upload_part_info_after_body(request, meta_request, is_body_stream_at_end)) {
+        error_code = aws_last_error_or_unknown();
+    }
 on_done:
     s_s3_prepare_upload_part_finish(part_prep, error_code);
 }
