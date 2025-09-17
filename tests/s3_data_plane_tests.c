@@ -7144,7 +7144,7 @@ static int s_test_s3_get_object_multipart_mrap(struct aws_allocator *allocator, 
     return s_s3_get_object_mrap_helper(allocator, true /*multipart*/);
 }
 
-/* NOTE: MRAP doesn't support MPU. https://github.com/aws/aws-sdk-java-v2/discussions/3969 */
+/* NOTE: MRAP doesn't support MPU yet. https://github.com/aws/aws-sdk-java-v2/discussions/3969 */
 static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
