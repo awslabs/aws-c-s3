@@ -62,7 +62,29 @@ struct aws_s3_meta_request_checksum_config_storage {
 };
 
 /**
- * a stream that takes in a stream
+ * Helper stream that takes in a stream and the checksum context to help finalize the checksum from the underlying
+ * stream.
+ * The context will be only finalized when the checksum stream has read to the end of stream.
+ *
+ * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
+ * checksum.
+ *
+ * @param allocator
+ * @param existing_stream The real content to read from. Destroying the checksum stream destroys the existing stream.
+ *                        outputs the checksum of existing stream to checksum_output upon destruction. Will be kept
+ *                        alive by the checksum stream
+ * @param context         Checksum context to keep and get checksum requirements from.
+ */
+AWS_S3_API
+struct aws_input_stream *aws_checksum_stream_new_with_context(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *existing_stream,
+    struct aws_s3_upload_request_checksum_context *context);
+
+/**
+ * Helper stream that takes in a stream to keep track of the checksum of the underlying stream during read.
+ * Invoke `aws_checksum_stream_finalize_checksum` to get the checksum of the data has been read so far.
+ *
  * Note: seek this stream will immediately fail, as it would prevent an accurate calculation of the
  * checksum.
  *
@@ -84,15 +106,6 @@ struct aws_input_stream *aws_checksum_stream_new(
  */
 AWS_S3_API
 int aws_checksum_stream_finalize_checksum(struct aws_input_stream *checksum_stream, struct aws_byte_buf *checksum_buf);
-
-/**
- * Finalize the checksum has read so far to the checksum context.
- * Not thread safe.
- */
-AWS_S3_API
-int aws_checksum_stream_finalize_checksum_context(
-    struct aws_input_stream *checksum_stream,
-    struct aws_s3_upload_request_checksum_context *checksum_context);
 
 /**
  * TODO: properly support chunked encoding.

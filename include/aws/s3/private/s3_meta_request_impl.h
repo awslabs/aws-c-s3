@@ -288,6 +288,9 @@ struct aws_s3_meta_request {
     FILE *recv_file;
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
+
+    /* File I/O options. */
+    struct aws_s3_file_io_options fio_opts;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */
@@ -307,6 +310,7 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
+    bool should_default_streaming,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,

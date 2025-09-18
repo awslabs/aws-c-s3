@@ -92,6 +92,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
             client,
             0,
             should_compute_content_md5,
+            false,
             options,
             meta_request_default,
             &s_s3_meta_request_default_vtable,
@@ -357,7 +358,8 @@ static void s_s3_default_prepare_request_finish(
         struct aws_s3_upload_request_checksum_context *checksum_context =
             aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
 
-        aws_s3_message_util_assign_body(meta_request->allocator, &request->request_body, message, checksum_context);
+        aws_s3_message_util_assign_body(
+            meta_request->allocator, &request->request_body, NULL, message, checksum_context);
 
         /* Release the context reference */
         aws_s3_upload_request_checksum_context_release(checksum_context);

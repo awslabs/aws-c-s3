@@ -168,8 +168,11 @@ struct aws_s3_client_vtable {
 
     void (*finish_destroy)(struct aws_s3_client *client);
 
-    struct aws_parallel_input_stream *(
-        *parallel_input_stream_new_from_file)(struct aws_allocator *allocator, struct aws_byte_cursor file_name);
+    struct aws_parallel_input_stream *(*parallel_input_stream_new_from_file)(
+        struct aws_allocator *allocator,
+        struct aws_byte_cursor file_name,
+        struct aws_event_loop_group *reading_elg,
+        bool direct_io_read);
 
     struct aws_http_stream *(*http_connection_make_request)(
         struct aws_http_connection *client_connection,
@@ -234,6 +237,10 @@ struct aws_s3_client {
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
     const uint64_t max_part_size;
+
+    /* File I/O options. */
+    bool fio_options_set;
+    struct aws_s3_file_io_options fio_opts;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
      * request. Uploads over this size will automatically use a multipart upload strategy, while uploads smaller or
@@ -351,6 +358,9 @@ struct aws_s3_client {
 
         /* Number of requests currently scheduled to be streamed the response body or are actively being streamed. */
         struct aws_atomic_var num_requests_streaming_response;
+
+        /* Number of overall requests currently streaming the request body instead of buffering. */
+        struct aws_atomic_var num_requests_streaming_request_body;
     } stats;
 
     struct {

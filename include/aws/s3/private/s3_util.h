@@ -24,7 +24,8 @@
 #endif
 #define KB_TO_BYTES(kb) ((kb) * 1024)
 #define MB_TO_BYTES(mb) ((mb) * 1024 * 1024)
-#define GB_TO_BYTES(gb) ((gb) * 1024 * 1024 * 1024ULL)
+#define GB_TO_BYTES(gb) ((uint64_t)(gb) * 1024 * 1024 * 1024ULL)
+#define TB_TO_BYTES(tb) ((uint64_t)(tb) * 1024 * 1024 * 1024 * 1024ULL)
 
 #define MS_TO_NS(ms) ((uint64_t)(ms) * 1000000)
 #define SEC_TO_NS(ms) ((uint64_t)(ms) * 1000000000)
@@ -150,6 +151,15 @@ extern const struct aws_byte_cursor g_delete_method;
 AWS_S3_API
 extern const uint32_t g_s3_max_num_upload_parts;
 
+AWS_S3_API
+/* TODO: now this is hard-coded as 8MB, but maybe something else is better. */
+extern const size_t g_streaming_buffer_size;
+
+AWS_S3_API
+extern const double g_default_throughput_target_gbps;
+
+AWS_S3_API
+extern const uint64_t g_streaming_object_size_threshold;
 /**
  * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
  */

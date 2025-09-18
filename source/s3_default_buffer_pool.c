@@ -8,6 +8,7 @@
 #include <aws/common/array_list.h>
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/system_info.h>
 #include <aws/io/future.h>
 #include <aws/s3/private/s3_util.h>
 
@@ -196,6 +197,7 @@ static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
 struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_allocator *allocator,
     struct aws_s3_buffer_pool_config config) {
+    (void)allocator;
 
     size_t chunk_size = config.part_size;
 
@@ -245,12 +247,16 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         chunk_size = 0;
     }
 
+    size_t page_size = aws_system_info_page_size();
+    /* TODO: if people override their allocator, this will not wrap their allocator at all. eg: mem-tracing allocator
+     * will be ignored. */
+    struct aws_allocator *aligned_allocator = aws_explicit_aligned_allocator_new(page_size);
     struct aws_s3_default_buffer_pool *buffer_pool =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_default_buffer_pool));
+        aws_mem_calloc(aligned_allocator, 1, sizeof(struct aws_s3_default_buffer_pool));
 
     AWS_FATAL_ASSERT(buffer_pool != NULL);
 
-    buffer_pool->base_allocator = allocator;
+    buffer_pool->base_allocator = aligned_allocator;
     buffer_pool->chunk_size = chunk_size;
     buffer_pool->block_size = s_chunks_per_block * chunk_size;
     /* Somewhat arbitrary number.
@@ -262,11 +268,14 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     AWS_FATAL_ASSERT(mutex_error == AWS_OP_SUCCESS);
 
     aws_array_list_init_dynamic(
-        &buffer_pool->blocks, allocator, s_block_list_initial_capacity, sizeof(struct s3_buffer_pool_block));
+        &buffer_pool->blocks,
+        buffer_pool->base_allocator,
+        s_block_list_initial_capacity,
+        sizeof(struct s3_buffer_pool_block));
 
     aws_linked_list_init(&buffer_pool->pending_reserves);
 
-    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+    struct aws_s3_buffer_pool *pool = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
     pool->vtable = &s_default_pool_vtable;
     aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
@@ -305,6 +314,7 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
     aws_mutex_clean_up(&buffer_pool->mutex);
     struct aws_allocator *base = buffer_pool->base_allocator;
     aws_mem_release(base, buffer_pool);
+    aws_explicit_aligned_allocator_destroy(base);
 }
 
 void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {

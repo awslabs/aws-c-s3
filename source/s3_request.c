@@ -42,6 +42,13 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->send_data.metrics = aws_s3_request_metrics_new(request->allocator);
 
+    if (meta_request->fio_opts.should_stream && meta_request->request_body_parallel_stream != NULL) {
+        /* The request buffer size should be two times the buffer size to allow one buffer to be read async. */
+        request->buffer_size = 2 * g_streaming_buffer_size;
+    } else {
+        request->buffer_size = meta_request->part_size;
+    }
+
     return request;
 }
 
@@ -172,6 +179,7 @@ static void s_s3_request_destroy(void *user_data) {
     aws_byte_buf_clean_up(&request->request_body);
     aws_s3_buffer_ticket_release(request->ticket);
     aws_string_destroy(request->operation_name);
+    aws_input_stream_release(request->request_body_stream);
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);
