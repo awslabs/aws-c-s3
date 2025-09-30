@@ -445,16 +445,19 @@ struct aws_s3_meta_request_resume_token {
 
     enum aws_s3_meta_request_type type;
 
-    /* Note: since pause currently only supports upload, this structure only has
-        upload specific fields. Extending it to support other types is left as
-        exercise for future. */
+    /* Only available for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT */
     struct aws_string *multipart_upload_id;
+
+    /* Only available for AWS_S3_META_REQUEST_TYPE_GET_OBJECT */
+    struct aws_string *object_last_modified;
+
     size_t part_size;
     size_t total_num_parts;
 
-    /* Note: this field is used only when s3 tells us that upload id no longer
-    exists, and if this indicates that all parts have already been uploaded,
-    request is completed instead of failing it.*/
+    /* Note: for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT this field is used only
+    when s3 tells us that upload id no longer exists, and if this indicates
+    that all parts have already been uploaded, request is completed instead
+    of failing it.*/
     size_t num_parts_completed;
 };
 

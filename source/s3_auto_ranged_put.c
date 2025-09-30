@@ -321,6 +321,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
     .pause = s_s3_auto_ranged_put_pause,
+    .pause_async = aws_s3_meta_request_pause_async_default,
 };
 
 /* Allocate a new auto-ranged put meta request */

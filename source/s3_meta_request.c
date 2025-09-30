@@ -445,6 +445,20 @@ int aws_s3_meta_request_pause(
     return meta_request->vtable->pause(meta_request, out_resume_token);
 }
 
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_pause_complete,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->vtable);
+
+    if (!meta_request->vtable->pause_async) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+
+    return meta_request->vtable->pause_async(meta_request, on_pause_complete, user_data);
+}
+
 void aws_s3_meta_request_set_fail_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *failed_request,
@@ -1944,12 +1958,15 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         meta_request->synced_data.event_delivery_active = true;
 
         if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
-            error_code = AWS_ERROR_S3_CANCELED;
+            error_code = meta_request->synced_data.finish_result.error_code;
         }
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+    bool paused = false;
+    aws_s3_meta_request_pause_complete_fn *on_pause_complete = NULL;
+    void *pause_user_data = NULL;
 
     /* Deliver all events */
     for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
@@ -2085,6 +2102,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     s_s3_request_finish_up_and_release_metrics(event.u.telemetry.metrics, meta_request);
             } break;
 
+            case AWS_S3_META_REQUEST_EVENT_PAUSE: {
+                paused = true;
+                on_pause_complete = event.u.pause.on_pause_complete;
+                pause_user_data = event.u.pause.user_data;
+            } break;
             default:
                 AWS_FATAL_ASSERT(false);
         }
@@ -2105,6 +2127,19 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+
+    if (paused) {
+        if (meta_request->recv_file) {
+            /* flush all writes. */
+            fflush(meta_request->recv_file);
+        }
+        /* Get the resume status after all the events scheduled completes. */
+        struct aws_s3_meta_request_resume_token *out_resume_token = NULL;
+        int rt_code = aws_s3_meta_request_pause(meta_request, &out_resume_token);
+        AWS_FATAL_ASSERT(rt_code == AWS_OP_SUCCESS);
+        on_pause_complete(meta_request, out_resume_token, pause_user_data);
+        aws_s3_meta_request_resume_token_release(out_resume_token);
+    }
 
     aws_s3_client_schedule_process_work(client);
     aws_s3_meta_request_release(meta_request);
@@ -2677,4 +2712,35 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
         default:
             return false;
     }
+}
+
+int aws_s3_meta_request_pause_async_default(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_pause_complete,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    /* TODO: PUT OBJECT check for content_length */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Cannot pause meta request. The meta request has already finished.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+    struct aws_s3_meta_request_event event = {
+        .type = AWS_S3_META_REQUEST_EVENT_PAUSE,
+    };
+    event.u.pause.on_pause_complete = on_pause_complete;
+    event.u.pause.user_data = user_data;
+    aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+    /**
+     * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
+     * This allows the client to resume the upload later, setting the persistable state in the meta request options.
+     */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    return AWS_OP_SUCCESS;
 }

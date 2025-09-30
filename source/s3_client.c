@@ -2621,6 +2621,7 @@ static void s_resume_token_ref_count_zero_callback(void *arg) {
     struct aws_s3_meta_request_resume_token *token = arg;
 
     aws_string_destroy(token->multipart_upload_id);
+    aws_string_destroy(token->object_last_modified);
 
     aws_mem_release(token->allocator, token);
 }
@@ -2696,6 +2697,16 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     AWS_FATAL_PRECONDITION(resume_token);
     if (resume_token->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT && resume_token->multipart_upload_id != NULL) {
         return aws_byte_cursor_from_string(resume_token->multipart_upload_id);
+    }
+
+    return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_object_last_modified(
+    struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && resume_token->object_last_modified != NULL) {
+        return aws_byte_cursor_from_string(resume_token->object_last_modified);
     }
 
     return aws_byte_cursor_from_c_str("");

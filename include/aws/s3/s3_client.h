@@ -975,6 +975,8 @@ struct aws_s3_meta_request_options {
      * aws_s3_meta_request_pause() can be provided here.
      * Note: If PutObject request specifies a checksum algorithm, client will calculate checksums while skipping parts
      * from the buffer and compare them them to previously uploaded part checksums.
+     * Note: token from download request is not supported to resume. To resume download, you need to
+     * create a new download request with a specified range. TODO: support this.
      */
     struct aws_s3_meta_request_resume_token *resume_token;
 
@@ -1243,6 +1245,26 @@ int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token);
 
+/**
+ * A callback to be invoked when the meta request has been paused.
+ * This is invoked when there will be no more events for the meta request:
+ * - progress callback
+ * - telemetry callback
+ * - body callback
+ * So that the status collected in the callback is the final status of the meta request.
+ * Notes: there is no guarantee that of the service status.
+ */
+typedef void(aws_s3_meta_request_pause_complete_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token *resume_token,
+    void *user_data);
+
+AWS_S3_API
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_pause_complete,
+    void *user_data);
+
 /*
  * Options to construct upload resume token.
  * Note: fields correspond to getters on the token below and it up to the caller
@@ -1320,6 +1342,15 @@ size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_r
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
+    struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Object last modified time associated with operation.
+ * Only valid for tokens returned from download operation. For all other operations
+ * this will return empty.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_object_last_modified(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /**

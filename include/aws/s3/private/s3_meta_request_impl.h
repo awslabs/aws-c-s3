@@ -60,6 +60,7 @@ struct aws_s3_meta_request_event {
         AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY, /* body_callback */
         AWS_S3_META_REQUEST_EVENT_PROGRESS,      /* progress_callback */
         AWS_S3_META_REQUEST_EVENT_TELEMETRY,     /* telemetry_callback */
+        AWS_S3_META_REQUEST_EVENT_PAUSE,         /* pause_callback */
     } type;
 
     union {
@@ -77,6 +78,12 @@ struct aws_s3_meta_request_event {
         struct {
             struct aws_s3_request_metrics *metrics;
         } telemetry;
+
+        /* data for AWS_S3_META_REQUEST_EVENT_PAUSE */
+        struct {
+            aws_s3_meta_request_pause_complete_fn *on_pause_complete;
+            void *user_data;
+        } pause;
     } u;
 };
 
@@ -122,6 +129,11 @@ struct aws_s3_meta_request_vtable {
 
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
+    /* Pause the given request, and notify when the pause completes */
+    int (*pause_async)(
+        struct aws_s3_meta_request *meta_request,
+        aws_s3_meta_request_pause_complete_fn *on_pause_complete,
+        void *user_data);
 };
 
 /**
@@ -481,6 +493,11 @@ void aws_s3_meta_request_schedule_prepare_request_default_impl(
     struct aws_s3_request *request,
     bool parallel,
     aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data);
+
+int aws_s3_meta_request_pause_async_default(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_pause_complete,
     void *user_data);
 
 AWS_EXTERN_C_END
