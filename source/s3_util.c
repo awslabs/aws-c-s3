@@ -77,8 +77,7 @@ const uint64_t g_streaming_object_size_threshold = UINT64_MAX;
 const uint64_t g_default_part_size_fallback = MB_TO_BYTES(8);
 const uint64_t g_default_max_part_size = 5368709120ULL;
 
-const uint64_t g_s3_optimal_range_size_alignment =
-    4 * g_default_part_size_fallback; /* alignment for buffer pool compatibility */
+const uint64_t g_s3_optimal_range_size_alignment = MB_TO_BYTES(32);
 /**
  * The most parts in memory will be:
  * - All downloaded parts to deliver them in the right order (download)

@@ -406,7 +406,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     /* default max part size is the smallest of either half of mem limit or default max part size */
-    size_t max_part_size = g_default_max_part_size;
+    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)g_default_max_part_size);
     if (client_config->max_part_size != 0) {
         if (client_config->max_part_size > SIZE_MAX) {
             max_part_size = SIZE_MAX;
