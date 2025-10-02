@@ -853,7 +853,7 @@ static int s_test_s3_calculate_client_optimal_range_size(struct aws_allocator *a
         uint32_t max_connections = 10;
 
         ASSERT_ERROR(
-            AWS_OP_ERR,
+            AWS_ERROR_INVALID_ARGUMENT,
             aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
     }
 
@@ -863,7 +863,7 @@ static int s_test_s3_calculate_client_optimal_range_size(struct aws_allocator *a
         uint32_t max_connections = 0;
 
         ASSERT_ERROR(
-            AWS_OP_ERR,
+            AWS_ERROR_INVALID_ARGUMENT,
             aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
     }
 
@@ -880,14 +880,14 @@ static int s_test_s3_calculate_request_optimal_range_size(struct aws_allocator *
 
     /* Test 1: Estimated part size is larger than client size - use client size */
     {
-        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
-        uint64_t estimated_part_size = MB_TO_BYTES(100);                            /* 100 MB */
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 160 MB (5 * 32MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(200);                            /* 200 MB */
 
         ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
             client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
 
-        /* Expected: min(40MB, 100MB) = 40MB */
-        uint64_t expected = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        /* Expected: min(160MB, 200MB) = 160MB */
+        uint64_t expected = g_s3_optimal_range_size_alignment * 5; /* 160 MB (5 * 32MB) */
         ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
     }
 
@@ -909,27 +909,27 @@ static int s_test_s3_calculate_request_optimal_range_size(struct aws_allocator *
 
     /* Test 3: Estimated part size is very small - apply minimum constraint */
     {
-        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 160 MB (5 * 32MB) */
         uint64_t estimated_part_size = MB_TO_BYTES(1);                              /* 1 MB */
 
         ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
             client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
 
-        /* Expected: min(40MB, 1MB) = minimum size (minimum constraint) */
+        /* Expected: min(160MB, 1MB) = minimum size (minimum constraint) */
         uint64_t expected = g_default_part_size_fallback; /* minimum size */
         ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
     }
 
     /* Test 4: Zero estimated part size (unknown) - use client size */
     {
-        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 160 MB (5 * 32MB) */
         uint64_t estimated_part_size = 0;                                           /* 0 - unknown */
 
         ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
             client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
 
         /* Expected: use client_optimal_range_size when estimated is unknown */
-        uint64_t expected = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t expected = g_s3_optimal_range_size_alignment * 5; /* 160 MB (5 * 32MB) */
         ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
     }
 
@@ -955,7 +955,7 @@ static int s_test_s3_calculate_request_optimal_range_size(struct aws_allocator *
         uint64_t estimated_part_size = MB_TO_BYTES(100);
 
         ASSERT_ERROR(
-            AWS_OP_ERR,
+            AWS_ERROR_INVALID_ARGUMENT,
             aws_s3_calculate_request_optimal_range_size(
                 client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
     }

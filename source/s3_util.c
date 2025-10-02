@@ -858,7 +858,7 @@ int aws_s3_calculate_request_optimal_range_size(
             AWS_LS_S3_GENERAL,
             "Invalid client_optimal_range_size for request optimal range size calculation: %" PRIu64,
             client_optimal_range_size);
-        return AWS_OP_ERR;
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
     /* Apply the minimum constraint from the formula:
@@ -869,15 +869,17 @@ int aws_s3_calculate_request_optimal_range_size(
     if (estimated_object_stored_part_size > 0 && estimated_object_stored_part_size < client_optimal_range_size) {
         optimal_size = estimated_object_stored_part_size;
 
-        /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
-         * what's the best round up for the part size. */
-        if (optimal_size % g_s3_optimal_range_size_alignment != 0) {
-            optimal_size = ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
-        }
-
-        /* Apply minimum constraint to preserve buffer pool benefits */
+        /* Apply minimum constraint first to avoid excessive alignment */
         if (optimal_size < g_default_part_size_fallback) {
             optimal_size = g_default_part_size_fallback;
+        } else {
+            /* Only apply alignment for sizes above minimum to avoid excessive rounding */
+            /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
+             * what's the best round up for the part size. */
+            if (optimal_size % g_s3_optimal_range_size_alignment != 0) {
+                optimal_size =
+                    ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+            }
         }
     }
 
