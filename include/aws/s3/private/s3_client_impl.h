@@ -238,6 +238,11 @@ struct aws_s3_client {
      * to meta requests for use. */
     const uint64_t max_part_size;
 
+    /* Calculated optimal range size for GET operations based on client configuration (memory limits, throughput
+     * targets). This is used when part_size is not explicitly configured, replacing the default with reasonable
+     * calculation. Value is calculated during client initialization and remains constant for the client's lifetime. */
+    const uint64_t optimal_range_size;
+
     /* File I/O options. */
     bool fio_options_set;
     struct aws_s3_file_io_options fio_opts;

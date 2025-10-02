@@ -66,7 +66,27 @@ const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
 const size_t g_streaming_buffer_size = MB_TO_BYTES(8);
 const double g_default_throughput_target_gbps = 10.0;
-const uint64_t g_streaming_object_size_threshold = TB_TO_BYTES(2);
+/* TODO: disable this threshold until we have a better option for threshold */
+const uint64_t g_streaming_object_size_threshold = UINT64_MAX;
+
+/**
+ * TODO: update this default part size 17/16 MiB based on S3 best practice.
+ * Default part size is 8 MiB to reach the best performance from the experiments we had.
+ * Default max part size is 5GiB as the current server limit.
+ **/
+const uint64_t g_default_part_size_fallback = MB_TO_BYTES(8);
+const uint64_t g_default_max_part_size = 5368709120ULL;
+
+const uint64_t g_s3_optimal_range_size_alignment =
+    4 * g_default_part_size_fallback; /* alignment for buffer pool compatibility */
+/**
+ * The most parts in memory will be:
+ * - All downloaded parts to deliver them in the right order (download)
+ * - All parts read into memory for preparing for the HTTP level (upload)
+ * - All transferring parts in HTTP
+ * So, it gives us at most 3 × (the max range size) × (concurrency) in memory.
+ */
+static const uint32_t s_optimal_range_size_memory_divisor = 3;
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
@@ -763,5 +783,109 @@ int aws_s3_check_headers_for_checksum(
         }
     }
     *out_checksum = NULL;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_calculate_client_optimal_range_size(
+    uint64_t memory_limit_in_bytes,
+    uint32_t max_connections,
+    uint64_t *out_client_optimal_range_size) {
+
+    AWS_PRECONDITION(out_client_optimal_range_size);
+
+    /* Validate input parameters */
+    if (memory_limit_in_bytes == 0 || max_connections == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Invalid parameters for client optimal range size calculation: memory_limit=%" PRIu64
+            ", max_connections=%" PRIu32,
+            memory_limit_in_bytes,
+            max_connections);
+        return AWS_OP_ERR;
+    }
+
+    /* Calculate memory-constrained range size using the formula:
+     * MemoryLimit / concurrency / s_optimal_range_size_memory_divisor
+     *
+     * The division by s_optimal_range_size_memory_divisor accounts for:
+     * - All downloaded parts to deliver them in the right order (download)
+     * - All parts read into memory for preparing for the HTTP level (upload)
+     * - All transferring parts in HTTP
+     */
+    uint64_t memory_constrained_size = memory_limit_in_bytes / max_connections / s_optimal_range_size_memory_divisor;
+
+    /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
+     * what's the best round up for the part size. */
+    uint64_t optimal_size = memory_constrained_size;
+    if (optimal_size % g_s3_optimal_range_size_alignment != 0) {
+        optimal_size = ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+    }
+
+    /* Use g_default_part_size_fallback as minimum constraint */
+    if (optimal_size < g_default_part_size_fallback) {
+        optimal_size = g_default_part_size_fallback;
+    } else if (optimal_size > g_default_max_part_size) {
+        optimal_size = g_default_max_part_size;
+    }
+
+    *out_client_optimal_range_size = optimal_size;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_GENERAL,
+        "Calculated client optimal range size: memory_limit=%" PRIu64 ", max_connections=%" PRIu32
+        ", client_optimal_range_size=%" PRIu64,
+        memory_limit_in_bytes,
+        max_connections,
+        optimal_size);
+
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_calculate_request_optimal_range_size(
+    uint64_t client_optimal_range_size,
+    uint64_t estimated_object_stored_part_size,
+    uint64_t *out_request_optimal_range_size) {
+
+    AWS_PRECONDITION(out_request_optimal_range_size);
+
+    /* Validate input parameters */
+    if (client_optimal_range_size == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Invalid client_optimal_range_size for request optimal range size calculation: %" PRIu64,
+            client_optimal_range_size);
+        return AWS_OP_ERR;
+    }
+
+    /* Apply the minimum constraint from the formula:
+     * min(client_optimal_range_size, estimated_object_stored_part_size)
+     * If estimated_object_stored_part_size is 0 (unknown), use client_optimal_range_size
+     */
+    uint64_t optimal_size = client_optimal_range_size;
+    if (estimated_object_stored_part_size > 0 && estimated_object_stored_part_size < client_optimal_range_size) {
+        optimal_size = estimated_object_stored_part_size;
+
+        /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
+         * what's the best round up for the part size. */
+        if (optimal_size % g_s3_optimal_range_size_alignment != 0) {
+            optimal_size = ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+        }
+
+        /* Apply minimum constraint to preserve buffer pool benefits */
+        if (optimal_size < g_default_part_size_fallback) {
+            optimal_size = g_default_part_size_fallback;
+        }
+    }
+
+    *out_request_optimal_range_size = optimal_size;
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_GENERAL,
+        "Calculated request optimal range size: client_optimal_range_size=%" PRIu64 ", estimated_part_size=%" PRIu64
+        ", request_optimal_range_size=%" PRIu64,
+        client_optimal_range_size,
+        estimated_object_stored_part_size,
+        optimal_size);
+
     return AWS_OP_SUCCESS;
 }

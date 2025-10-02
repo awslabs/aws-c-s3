@@ -160,6 +160,15 @@ extern const double g_default_throughput_target_gbps;
 
 AWS_S3_API
 extern const uint64_t g_streaming_object_size_threshold;
+
+AWS_S3_API
+extern const uint64_t g_default_part_size_fallback;
+
+AWS_S3_API
+extern const uint64_t g_default_max_part_size;
+
+AWS_S3_API
+extern const uint64_t g_s3_optimal_range_size_alignment;
 /**
  * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
  */
@@ -317,6 +326,39 @@ int aws_s3_check_headers_for_checksum(
     struct aws_s3_checksum **out_checksum,
     struct aws_byte_buf *out_checksum_buffer,
     bool meta_request_level);
+
+/**
+ * Calculate client-level optimal range size based on memory and connection constraints.
+ * This function is called during client initialization to determine the base range size
+ * using the formula: MemoryLimit / concurrency / divisor.
+ * The result is rounded up to ensure proper alignment and applies minimum size constraints.
+ *
+ * @param memory_limit_in_bytes Total memory limit available for buffering
+ * @param max_connections Maximum number of concurrent connections
+ * @param out_client_optimal_range_size Output parameter for calculated client-level optimal range size
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure (caller should fall back to default)
+ */
+AWS_S3_API
+int aws_s3_calculate_client_optimal_range_size(
+    uint64_t memory_limit_in_bytes,
+    uint32_t max_connections,
+    uint64_t *out_client_optimal_range_size);
+
+/**
+ * Calculate request-level optimal range size by considering object-specific information.
+ * This function is called per request to adjust the client-level range size based on
+ * estimated object stored part size using: min(client_optimal_range_size, estimated_object_stored_part_size).
+ *
+ * @param client_optimal_range_size The client-level optimal range size from initialization
+ * @param estimated_object_stored_part_size Estimated size of object stored parts in S3
+ * @param out_request_optimal_range_size Output parameter for calculated request-level optimal range size
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure (caller should fall back to client size)
+ */
+AWS_S3_API
+int aws_s3_calculate_request_optimal_range_size(
+    uint64_t client_optimal_range_size,
+    uint64_t estimated_object_stored_part_size,
+    uint64_t *out_request_optimal_range_size);
 
 AWS_EXTERN_C_END
 

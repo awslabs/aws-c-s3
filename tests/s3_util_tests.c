@@ -781,3 +781,185 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
     }
     return AWS_OP_SUCCESS;
 }
+
+AWS_TEST_CASE(test_s3_calculate_client_optimal_range_size, s_test_s3_calculate_client_optimal_range_size)
+static int s_test_s3_calculate_client_optimal_range_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    uint64_t client_optimal_range_size = 0;
+
+    /* Test 1: Basic calculation with sufficient memory */
+    {
+        uint64_t memory_limit = GB_TO_BYTES(1); /* 1 GB */
+        uint32_t max_connections = 10;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 1GB / 10 / 3 = 34.13MB -> rounded up to alignment boundary */
+        uint64_t memory_constrained = memory_limit / max_connections / 3;
+        uint64_t aligned_size =
+            ((memory_constrained / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+        uint64_t expected = (aligned_size < g_default_part_size_fallback) ? g_default_part_size_fallback : aligned_size;
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 2: Memory-constrained scenario */
+    {
+        uint64_t memory_limit = MB_TO_BYTES(100); /* 100 MB */
+        uint32_t max_connections = 10;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 100MB / 10 / 3 = 3.33MB -> minimum size (minimum constraint) */
+        uint64_t expected = g_default_part_size_fallback; /* minimum size */
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 3: High concurrency scenario */
+    {
+        uint64_t memory_limit = GB_TO_BYTES(1); /* 1 GB */
+        uint32_t max_connections = 50;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 1GB / 50 / 3 = 6.83MB -> minimum size (minimum constraint) */
+        uint64_t expected = g_default_part_size_fallback; /* minimum size */
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 4: Alignment to buffer pool boundaries */
+    {
+        uint64_t memory_limit = MB_TO_BYTES(300); /* 300 MB */
+        uint32_t max_connections = 10;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 300MB / 10 / 3 = 10MB -> rounded up to alignment boundary */
+        uint64_t memory_constrained = memory_limit / max_connections / 3;
+        uint64_t aligned_size =
+            ((memory_constrained / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+        uint64_t expected = (aligned_size < g_default_part_size_fallback) ? g_default_part_size_fallback : aligned_size;
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 5: Error cases - zero memory limit */
+    {
+        uint64_t memory_limit = 0;
+        uint32_t max_connections = 10;
+
+        ASSERT_ERROR(
+            AWS_OP_ERR,
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+    }
+
+    /* Test 6: Error cases - zero max connections */
+    {
+        uint64_t memory_limit = GB_TO_BYTES(1);
+        uint32_t max_connections = 0;
+
+        ASSERT_ERROR(
+            AWS_OP_ERR,
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+    }
+
+    aws_s3_library_clean_up();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_calculate_request_optimal_range_size, s_test_s3_calculate_request_optimal_range_size)
+static int s_test_s3_calculate_request_optimal_range_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    uint64_t request_optimal_range_size = 0;
+
+    /* Test 1: Estimated part size is larger than client size - use client size */
+    {
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(100);                            /* 100 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
+
+        /* Expected: min(40MB, 100MB) = 40MB */
+        uint64_t expected = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 2: Estimated part size is smaller than client size - use estimated size */
+    {
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 8; /* 64 MB (8 * 8MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(50);                             /* 50 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
+
+        /* Expected: min(64MB, 50MB) = 50MB -> rounded up to alignment boundary */
+        uint64_t smaller_size = estimated_part_size; /* 50MB is smaller than 64MB */
+        uint64_t aligned_size =
+            ((smaller_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+        uint64_t expected = (aligned_size < g_default_part_size_fallback) ? g_default_part_size_fallback : aligned_size;
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 3: Estimated part size is very small - apply minimum constraint */
+    {
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(1);                              /* 1 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
+
+        /* Expected: min(40MB, 1MB) = minimum size (minimum constraint) */
+        uint64_t expected = g_default_part_size_fallback; /* minimum size */
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 4: Zero estimated part size (unknown) - use client size */
+    {
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t estimated_part_size = 0;                                           /* 0 - unknown */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
+
+        /* Expected: use client_optimal_range_size when estimated is unknown */
+        uint64_t expected = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 5: Alignment to buffer pool boundaries */
+    {
+        uint64_t client_optimal_range_size = g_s3_optimal_range_size_alignment * 5; /* 40 MB (5 * 8MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(9);                              /* 9 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
+
+        /* Expected: min(40MB, 9MB) = 9MB -> rounded up to alignment boundary */
+        uint64_t smaller_size = estimated_part_size; /* 9MB is smaller than 40MB */
+        uint64_t aligned_size =
+            ((smaller_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+        uint64_t expected = (aligned_size < g_default_part_size_fallback) ? g_default_part_size_fallback : aligned_size;
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 6: Error cases - zero client optimal range size */
+    {
+        uint64_t client_optimal_range_size = 0;
+        uint64_t estimated_part_size = MB_TO_BYTES(100);
+
+        ASSERT_ERROR(
+            AWS_OP_ERR,
+            aws_s3_calculate_request_optimal_range_size(
+                client_optimal_range_size, estimated_part_size, &request_optimal_range_size));
+    }
+
+    aws_s3_library_clean_up();
+    return 0;
+}
