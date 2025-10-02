@@ -360,6 +360,18 @@ int aws_s3_calculate_request_optimal_range_size(
     uint64_t estimated_object_stored_part_size,
     uint64_t *out_request_optimal_range_size);
 
+/**
+ * Extract the number of parts from an S3 ETag header value.
+ * S3 multipart upload ETags have the format "<hash>-<number_of_parts>".
+ * Single-part uploads have ETags without dashes.
+ *
+ * @param etag_header_value The ETag header value (may include quotes)
+ * @param out_num_parts Output parameter for the number of parts (1 for single-part uploads)
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure (invalid ETag format)
+ */
+AWS_S3_API
+int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uint32_t *out_num_parts);
+
 AWS_EXTERN_C_END
 
 #endif /* AWS_S3_UTIL_H */

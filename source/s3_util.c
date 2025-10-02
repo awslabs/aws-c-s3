@@ -801,7 +801,7 @@ int aws_s3_calculate_client_optimal_range_size(
             ", max_connections=%" PRIu32,
             memory_limit_in_bytes,
             max_connections);
-        return AWS_OP_ERR;
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
     /* Calculate memory-constrained range size using the formula:
@@ -814,17 +814,21 @@ int aws_s3_calculate_client_optimal_range_size(
      */
     uint64_t memory_constrained_size = memory_limit_in_bytes / max_connections / s_optimal_range_size_memory_divisor;
 
-    /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
-     * what's the best round up for the part size. */
+    /* Apply minimum constraint first */
     uint64_t optimal_size = memory_constrained_size;
-    if (optimal_size % g_s3_optimal_range_size_alignment != 0) {
-        optimal_size = ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
-    }
-
-    /* Use g_default_part_size_fallback as minimum constraint */
     if (optimal_size < g_default_part_size_fallback) {
         optimal_size = g_default_part_size_fallback;
-    } else if (optimal_size > g_default_max_part_size) {
+    } else {
+        /* Only apply alignment for sizes above minimum to avoid excessive rounding */
+        /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
+         * what's the best round up for the part size. */
+        if (optimal_size % g_s3_optimal_range_size_alignment != 0) {
+            optimal_size = ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+        }
+    }
+
+    /* Apply maximum constraint */
+    if (optimal_size > g_default_max_part_size) {
         optimal_size = g_default_max_part_size;
     }
 
@@ -886,6 +890,89 @@ int aws_s3_calculate_request_optimal_range_size(
         client_optimal_range_size,
         estimated_object_stored_part_size,
         optimal_size);
+
+    return AWS_OP_SUCCESS;
+}
+
+static bool s_is_quote_or_space_char(uint8_t c) {
+    return c == '"' || c == ' ';
+}
+
+int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uint32_t *out_num_parts) {
+
+    AWS_PRECONDITION(out_num_parts);
+    /* Strip quotes if present (ETags often come wrapped in quotes) */
+    struct aws_byte_cursor etag_cursor = aws_byte_cursor_trim_pred(&etag_header_value, s_is_quote_or_space_char);
+
+    /* Handle empty or invalid ETag */
+    if (etag_cursor.len == 0) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Empty ETag header value");
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* Use aws_byte_cursor_next_split to iterate through dash-separated parts */
+    struct aws_byte_cursor substr = {0};
+    struct aws_byte_cursor remaining_cursor = etag_cursor;
+    int split_count = 0;
+    struct aws_byte_cursor parts_count = {0};
+
+    /* Count splits and extract parts */
+    while (aws_byte_cursor_next_split(&remaining_cursor, '-', &substr)) {
+        split_count++;
+        if (split_count == 2) {
+            /* The ETag should follow the pattern <hash>-<parts_count>, so the second part is the parts count. */
+            parts_count = substr;
+        }
+        if (split_count > 2) {
+            /* More than 2 parts - invalid format */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Invalid ETag format - multiple dashes found: " PRInSTR,
+                AWS_BYTE_CURSOR_PRI(etag_header_value));
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+    }
+
+    if (split_count == 1) {
+        /* No dash found - this is a single-part upload */
+        *out_num_parts = 1;
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_GENERAL, "Single-part ETag detected (no dash): " PRInSTR, AWS_BYTE_CURSOR_PRI(etag_cursor));
+        return AWS_OP_SUCCESS;
+    } else if (split_count == 2) {
+        /* Exactly one dash - multipart upload format */
+        /* Parse the number after the dash */
+        uint64_t num_parts_u64;
+        if (aws_byte_cursor_utf8_parse_u64(parts_count, &num_parts_u64)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Invalid ETag format - could not parse number of parts: " PRInSTR,
+                AWS_BYTE_CURSOR_PRI(parts_count));
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+
+        /* Validate the number is within reasonable bounds */
+        if (num_parts_u64 == 0 || num_parts_u64 > g_s3_max_num_upload_parts) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Invalid number of parts in ETag: %" PRIu64 " (must be 1-%" PRIu32 ")",
+                num_parts_u64,
+                g_s3_max_num_upload_parts);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+
+        *out_num_parts = (uint32_t)num_parts_u64;
+    } else {
+        /* Should not reach here due to early exit above, but handle just in case */
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Unexpected split count: %d", split_count);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_GENERAL,
+        "Extracted %" PRIu32 " parts from ETag: " PRInSTR,
+        *out_num_parts,
+        AWS_BYTE_CURSOR_PRI(etag_header_value));
 
     return AWS_OP_SUCCESS;
 }

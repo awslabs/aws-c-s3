@@ -963,3 +963,91 @@ static int s_test_s3_calculate_request_optimal_range_size(struct aws_allocator *
     aws_s3_library_clean_up();
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_extract_parts_from_etag, s_test_s3_extract_parts_from_etag)
+static int s_test_s3_extract_parts_from_etag(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    uint32_t num_parts = 0;
+
+    /* Test 1: Single-part upload (no dash) */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"d41d8cd98f00b204e9800998ecf8427e\"");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(1, num_parts);
+    }
+
+    /* Test 2: Single-part upload without quotes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(1, num_parts);
+    }
+
+    /* Test 3: Multi-part upload with 5 parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"d41d8cd98f00b204e9800998ecf8427e-5\"");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(5, num_parts);
+    }
+
+    /* Test 4: Multi-part upload without quotes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-123");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(123, num_parts);
+    }
+
+    /* Test 5: Maximum number of parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-10000");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(10000, num_parts);
+    }
+
+    /* Test 6: Error case - empty ETag */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 7: Error case - multiple dashes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-5-extra");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 8: Error case - invalid number */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-abc");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 9: Error case - zero parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-0");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 10: Error case - too many parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-10001");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 11: Edge case - just quotes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"\"");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 12: Edge case - single quote */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    aws_s3_library_clean_up();
+    return 0;
+}

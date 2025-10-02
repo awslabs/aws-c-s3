@@ -757,22 +757,47 @@ static void s_s3_auto_ranged_get_request_finished(
 
             goto update_synced_data;
         }
-        if ((!request_failed || first_part_size_mismatch) && !auto_ranged_get->initial_message_has_if_match_header) {
-            AWS_ASSERT(auto_ranged_get->etag == NULL);
-            struct aws_byte_cursor etag_header_value;
+        /* Always extract ETag header for part size estimation */
+        struct aws_byte_cursor etag_header_value;
+        if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value) ==
+            AWS_OP_SUCCESS) {
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p ETag received for the meta request. value is: " PRInSTR "",
+                (void *)meta_request,
+                AWS_BYTE_CURSOR_PRI(etag_header_value));
 
-            if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value)) {
+            /* Store ETag if needed for If-Match header */
+            if ((!request_failed || first_part_size_mismatch) &&
+                !auto_ranged_get->initial_message_has_if_match_header) {
+                AWS_ASSERT(auto_ranged_get->etag == NULL);
+                auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
+            }
+
+            /* Extract number of parts from ETag and calculate estimated part size */
+            uint32_t num_parts = 0;
+            if (aws_s3_extract_parts_from_etag(etag_header_value, &num_parts) == AWS_OP_SUCCESS && num_parts > 0) {
+                auto_ranged_get->estimated_object_stored_part_size = object_size / num_parts;
+
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Estimated object stored part size: object_size=%" PRIu64 ", num_parts=%" PRIu32
+                    ", estimated_part_size=%" PRIu64,
+                    (void *)meta_request,
+                    object_size,
+                    num_parts,
+                    auto_ranged_get->estimated_object_stored_part_size);
+            } else {
+                /* failed to parse ETag header, error out */
                 aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
                 error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
             }
-
-            AWS_LOGF_TRACE(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Etag received for the meta request. value is: " PRInSTR "",
-                (void *)meta_request,
-                AWS_BYTE_CURSOR_PRI(etag_header_value));
-            auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
+        } else {
+            /* No ETag header found, error out */
+            aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
+            error_code = AWS_ERROR_S3_MISSING_ETAG;
+            goto update_synced_data;
         }
 
         /* If we were able to discover the object-range/content length successfully, then any error code that was passed

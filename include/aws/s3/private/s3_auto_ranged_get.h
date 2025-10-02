@@ -21,6 +21,9 @@ struct aws_s3_auto_ranged_get {
 
     struct aws_string *etag;
 
+    /* Estimated object stored part size based on ETag analysis */
+    uint64_t estimated_object_stored_part_size;
+
     bool initial_message_has_start_range;
     bool initial_message_has_end_range;
     uint64_t initial_range_start;
