@@ -234,6 +234,8 @@ struct aws_s3_client {
      * to meta requests for use. */
     const size_t part_size;
 
+    bool part_size_set;
+
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
     const uint64_t max_part_size;

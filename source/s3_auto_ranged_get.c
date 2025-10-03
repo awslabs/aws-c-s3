@@ -62,6 +62,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
     size_t part_size,
+    bool part_size_set,
     const struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client);
@@ -91,6 +92,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         return NULL;
     }
 
+    auto_ranged_get->part_size_set = part_size_set;
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);
 
@@ -319,8 +321,12 @@ static bool s_s3_auto_ranged_get_update(
                      * we could end up stuck in a situation where the user is
                      * waiting for more bytes before they'll open the window,
                      * and this implementation is waiting for more window before it will send more parts. */
-                    uint64_t read_data_requested =
-                        auto_ranged_get->synced_data.num_parts_requested * meta_request->part_size;
+                    uint64_t read_data_requested = 0;
+                    if (auto_ranged_get->synced_data.num_parts_requested > 0) {
+                        read_data_requested =
+                            (auto_ranged_get->synced_data.num_parts_requested - 1) * meta_request->part_size +
+                            auto_ranged_get->synced_data.first_part_size;
+                    }
                     if (read_data_requested >= meta_request->synced_data.read_window_running_total) {
 
                         /* Avoid spamming users with this DEBUG message */
@@ -804,6 +810,20 @@ static void s_s3_auto_ranged_get_request_finished(
          * into this function is being handled and does not indicate an overall failure.*/
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
+
+        if (!auto_ranged_get->part_size_set && !meta_request->client->part_size_set) {
+            /* No part size has been set from user. Now we use the optimal part size based on the throughput and memory
+             * limit */
+            uint64_t out_request_optimal_range_size = 0;
+            int error = aws_s3_calculate_request_optimal_range_size(
+                meta_request->client->optimal_range_size,
+                auto_ranged_get->estimated_object_stored_part_size,
+                &out_request_optimal_range_size);
+            if (!error) {
+                /* Override the part size to be  */
+                *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
+            }
+        }
 
         /* Check for checksums if requested to */
         if (meta_request->checksum_config.validate_response_checksum) {

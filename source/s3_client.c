@@ -403,6 +403,7 @@ struct aws_s3_client *aws_s3_client_new(
         } else {
             part_size = (size_t)client_config->part_size;
         }
+        client->part_size_set = true;
     }
 
     /* default max part size is the smallest of either half of mem limit or default max part size */
@@ -1279,12 +1280,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return NULL;
     }
     size_t part_size = client->part_size;
+    bool part_size_set = false;
     if (options->part_size != 0) {
         if (options->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
         } else {
             part_size = (size_t)options->part_size;
         }
+        part_size_set = true;
     }
 
     /* Call the appropriate meta-request new function. */
@@ -1318,7 +1321,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     }
                 }
             }
-            return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, part_size, options);
+            return aws_s3_meta_request_auto_ranged_get_new(
+                client->allocator, client, part_size, part_size_set, options);
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
             if (body_source_count == 0) {

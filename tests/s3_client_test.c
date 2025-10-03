@@ -489,7 +489,7 @@ TEST_CASE(s3_calculate_client_optimal_range_size) {
         /* Verify optimal range size is calculated and within expected bounds */
         ASSERT_TRUE(client->optimal_range_size >= MB_TO_BYTES(8)); /* At least 8MiB minimum */
         ASSERT_TRUE(client->optimal_range_size <= GB_TO_BYTES(1)); /* At most 1GB maximum */
-        
+
         /* Verify it's properly initialized (not zero) */
         ASSERT_TRUE(client->optimal_range_size > 0);
 
@@ -521,7 +521,7 @@ TEST_CASE(s3_calculate_client_optimal_range_size) {
     {
         struct aws_s3_client_config client_config = {
             .part_size = MB_TO_BYTES(8),
-            .throughput_target_gbps = 100.0, /* High throughput = more connections */
+            .throughput_target_gbps = 100.0,           /* High throughput = more connections */
             .memory_limit_in_bytes = MB_TO_BYTES(512), /* Low memory */
         };
 
