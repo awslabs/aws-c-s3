@@ -74,11 +74,8 @@ const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old b
 const uint32_t g_max_num_connections = 10000;
 
 /**
- * Default part size is 8 MiB to reach the best performance from the experiments we had.
  * Default max part size is 5GiB as the server limit.
  */
-static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = 5368709120ULL;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
@@ -364,17 +361,53 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    size_t part_size = s_default_part_size;
+    if (client_config->throughput_target_gbps > 0.0) {
+        *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
+    } else {
+        *((double *)&client->throughput_target_gbps) = g_default_throughput_target_gbps;
+    }
+
+    *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
+        client_config->compute_content_md5;
+
+    *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
+        g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
+
+    /* Calculate optimal range size based on memory limits and connection count */
+    uint64_t calculated_optimal_range_size = 0;
+    if (aws_s3_calculate_client_optimal_range_size(
+            mem_limit, client->ideal_connection_count, &calculated_optimal_range_size) != AWS_OP_SUCCESS) {
+        /* Fall back to default 8MiB if calculation fails */
+        calculated_optimal_range_size = 8ULL * 1024 * 1024; /* 8MiB */
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p: Failed to calculate optimal range size, falling back to default 8MiB",
+            (void *)client);
+    }
+    *(uint64_t *)&client->optimal_range_size = calculated_optimal_range_size;
+
+    AWS_LOGF_INFO(
+        AWS_LS_S3_CLIENT,
+        "id=%p: Calculated optimal range size: %" PRIu64 " bytes (%.2f MiB) based on memory_limit=%" PRIu64
+        " bytes, ideal_connection_count=%" PRIu32,
+        (void *)client,
+        client->optimal_range_size,
+        (double)client->optimal_range_size / (1024.0 * 1024.0),
+        (uint64_t)mem_limit,
+        client->ideal_connection_count);
+
+    size_t part_size = (size_t)g_default_part_size_fallback;
     if (client_config->part_size != 0) {
         if (client_config->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
         } else {
             part_size = (size_t)client_config->part_size;
         }
+        client->part_size_set = true;
     }
 
     /* default max part size is the smallest of either half of mem limit or default max part size */
-    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)s_default_max_part_size);
+    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)g_default_max_part_size);
     if (client_config->max_part_size != 0) {
         if (client_config->max_part_size > SIZE_MAX) {
             max_part_size = SIZE_MAX;
@@ -586,18 +619,6 @@ struct aws_s3_client *aws_s3_client_new(
         client->synced_data.body_streaming_elg_allocated = true;
     }
     /* Setup cannot fail after this point. */
-
-    if (client_config->throughput_target_gbps > 0.0) {
-        *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
-    } else {
-        *((double *)&client->throughput_target_gbps) = g_default_throughput_target_gbps;
-    }
-
-    *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
-        client_config->compute_content_md5;
-
-    *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
-        g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
     if (client_config->enable_s3express) {
@@ -1259,12 +1280,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return NULL;
     }
     size_t part_size = client->part_size;
+    bool part_size_set = false;
     if (options->part_size != 0) {
         if (options->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
         } else {
             part_size = (size_t)options->part_size;
         }
+        part_size_set = true;
     }
 
     /* Call the appropriate meta-request new function. */
@@ -1298,7 +1321,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     }
                 }
             }
-            return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, part_size, options);
+            return aws_s3_meta_request_auto_ranged_get_new(
+                client->allocator, client, part_size, part_size_set, options);
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
             if (body_source_count == 0) {
