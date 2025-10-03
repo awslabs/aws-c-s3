@@ -396,7 +396,7 @@ struct aws_s3_client *aws_s3_client_new(
         (uint64_t)mem_limit,
         client->ideal_connection_count);
 
-    size_t part_size = g_default_part_size_fallback;
+    size_t part_size = (size_t)g_default_part_size_fallback;
     if (client_config->part_size != 0) {
         if (client_config->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
