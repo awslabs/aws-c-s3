@@ -315,7 +315,11 @@ enum aws_s3_recv_file_options {
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
 
-/* Controls how client performance file I/O operations. Only applies to the file based workload. */
+/**
+ * WARNING: experimental/unstable:
+ * Controls how client performance file I/O operations. Only applies to the file based
+ * workload.
+ **/
 struct aws_s3_file_io_options {
     /**
      * Skip buffering the part in memory before sending the request.
