@@ -122,6 +122,10 @@ struct aws_s3_meta_request_vtable {
 
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
+
+    /********************* TEST ONLY STUB **************************/
+    /* A stub to the update implementation from meta request with the lock held. Only for tests. */
+    bool (*synced_update_stub)(struct aws_s3_meta_request *meta_request);
 };
 
 /**
