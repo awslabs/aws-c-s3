@@ -1604,6 +1604,68 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 AWS_S3_API
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
 
+/* Get the request start timestamp from aws_s3_request_metrics. Always available. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_request_start_time);
+
+/* Get the request end timestamp from aws_s3_request_metrics. Always available. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_request_end_time);
+
+/* Get the request duration from aws_s3_request_metrics. Always available. */
+AWS_S3_API
+void aws_s3_request_metrics_get_request_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_request_duration);
+
+/* Get the connection acquire start timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_conn_acquire_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_conn_acquire_start_time);
+
+/* Get the connection acquire end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_conn_acquire_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_conn_acquire_end_time);
+
+/* Get the connection acquire duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_conn_acquire_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_conn_acquire_duration);
+
+/* Get the retry delay start timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_retry_delay_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_retry_delay_start_time);
+
+/* Get the retry delay end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_retry_delay_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_retry_delay_end_time);
+
+/* Get the retry delay duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_retry_delay_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_retry_delay_duration);
+
+/* Get the service call duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_service_call_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_service_call_duration);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
