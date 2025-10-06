@@ -202,12 +202,14 @@ static bool s_s3_auto_ranged_get_update(
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
         if (meta_request->vtable->synced_update_stub && meta_request->vtable->synced_update_stub(meta_request)) {
             /* TEST ONLY, allow test to stub here. */
             aws_s3_meta_request_unlock_synced_data(meta_request);
             return true;
         }
-
+#endif
         /* If nothing has set the "finish result" then this meta request is still in progress, and we can potentially
          * send additional requests. */
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {

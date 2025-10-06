@@ -108,6 +108,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
 
 include(CTest)
 if (BUILD_TESTING)
+    add_definitions(-DAWS_C_S3_ENABLE_TEST_STUBS)
     add_subdirectory(tests)
     if (NOT BYO_CRYPTO AND NOT CMAKE_CROSSCOMPILING)
         add_subdirectory(samples)

@@ -160,11 +160,14 @@ static bool s_s3_meta_request_default_update(
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
         if (meta_request->vtable->synced_update_stub && meta_request->vtable->synced_update_stub(meta_request)) {
             /* TEST ONLY, allow test to stub here. */
             aws_s3_meta_request_unlock_synced_data(meta_request);
             return true;
         }
+#endif
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
 
             /* If the request hasn't been sent, then create and send it now. */
