@@ -1902,6 +1902,7 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
             aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
             metrics->time_metrics.total_duration_ns =
                 metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.request_end_timestamp_ns);
         }
 
         if (meta_request->telemetry_callback != NULL) {
