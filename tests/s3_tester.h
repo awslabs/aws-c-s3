@@ -142,6 +142,7 @@ struct aws_s3_tester_client_options {
     uint32_t use_proxy : 1;
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     void *factory_user_data;
+    uint64_t memory_limit_in_bytes;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
