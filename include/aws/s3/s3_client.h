@@ -315,14 +315,16 @@ enum aws_s3_recv_file_options {
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
 
-/* Controls how client performance file I/O operations. Only applies to the file based workload. */
+/**
+ * WARNING: experimental/unstable:
+ * Controls how client performance file I/O operations. Only applies to the file based workload.
+ **/
 struct aws_s3_file_io_options {
     /**
      * Skip buffering the part in memory before sending the request.
-     * If set, set the `disk_throughput_gbps` to be reasonable align with the available disk throughput.
-     * Otherwise, the transfer may fail with connection starvation.
      *
-     * Default to false.
+     * Default to false on small objects, and true when the object size exceed a certain threshold
+     *`g_streaming_object_size_threshold`.
      **/
     bool should_stream;
 
@@ -330,12 +332,11 @@ struct aws_s3_file_io_options {
      * The estimated disk throughput. Only be applied when `streaming_upload` is true.
      * in gigabits per second (Gbps).
      *
-     * When doing upload with streaming, it's important to set the disk throughput to prevent the connection starvation.
      * Notes: There are possibilities that cannot reach the all available disk throughput:
      * 1. Disk is busy with other applications
      * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
      *
-     * Note: When `streaming_upload` is true, this default to 10 Gbps.
+     * Default to throughput_target_gbps.
      **/
     double disk_throughput_gbps;
 
