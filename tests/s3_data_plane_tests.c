@@ -5121,15 +5121,15 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.metrics));
         /* First request made was Get object and the range should be 0 to default range - 1 */
         ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, g_default_part_size_fallback - 1));
+            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
         /* Second request made should be get with range and range from 0 to optimal part size. */
         ASSERT_SUCCESS(s_check_metrics_helper(
             &test_results,
             1,
             AWS_S3_REQUEST_TYPE_GET_OBJECT,
             2,
-            g_default_part_size_fallback,
-            g_default_part_size_fallback + stored_part_size - 1));
+            (size_t)g_default_part_size_fallback,
+            (size_t)g_default_part_size_fallback + stored_part_size - 1));
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
         /*** GET FILE WITHOUT FORCING -- old behavior should be changed ***/
@@ -5141,7 +5141,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
             .client = client,
             .validate_get_response_checksum = false,
-            .part_size = g_default_part_size_fallback,
+            .part_size = (size_t)g_default_part_size_fallback,
             .get_options =
                 {
                     .object_path = object_path,
@@ -5275,14 +5275,14 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.metrics));
         /* First request made was Get object and the range should be 0 to default range - 1 */
         ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, g_default_part_size_fallback - 1));
+            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
         /* Second request made should be get with range and range from 0 to optimal part size. */
         ASSERT_SUCCESS(s_check_metrics_helper(
             &test_results,
             1,
             AWS_S3_REQUEST_TYPE_GET_OBJECT,
             2,
-            g_default_part_size_fallback,
+            (size_t)g_default_part_size_fallback,
             MB_TO_BYTES(stored_part_size_mb) - 1));
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
