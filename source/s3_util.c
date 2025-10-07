@@ -78,7 +78,7 @@ const uint64_t g_default_part_size_fallback = MB_TO_BYTES(8);
 const uint64_t g_default_max_part_size = 5368709120ULL;
 
 /* TODO: Use a reasonable alignment with the update of the buffer pool */
-const uint64_t g_s3_optimal_range_size_alignment = MB_TO_BYTES(32);
+const uint64_t g_s3_optimal_range_size_alignment = 1;
 /**
  * The most parts in memory will be:
  * - All downloaded parts to deliver them in the right order (download)
@@ -786,7 +786,14 @@ int aws_s3_check_headers_for_checksum(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_range_size_alignment(uint64_t *range_size) {}
+static void s_s3_range_size_alignment(uint64_t *range_size) {
+    /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
+     * what's the best round up for the part size. */
+    if (*range_size > g_s3_optimal_range_size_alignment && *range_size % g_s3_optimal_range_size_alignment != 0) {
+        /* Only apply alignment for sizes above minimum to avoid excessive rounding */
+        *range_size = ((*range_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+    }
+}
 
 int aws_s3_calculate_client_optimal_range_size(
     uint64_t memory_limit_in_bytes,
@@ -821,12 +828,7 @@ int aws_s3_calculate_client_optimal_range_size(
     if (optimal_size < g_default_part_size_fallback) {
         optimal_size = g_default_part_size_fallback;
     } else {
-        /* Only apply alignment for sizes above minimum to avoid excessive rounding */
-        /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
-         * what's the best round up for the part size. */
-        if (optimal_size > g_s3_optimal_range_size_alignment && optimal_size % g_s3_optimal_range_size_alignment != 0) {
-            optimal_size = ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
-        }
+        s_s3_range_size_alignment(&optimal_size);
     }
 
     /* Apply maximum constraint */
@@ -875,14 +877,7 @@ int aws_s3_calculate_request_optimal_range_size(
         if (optimal_size < g_default_part_size_fallback) {
             optimal_size = g_default_part_size_fallback;
         } else {
-            /* Only apply alignment for sizes above minimum to avoid excessive rounding */
-            /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
-             * what's the best round up for the part size. */
-            if (optimal_size > g_s3_optimal_range_size_alignment &&
-                optimal_size % g_s3_optimal_range_size_alignment != 0) {
-                optimal_size =
-                    ((optimal_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
-            }
+            s_s3_range_size_alignment(&optimal_size);
         }
     }
 
