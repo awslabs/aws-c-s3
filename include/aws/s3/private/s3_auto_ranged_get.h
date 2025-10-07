@@ -25,6 +25,7 @@ struct aws_s3_auto_ranged_get {
     uint64_t estimated_object_stored_part_size;
     /* Part size was set or not from user for this meta request. */
     bool part_size_set;
+    bool force_dynamic_part_size;
 
     bool initial_message_has_start_range;
     bool initial_message_has_end_range;

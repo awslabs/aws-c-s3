@@ -192,6 +192,8 @@ static void s_s3_test_meta_request_finish(
 
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
+    meta_request_test_results->did_validate = result->did_validate;
+    meta_request_test_results->validation_algorithm = result->validation_algorithm;
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -1620,7 +1622,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
             }
             meta_request_options.message = message;
-
+            meta_request_options.force_dynamic_part_size = options->get_options.force_dynamic_part_size;
         } else if (
             meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&

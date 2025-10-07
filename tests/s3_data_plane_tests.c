@@ -4987,6 +4987,97 @@ static int s_test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum
         AWS_TEST_FOC_CALLBACK);
 }
 
+AWS_TEST_CASE(test_s3_round_trip_dynamic_range_size_download, s_test_s3_round_trip_dynamic_range_size_download)
+static int s_test_s3_round_trip_dynamic_range_size_download(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    /*** 1. SINGLE PART ***/
+    {
+
+        ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+            allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/dynamic_size_singlepart")));
+        struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+        /* Configure file I/O options for streaming upload */
+        struct aws_s3_file_io_options fio_opts = {
+            .should_stream = true,
+            .direct_io = true,
+        };
+
+        size_t stored_part_size_mb = 30;
+        struct aws_s3_tester_meta_request_options put_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+            .client = client,
+            .checksum_algorithm = AWS_SCA_CRC32,
+            .validate_get_response_checksum = false,
+            .fio_opts = &fio_opts,
+            .default_type_options =
+                {
+                    .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_PUT,
+                    .operation_name = aws_byte_cursor_from_c_str("PutObject"),
+                },
+            .put_options =
+                {
+                    .object_size_mb = stored_part_size_mb,
+                    .object_path_override = object_path,
+                    .file_on_disk = true,
+                    .full_object_checksum = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+        aws_s3_meta_request_test_results_clean_up(&test_results);
+
+        /*** GET FILE ***/
+        aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+        struct aws_s3_tester_meta_request_options get_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .client = client,
+            .expected_validate_checksum_alg = AWS_SCA_CRC32,
+            .validate_get_response_checksum = true,
+            .get_options =
+                {
+                    .object_path = object_path,
+                    .file_on_disk = true,
+                    .force_dynamic_part_size = true,
+                },
+        };
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
+        /* The tests has been done, we are safe to touch the synced data from test results. */
+        ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.metrics));
+        /* TODO: validate the part range from the metrics to be expected */
+        ASSERT_TRUE(test_results.did_validate);
+        ASSERT_UINT_EQUALS(AWS_SCA_CRC32, test_results.validation_algorithm);
+
+        aws_s3_meta_request_test_results_clean_up(&test_results);
+    }
+    /* TODO: An uploaded empty file still works with dynamic part size */
+    /* TODO: The MPU file still works with dynamic part size */
+    // aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 /* When streaming, the data will be read after the headers are sent, so, we don't support set the parts level checksum
  * via headers when streaming. */
 AWS_TEST_CASE(
@@ -6191,7 +6282,6 @@ static void s_s3_test_user_agent_meta_request_finished_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
-
     AWS_ASSERT(meta_request != NULL);
 
     struct aws_s3_meta_request_test_results *results = meta_request->user_data;
@@ -6381,7 +6471,6 @@ static int s_range_requests_receive_body_callback(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
-
     (void)meta_request;
     (void)range_start;
 
@@ -7086,7 +7175,6 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
 }
 
 static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
-
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -7205,7 +7293,6 @@ static struct aws_http_message *s_put_object_request_new(
     struct aws_byte_cursor endpoint,
     struct aws_input_stream *body_stream,
     uint64_t content_length) {
-
     AWS_PRECONDITION(allocator);
 
     struct aws_http_message *message = aws_http_message_new_request(allocator);
@@ -7287,7 +7374,6 @@ static void s_put_pause_resume_meta_request_finish(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *meta_request_result,
     void *user_data) {
-
     (void)meta_request;
     struct aws_s3_tester *tester = user_data;
     struct put_object_pause_resume_test_data *test_data = tester->user_data;
@@ -7323,7 +7409,6 @@ static void s_meta_request_finished_request_patched_for_pause_resume_tests(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
     int error_code) {
-
     AWS_ASSERT(meta_request);
     struct aws_s3_tester *tester = meta_request->user_data;
     struct put_object_pause_resume_test_data *test_data = tester->user_data;
@@ -7367,7 +7452,6 @@ static void s_meta_request_finished_request_patched_for_pause_resume_tests(
 static struct aws_s3_meta_request *s_meta_request_factory_patch_for_pause_resume_tests(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options) {
-
     AWS_ASSERT(client != NULL);
     struct aws_s3_tester *tester = client->shutdown_callback_user_data;
     AWS_ASSERT(tester != NULL);
@@ -7392,7 +7476,6 @@ static int s_pause_resume_upload_review_callback(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_upload_review *review,
     void *user_data) {
-
     (void)meta_request;
     (void)user_data;
     struct aws_allocator *allocator = meta_request->allocator;
@@ -7450,7 +7533,6 @@ static int s_pause_resume_receive_body_callback(
     const struct aws_byte_cursor *body,
     uint64_t range_start,
     void *user_data) {
-
     (void)meta_request;
     (void)range_start;
     (void)user_data;
@@ -7491,7 +7573,6 @@ static int s_test_s3_put_pause_resume_helper(
     enum aws_s3_checksum_algorithm checksum_algorithm,
     int expected_error_code,
     int expected_response_status) {
-
     (void)ctx;
 
     struct aws_s3_client_config client_config;
@@ -8071,7 +8152,6 @@ static int s_upload_review_raise_canceled_error(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_upload_review *review,
     void *user_data) {
-
     (void)meta_request;
     (void)review;
     (void)user_data;
@@ -8311,7 +8391,6 @@ static int s_test_s3_upload_review_checksum_location_none_async_noop_part(struct
 static struct aws_http_stream *s_http_connection_make_request_patch(
     struct aws_http_connection *client_connection,
     const struct aws_http_make_request_options *options) {
-
     struct aws_http_message *message = options->request;
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     struct aws_byte_cursor out_value;

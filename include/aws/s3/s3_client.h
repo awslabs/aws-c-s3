@@ -513,7 +513,9 @@ struct aws_s3_client_config {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If not set, this defaults to 8 MiB.
+     *
+     * If not set, a dynamic default part size will be used based on the throughput target, memory_limit_in_bytes.
+     *
      * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
      * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      *
@@ -878,12 +880,21 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to 8MiB.
+     *
+     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to a dynamic value based on
+     * the throughput target, memory_limit_in_bytes and the requested object size.
      *
      * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
      * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      */
     uint64_t part_size;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * Set this to prefer for the dynamic default part_size over the part size set for both client and meta request for
+     * the best performance under the memory constrain, especially for getting large objects.
+     */
+    bool force_dynamic_part_size;
 
     /**
      * Optional.

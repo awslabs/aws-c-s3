@@ -413,9 +413,11 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
 /* Cancel the requests with cancellable HTTP stream for the meta request */
+AWS_S3_API
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Cancel the pending buffer futures for the meta request */
+AWS_S3_API
 void aws_s3_meta_request_cancel_pending_buffer_futures_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,

@@ -93,6 +93,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     }
 
     auto_ranged_get->part_size_set = part_size_set;
+    auto_ranged_get->force_dynamic_part_size = options->force_dynamic_part_size;
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);
 
@@ -820,7 +821,8 @@ static void s_s3_auto_ranged_get_request_finished(
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
 
-        if (!auto_ranged_get->part_size_set && !meta_request->client->part_size_set) {
+        if (auto_ranged_get->force_dynamic_part_size ||
+            (!auto_ranged_get->part_size_set && !meta_request->client->part_size_set)) {
             /* No part size has been set from user. Now we use the optimal part size based on the throughput and memory
              * limit */
             uint64_t out_request_optimal_range_size = 0;
@@ -829,8 +831,12 @@ static void s_s3_auto_ranged_get_request_finished(
                 auto_ranged_get->estimated_object_stored_part_size,
                 &out_request_optimal_range_size);
             if (!error) {
-                /* Override the part size to be  */
+                /* Override the part size to be optimal */
                 *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
+                if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT) {
+                    /* Update the first part size as well */
+                    first_part_size = meta_request->part_size;
+                }
             }
         }
 

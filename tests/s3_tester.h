@@ -204,6 +204,7 @@ struct aws_s3_tester_meta_request_options {
         bool recv_file_delete_on_failure;
         /* If larger than 0, create a pre-exist file with the length */
         uint64_t pre_exist_file_length;
+        bool force_dynamic_part_size;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -268,6 +269,10 @@ struct aws_s3_meta_request_test_results {
     int finished_response_status;
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
+
+    /* Record the status of checksum validation. */
+    bool did_validate;
+    enum aws_s3_checksum_algorithm validation_algorithm;
 
     /* Record data from progress_callback() */
     struct {
