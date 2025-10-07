@@ -5023,7 +5023,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     size_t stored_part_size = MB_TO_BYTES(15);
-    struct aws_s3_tester_client_options client_options = {};
+    struct aws_s3_tester_client_options client_options = {0};
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -5055,7 +5055,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .part_size = stored_part_size,
             .put_options =
                 {
-                    .object_size_mb = object_size_mb,
+                    .object_size_mb = (uint32_t)object_size_mb,
                     .object_path_override = object_path,
                     .file_on_disk = true,
                     .full_object_checksum = true,
@@ -5211,7 +5211,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
                 },
             .put_options =
                 {
-                    .object_size_mb = stored_part_size_mb,
+                    .object_size_mb = (uint32_t)stored_part_size_mb,
                     .object_path_override = object_path,
                     .file_on_disk = true,
                     .full_object_checksum = true,
