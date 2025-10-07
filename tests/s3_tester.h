@@ -160,6 +160,7 @@ struct aws_s3_tester_meta_request_options {
 
     /* Optional. Bucket for this request. If NULL, g_test_bucket_name will be used. */
     const struct aws_byte_cursor *bucket_name;
+    size_t part_size;
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
