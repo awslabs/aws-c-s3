@@ -64,10 +64,31 @@ const struct aws_byte_cursor g_user_agent_header_unknown = AWS_BYTE_CUR_INIT_FRO
 
 const uint32_t g_s3_max_num_upload_parts = 10000;
 const size_t g_s3_min_upload_part_size = MB_TO_BYTES(5);
-const size_t g_streaming_buffer_size = MB_TO_BYTES(8);
+
 const double g_default_throughput_target_gbps = 10.0;
-/* TODO: disable this threshold until we have a better option for threshold */
-const uint64_t g_streaming_object_size_threshold = UINT64_MAX;
+
+/**
+ * Streaming buffer size selection based on experimental results on EBS:
+ *
+ * - Too small buffer sizes (e.g., 16KiB) impact disk read performance,
+ *   achieving only 6.73 Gbps throughput from EBS.
+ * - Too large buffer sizes cause network connections to starve more easily
+ *   when disk reads cannot provide data fast enough.
+ * - 1MiB buffer size provides optimal balance: sufficient disk read throughput
+ *   while maintaining reasonable retry rates due to connection starvation.
+ */
+const size_t g_streaming_buffer_size = MB_TO_BYTES(1);
+
+/**
+ * The streaming approach reduces memory consumption without introducing unexpected errors
+ * or performance degradation.
+ *
+ * We start streaming for objects larger than 1TiB, with plans to lower this threshold in future iterations.
+ *
+ * The 1TiB threshold was chosen to minimize the blast radius of this behavioral change
+ * while still providing meaningful memory usage improvements for large objects.
+ */
+const uint64_t g_streaming_object_size_threshold = TB_TO_BYTES(1);
 
 /**
  * TODO: update this default part size 17/16 MiB based on S3 best practice.
