@@ -596,3 +596,8 @@ void aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics 
     AWS_PRECONDITION(out_part_number);
     *out_part_number = metrics->part_info_metrics.part_number;
 }
+
+bool aws_s3_request_metrics_get_memory_allocated_from_pool(const struct aws_s3_request_metrics *metrics) {
+    AWS_PRECONDITION(metrics);
+    return metrics->crt_info_metrics.memory_allocated_from_pool;
+}

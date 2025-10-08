@@ -1615,6 +1615,10 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 AWS_S3_API
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
 
+/* Get the memory for the request allocated from the pool or not. Cannot fail */
+AWS_S3_API
+bool aws_s3_request_metrics_get_memory_allocated_from_pool(const struct aws_s3_request_metrics *metrics);
+
 /* Get the beginning range of this part from request metrics. */
 AWS_S3_API
 void aws_s3_request_metrics_get_part_range_start(

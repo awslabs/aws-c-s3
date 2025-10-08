@@ -247,12 +247,7 @@ static void s_s3_test_meta_request_telemetry(
         AWS_FATAL_ASSERT(during_time == (end_time - start_time));
     }
 
-    enum aws_s3_request_type request_type;
-    aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    uint32_t retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
-
-    if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS && retry_attempt == 0 &&
-        (request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT || request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART)) {
+    if (aws_s3_request_metrics_get_memory_allocated_from_pool(metrics)) {
         uint64_t start_time = 0;
         uint64_t end_time = 0;
         uint64_t duration_time = 0;
@@ -582,12 +577,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
-    while (aws_array_list_length(&test_meta_request->synced_data.succeed_metrics) > 0) {
-        struct aws_s3_request_metrics *metrics = NULL;
-        aws_array_list_back(&test_meta_request->synced_data.succeed_metrics, (void **)&metrics);
-        aws_array_list_pop_back(&test_meta_request->synced_data.succeed_metrics);
-        aws_s3_request_metrics_release(metrics);
-    }
+    /* We don't need to release the metrics from the succeed list, since it's already released from the main list. */
     aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
 
     for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {

@@ -122,6 +122,8 @@ struct aws_s3_request_metrics {
         int error_code;
         /* Retry attempt. */
         uint32_t retry_attempt;
+        /* Is the memory for the request allocated from the buffer pool or not. */
+        bool memory_allocated_from_pool;
     } crt_info_metrics;
 
     struct {

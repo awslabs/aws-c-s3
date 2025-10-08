@@ -1984,6 +1984,7 @@ void s_acquire_mem_and_prepare_request(
 
         if (request->send_data.metrics) {
             struct aws_s3_request_metrics *metric = request->send_data.metrics;
+            metric->crt_info_metrics.memory_allocated_from_pool = true;
             aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.mem_acquire_start_timestamp_ns);
         }
 
