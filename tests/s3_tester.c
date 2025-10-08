@@ -251,7 +251,7 @@ static void s_s3_test_meta_request_telemetry(
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     uint32_t retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
 
-    if (aws_s3_request_metrics_get_error_code(metrics) == 200 && retry_attempt == 0 &&
+    if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS && retry_attempt == 0 &&
         (request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT || request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART)) {
         uint64_t start_time = 0;
         uint64_t end_time = 0;
@@ -266,6 +266,9 @@ static void s_s3_test_meta_request_telemetry(
 
     aws_s3_tester_lock_synced_data(tester);
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
+    if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS) {
+        aws_array_list_push_back(&meta_request_test_results->synced_data.succeed_metrics, &metrics);
+    }
     aws_s3_request_metrics_acquire(metrics);
     aws_s3_tester_unlock_synced_data(tester);
 }
@@ -560,6 +563,8 @@ void aws_s3_meta_request_test_results_init(
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
+    aws_array_list_init_dynamic(
+        &test_meta_request->synced_data.succeed_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -577,6 +582,13 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
+    while (aws_array_list_length(&test_meta_request->synced_data.succeed_metrics) > 0) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        aws_array_list_back(&test_meta_request->synced_data.succeed_metrics, (void **)&metrics);
+        aws_array_list_pop_back(&test_meta_request->synced_data.succeed_metrics);
+        aws_s3_request_metrics_release(metrics);
+    }
+    aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
 
     for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {
         aws_string_destroy(test_meta_request->upload_review.part_checksums_array[i]);

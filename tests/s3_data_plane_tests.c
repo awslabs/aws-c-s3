@@ -2029,7 +2029,7 @@ static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx)
 
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, meta_request_test_results.finished_error_code);
     /* Only one request was made to get the second part of the object */
-    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.succeed_metrics));
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
@@ -4997,7 +4997,7 @@ static int s_check_metrics_helper(
     struct aws_s3_request_metrics *metrics = NULL;
 
     /* First metrics should be the CreateMPU */
-    ASSERT_SUCCESS(aws_array_list_get_at(&test_results->synced_data.metrics, (void **)&metrics, index));
+    ASSERT_SUCCESS(aws_array_list_get_at(&test_results->synced_data.succeed_metrics, (void **)&metrics, index));
     enum aws_s3_request_type out_request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
     aws_s3_request_metrics_get_request_type(metrics, &out_request_type);
     uint32_t part_number = 0;
@@ -5087,7 +5087,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_TRUE(test_results.did_validate);
         ASSERT_UINT_EQUALS(AWS_SCA_CRC32, test_results.validation_algorithm);
         /* The tests has been done, we are safe to touch the synced data from test results. */
-        ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.metrics));
+        ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
         /* Second request made should be get with range and range from 0 to stored part size -1. */
@@ -5118,7 +5118,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             aws_s3_tester_send_meta_request_with_options(&tester, &get_options_without_checksum, &test_results));
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
-        ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.metrics));
+        ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was Get object and the range should be 0 to default range - 1 */
         ASSERT_SUCCESS(s_check_metrics_helper(
             &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
@@ -5153,7 +5153,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
         /* 4 parts in total for 30MiB with 8MiB part */
-        ASSERT_UINT_EQUALS(4, aws_array_list_length(&test_results.synced_data.metrics));
+        ASSERT_UINT_EQUALS(4, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         aws_s3_meta_request_test_results_clean_up(&test_results);
     }
     /* TODO: The MPU file still works with dynamic part size */
@@ -5245,7 +5245,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_TRUE(test_results.did_validate);
         ASSERT_UINT_EQUALS(AWS_SCA_CRC32, test_results.validation_algorithm);
         /* The tests has been done, we are safe to touch the synced data from test results. */
-        ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.metrics));
+        ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
         /* Second request made should be get with range and range from 0 to optimal part size. */
@@ -5274,7 +5274,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             aws_s3_tester_send_meta_request_with_options(&tester, &get_options_without_checksum, &test_results));
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
-        ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.metrics));
+        ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was Get object and the range should be 0 to default range - 1 */
         ASSERT_SUCCESS(s_check_metrics_helper(
             &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
@@ -5308,7 +5308,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
         /* 4 parts in total for 30MiB with 8MiB part */
-        ASSERT_UINT_EQUALS(4, aws_array_list_length(&test_results.synced_data.metrics));
+        ASSERT_UINT_EQUALS(4, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         aws_s3_meta_request_test_results_clean_up(&test_results);
     }
     /* TODO: The MPU file still works with dynamic part size */
@@ -5496,9 +5496,9 @@ static int s_test_s3_meta_request_default(struct aws_allocator *allocator, void 
 
     /* Check the size of the metrics should be the same as the number of
     requests, which should be 1 */
-    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.metrics));
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&meta_request_test_results.synced_data.succeed_metrics));
     struct aws_s3_request_metrics *metrics = NULL;
-    aws_array_list_back(&meta_request_test_results.synced_data.metrics, (void **)&metrics);
+    aws_array_list_back(&meta_request_test_results.synced_data.succeed_metrics, (void **)&metrics);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
 

@@ -286,6 +286,8 @@ struct aws_s3_meta_request_test_results {
     struct {
         /* The array_list of `struct aws_s3_request_metrics *` */
         struct aws_array_list metrics;
+        /* The array_list of `struct aws_s3_request_metrics *` that the request succeed, to avoid retries counts. */
+        struct aws_array_list succeed_metrics;
     } synced_data;
 
     /* record data from the upload_review_callback */
