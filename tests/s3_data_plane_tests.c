@@ -5023,7 +5023,10 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     size_t stored_part_size = MB_TO_BYTES(15);
-    struct aws_s3_tester_client_options client_options = {0};
+    /* Gives it a higher memory limit to allow parts around 15MiB */
+    struct aws_s3_tester_client_options client_options = {
+        .memory_limit_in_bytes = GB_TO_BYTES(2),
+    };
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
