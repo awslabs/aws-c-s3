@@ -39,13 +39,13 @@ struct aws_s3_request_metrics {
         /* The time stamp when the request completely finished (success or final failure), including all retry 
         * attempts. This is set when the request reaches its final state - either successful completion or 
         * exhaustion of all retry attempts. Timestamps are from `aws_high_res_clock_get_ticks`. This will 
-        * always be available. */
+        * be available with the last attempt. */
         int64_t request_end_timestamp_ns;
 
         /* The total time duration for the complete request lifecycle from initial start to final completion, 
         * including all retry attempts, backoff delays, and connection establishment time 
         * (request_end_timestamp_ns - request_start_timestamp_ns). This represents the end-to-end user 
-        * experience time. This will always be available. */
+        * experience time. This will be available with the last attempt. */
         int64_t request_duration_ns;
         
         /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps

@@ -1610,15 +1610,17 @@ void aws_s3_request_metrics_get_request_start_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_request_start_time);
 
-/* Get the request end timestamp from aws_s3_request_metrics. Always available. */
+/* Get the request end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
 AWS_S3_API
-void aws_s3_request_metrics_get_request_end_timestamp_ns(
+int aws_s3_request_metrics_get_request_end_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_request_end_time);
 
-/* Get the request duration from aws_s3_request_metrics. Always available. */
+/* Get the request duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
 AWS_S3_API
-void aws_s3_request_metrics_get_request_duration_ns(
+int aws_s3_request_metrics_get_request_duration_ns(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_request_duration);
 
