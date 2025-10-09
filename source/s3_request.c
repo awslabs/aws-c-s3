@@ -133,6 +133,9 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     } else{
         request->send_data.metrics->time_metrics.request_start_timestamp_ns = first_attempt_start_timestamp_ns;
     }
+
+    request->send_data.metrics->crt_info_metrics.part_number = request->part_number;
+
     aws_http_message_acquire(message);
 }
 
