@@ -377,12 +377,10 @@ struct aws_s3_client *aws_s3_client_new(
     uint64_t calculated_optimal_range_size = 0;
     if (aws_s3_calculate_client_optimal_range_size(
             mem_limit, client->ideal_connection_count, &calculated_optimal_range_size) != AWS_OP_SUCCESS) {
-        /* Fall back to default 8MiB if calculation fails */
-        calculated_optimal_range_size = 8ULL * 1024 * 1024; /* 8MiB */
+        /* Fall back to default if calculation fails */
+        calculated_optimal_range_size = g_default_part_size_fallback;
         AWS_LOGF_WARN(
-            AWS_LS_S3_CLIENT,
-            "id=%p: Failed to calculate optimal range size, falling back to default 8MiB",
-            (void *)client);
+            AWS_LS_S3_CLIENT, "id=%p: Failed to calculate optimal range size, falling back to default", (void *)client);
     }
     *(uint64_t *)&client->optimal_range_size = calculated_optimal_range_size;
 
