@@ -162,6 +162,8 @@ struct aws_s3_request_metrics {
         int error_code;
         /* Retry attempt. */
         uint32_t retry_attempt;
+        /* The part number if it is a multipart request */
+        uint32_t part_number;
     } crt_info_metrics;
 
     struct aws_ref_count ref_count;
