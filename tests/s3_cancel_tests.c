@@ -40,12 +40,48 @@ struct s3_cancel_test_user_data {
     bool abort_successful;
 };
 
-static bool s_s3_meta_request_update_cancel_test(
+/* TODO: this is an unfortunately copy/paste from `s_s3_auto_ranged_put_pause`, we need to hold the lock to invoke the
+ * pause for the test to avoid the checks changed after checking it and used afterward. In between move the
+ * synced_section from s_s3_auto_ranged_put_pause to a function that can be used here and copy/paste it here. I picked
+ * copy/paste it to avoid exposing a weird test only function to our API.  */
+static void s_pause_meta_request_synced(
     struct aws_s3_meta_request *meta_request,
-    uint32_t flags,
-    struct aws_s3_request **out_request) {
+    struct aws_s3_meta_request_resume_token **out_resume_token) {
+
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    /* upload can be in one of several states:
+     * - not started, i.e. we didn't even call crete mpu yet - return success,
+     *   token is NULL and cancel the upload
+     * - in the middle of upload - return success, create token and cancel
+     *     upload
+     * - complete MPU started - return success, generate token and try to cancel
+     *   complete MPU
+     */
+    if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
+
+        *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
+
+        (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+        (*out_resume_token)->multipart_upload_id =
+            aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
+        (*out_resume_token)->part_size = meta_request->part_size;
+        (*out_resume_token)->total_num_parts = auto_ranged_put->total_num_parts_from_content_length;
+        (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
+    }
+
+    /**
+     * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
+     * This allows the client to resume the upload later, setting the persistable state in the meta request options.
+     */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_PAUSED);
+}
+
+static bool s_s3_meta_request_cancel_test_synced_update_stub(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(out_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     struct aws_s3_meta_request_test_results *results = meta_request->user_data;
     struct aws_s3_tester *tester = results->tester;
@@ -56,8 +92,6 @@ static bool s_s3_meta_request_update_cancel_test(
 
     bool call_cancel_or_pause = false;
     bool block_update = false;
-
-    aws_s3_meta_request_lock_synced_data(meta_request);
 
     switch (cancel_test_user_data->type) {
         case S3_UPDATE_CANCEL_TYPE_NO_CANCEL:
@@ -131,23 +165,20 @@ static bool s_s3_meta_request_update_cancel_test(
             break;
     }
 
-    aws_s3_meta_request_unlock_synced_data(meta_request);
     if (call_cancel_or_pause) {
         if (cancel_test_user_data->pause) {
-            aws_s3_meta_request_pause(meta_request, &cancel_test_user_data->resume_token);
+            s_pause_meta_request_synced(meta_request, &cancel_test_user_data->resume_token);
         } else {
-            aws_s3_meta_request_cancel(meta_request);
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_CANCELED);
+            aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_CANCELED);
+            aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_CANCELED);
         }
     }
 
     if (block_update) {
         return true;
     }
-
-    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
-        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
-
-    return original_meta_request_vtable->update(meta_request, flags, out_request);
+    return false;
 }
 
 static void s_s3_meta_request_finished_request_cancel_test(
@@ -188,7 +219,7 @@ static struct aws_s3_meta_request *s_meta_request_factory_patch_update_cancel_te
 
     struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
         aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
-    patched_meta_request_vtable->update = s_s3_meta_request_update_cancel_test;
+    patched_meta_request_vtable->synced_update_stub = s_s3_meta_request_cancel_test_synced_update_stub;
     patched_meta_request_vtable->finished_request = s_s3_meta_request_finished_request_cancel_test;
 
     return meta_request;

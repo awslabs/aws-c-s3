@@ -122,6 +122,12 @@ struct aws_s3_meta_request_vtable {
 
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    /********************* TEST ONLY STUB **************************/
+    /* A stub to the update implementation from meta request with the lock held. Only for tests. */
+    bool (*synced_update_stub)(struct aws_s3_meta_request *meta_request);
+#endif
 };
 
 /**
@@ -407,9 +413,11 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
 /* Cancel the requests with cancellable HTTP stream for the meta request */
+AWS_S3_API
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Cancel the pending buffer futures for the meta request */
+AWS_S3_API
 void aws_s3_meta_request_cancel_pending_buffer_futures_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,

@@ -178,7 +178,10 @@ struct aws_s3_client_vtable {
         struct aws_http_connection *client_connection,
         const struct aws_http_make_request_options *options);
 
-    void (*after_prepare_upload_part_finish)(struct aws_s3_request *request, struct aws_http_message *message);
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    /********************* TEST ONLY STUB **************************/
+    void (*after_prepare_upload_part_finish_stub)(struct aws_s3_request *request, struct aws_http_message *message);
+#endif
 };
 
 struct aws_s3_upload_part_timeout_stats {
@@ -234,9 +237,16 @@ struct aws_s3_client {
      * to meta requests for use. */
     const size_t part_size;
 
+    bool part_size_set;
+
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
     const uint64_t max_part_size;
+
+    /* Calculated optimal range size for GET operations based on client configuration (memory limits, throughput
+     * targets). This is used when part_size is not explicitly configured, replacing the default with reasonable
+     * calculation. Value is calculated during client initialization and remains constant for the client's lifetime. */
+    const uint64_t optimal_range_size;
 
     /* File I/O options. */
     bool fio_options_set;
