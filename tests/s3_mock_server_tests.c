@@ -228,7 +228,7 @@ static int s_validate_complete_multipart_upload_metrics(struct aws_s3_request_me
     return AWS_OP_SUCCESS;
 }
 
-static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list, uint expected_length) {
+static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list, uint32_t expected_length) {
     /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
      * upload parts and one complete MPU */
     ASSERT_UINT_EQUALS(expected_length, aws_array_list_length(metrics_list));
