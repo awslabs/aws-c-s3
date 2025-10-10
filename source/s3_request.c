@@ -91,6 +91,13 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 
     if (request->num_times_prepared > 0 && request->send_data.metrics != NULL) {
         /* If there is a metrics from previous attempt, complete it now. */
+        
+        /* checkpoint retry_delay_end and calculate duration */
+        aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns);
+        request->send_data.metrics->time_metrics.retry_delay_duration_ns =
+            request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns -
+            request->send_data.metrics->time_metrics.retry_delay_start_timestamp_ns;
+
         struct aws_s3_request_metrics *metric = request->send_data.metrics;
         aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.end_timestamp_ns);
         metric->time_metrics.total_duration_ns =
@@ -118,14 +125,15 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
         aws_s3_request_clean_up_send_data(request);
 
         request->send_data.metrics = aws_s3_request_metrics_new(request->allocator);
+
+        // metrics persisted to the next request
         request->send_data.metrics->crt_info_metrics.retry_attempt = request->num_times_prepared;
+        request->send_data.metrics->time_metrics.request_start_timestamp_ns = first_attempt_start_timestamp_ns;
     }
 
     /* Set request start timestamp */
     if (first_attempt_start_timestamp_ns == -1) {
         aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.request_start_timestamp_ns);
-    } else {
-        request->send_data.metrics->time_metrics.request_start_timestamp_ns = first_attempt_start_timestamp_ns;
     }
 
     request->send_data.message = message;

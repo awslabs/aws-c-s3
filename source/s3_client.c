@@ -2460,6 +2460,7 @@ void aws_s3_client_notify_connection_finished(
         }
 
         /* Ask the retry strategy to schedule a retry of the request. */
+        aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.retry_delay_start_timestamp_ns);
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
 
