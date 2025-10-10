@@ -91,9 +91,10 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 
     if (request->num_times_prepared > 0 && request->send_data.metrics != NULL) {
         /* If there is a metrics from previous attempt, complete it now. */
-        
+
         /* checkpoint retry_delay_end and calculate duration */
-        aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns);
+        aws_high_res_clock_get_ticks(
+            (uint64_t *)&request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns);
         request->send_data.metrics->time_metrics.retry_delay_duration_ns =
             request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns -
             request->send_data.metrics->time_metrics.retry_delay_start_timestamp_ns;
@@ -104,7 +105,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
             metric->time_metrics.end_timestamp_ns - metric->time_metrics.start_timestamp_ns;
 
         if (metric->time_metrics.receive_start_timestamp_ns != -1) {
-            metric->time_metrics.service_call_duration_ns = 
+            metric->time_metrics.service_call_duration_ns =
                 metric->time_metrics.receive_start_timestamp_ns - metric->time_metrics.conn_acquire_start_timestamp_ns;
         }
 
@@ -239,37 +240,37 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *
     metrics->time_metrics.start_timestamp_ns = -1;
     metrics->time_metrics.end_timestamp_ns = -1;
     metrics->time_metrics.total_duration_ns = -1;
-    
+
     metrics->time_metrics.send_start_timestamp_ns = -1;
     metrics->time_metrics.send_end_timestamp_ns = -1;
     metrics->time_metrics.sending_duration_ns = -1;
-    
+
     metrics->time_metrics.receive_start_timestamp_ns = -1;
     metrics->time_metrics.receive_end_timestamp_ns = -1;
     metrics->time_metrics.receiving_duration_ns = -1;
-    
+
     metrics->time_metrics.sign_start_timestamp_ns = -1;
     metrics->time_metrics.sign_end_timestamp_ns = -1;
     metrics->time_metrics.signing_duration_ns = -1;
-    
+
     metrics->time_metrics.mem_acquire_start_timestamp_ns = -1;
     metrics->time_metrics.mem_acquire_end_timestamp_ns = -1;
     metrics->time_metrics.mem_acquire_duration_ns = -1;
-    
+
     metrics->time_metrics.deliver_start_timestamp_ns = -1;
     metrics->time_metrics.deliver_end_timestamp_ns = -1;
     metrics->time_metrics.deliver_duration_ns = -1;
-    
+
     metrics->time_metrics.conn_acquire_start_timestamp_ns = -1;
     metrics->time_metrics.conn_acquire_end_timestamp_ns = -1;
     metrics->time_metrics.conn_acquire_duration_ns = -1;
-    
+
     metrics->time_metrics.retry_delay_start_timestamp_ns = -1;
     metrics->time_metrics.retry_delay_end_timestamp_ns = -1;
     metrics->time_metrics.retry_delay_duration_ns = -1;
 
     metrics->time_metrics.service_call_duration_ns = -1;
-    
+
     metrics->req_resp_info_metrics.response_status = -1;
 
     aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy); /**/
