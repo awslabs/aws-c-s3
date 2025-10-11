@@ -37,7 +37,7 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
         ASSERT_SUCCESS(aws_s3_request_metrics_get_request_duration_ns(metrics, &duration));
         ASSERT_TRUE(duration > 0);
         ASSERT_UINT_EQUALS(end - start, duration);
-    } else{
+    } else {
         ASSERT_FAILS(aws_s3_request_metrics_get_request_end_timestamp_ns(metrics, &end));
         ASSERT_FAILS(aws_s3_request_metrics_get_request_duration_ns(metrics, &end));
     }
@@ -288,7 +288,7 @@ static int s_validate_retry_metrics(
 
     aws_hash_table_init(&hash_table, allocator, parts, aws_hash_ptr, aws_ptr_eq, NULL, NULL);
 
-    for (size_t i = (aws_array_list_length(metrics_list)); i-- > 0; ) {
+    for (size_t i = (aws_array_list_length(metrics_list)); i-- > 0;) {
         metrics = NULL;
         aws_array_list_get_at(metrics_list, (void **)&metrics, i);
         int was_created = -1;
