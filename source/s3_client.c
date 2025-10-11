@@ -2299,6 +2299,8 @@ static void s_s3_client_acquired_retry_token(
     /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage */
     aws_s3_client_acquire(client);
 
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns);
+
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);
 
@@ -2355,6 +2357,11 @@ static void s_s3_client_on_acquire_http_connection(
 
         goto error_retry;
     }
+
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_end_timestamp_ns);
+    request->send_data.metrics->time_metrics.conn_acquire_duration_ns =
+        request->send_data.metrics->time_metrics.conn_acquire_end_timestamp_ns -
+        request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns;
 
     connection->http_connection = incoming_http_connection;
     aws_s3_meta_request_send_request(meta_request, connection);
@@ -2455,6 +2462,8 @@ void aws_s3_client_notify_connection_finished(
         }
 
         /* Ask the retry strategy to schedule a retry of the request. */
+        aws_high_res_clock_get_ticks(
+            (uint64_t *)&request->send_data.metrics->time_metrics.retry_delay_start_timestamp_ns);
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
 
