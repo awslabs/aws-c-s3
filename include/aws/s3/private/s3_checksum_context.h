@@ -38,6 +38,9 @@ struct aws_s3_upload_request_checksum_context {
         bool checksum_calculated;
     } synced_data;
 
+    /* Checksum metrics pointer to request metrics */
+    int64_t *checksum_calc_duration_ns;
+
     /* Validation */
     size_t encoded_checksum_size;
 };

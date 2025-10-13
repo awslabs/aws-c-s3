@@ -9,6 +9,7 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <aws/common/clock.h>
 #include <inttypes.h>
 
 /* Dont use buffer pool when we know response size, and its below this number,
@@ -782,6 +783,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
         /* Check for checksums if requested to */
         if (meta_request->checksum_config.validate_response_checksum) {
+            aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.checksum_calc_start_timestamp_ns);
             if (aws_s3_check_headers_for_checksum(
                     meta_request,
                     request->send_data.response_headers,
@@ -791,6 +793,10 @@ static void s_s3_auto_ranged_get_request_finished(
                 error_code = aws_last_error_or_unknown();
                 goto update_synced_data;
             }
+            aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.checksum_calc_end_timestamp_ns);
+            request->send_data.metrics->time_metrics.checksum_calc_duration_ns =
+                request->send_data.metrics->time_metrics.checksum_calc_end_timestamp_ns -
+                request->send_data.metrics->time_metrics.checksum_calc_start_timestamp_ns;
         }
 
         if (!empty_file_error && meta_request->headers_callback != NULL) {

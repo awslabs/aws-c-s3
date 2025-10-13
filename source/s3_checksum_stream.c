@@ -6,6 +6,7 @@
 #include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include <aws/common/encoding.h>
+#include <aws/common/clock.h>
 #include <aws/io/stream.h>
 
 struct aws_checksum_stream {
@@ -34,7 +35,11 @@ static int s_aws_input_checksum_stream_seek(
 }
 
 static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
+    int64_t start_timestamp_ns, end_timestamp_ns;
+
     struct aws_checksum_stream *impl = AWS_CONTAINER_OF(stream, struct aws_checksum_stream, base);
+
+    aws_high_res_clock_get_ticks((uint64_t *) &start_timestamp_ns);
 
     size_t original_len = dest->len;
     if (aws_input_stream_read(impl->old_stream, dest)) {
@@ -77,6 +82,16 @@ static int s_aws_input_checksum_stream_read(struct aws_input_stream *stream, str
             }
         }
     }
+
+    aws_high_res_clock_get_ticks((uint64_t *) &end_timestamp_ns);
+
+    if (impl->context && impl->context->checksum_calc_duration_ns != NULL){
+        if (*impl->context->checksum_calc_duration_ns == -1){
+            *impl->context->checksum_calc_duration_ns = 0;
+        }
+        *impl->context->checksum_calc_duration_ns += end_timestamp_ns - start_timestamp_ns;
+    }
+
     return AWS_OP_SUCCESS;
 }
 

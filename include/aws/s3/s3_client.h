@@ -1604,6 +1604,21 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 AWS_S3_API
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
 
+AWS_S3_API
+int aws_s3_request_metrics_get_checksum_calc_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_checksum_calc_start_time);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_checksum_calc_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_checksum_calc_end_time);
+
+AWS_S3_API
+int aws_s3_request_metrics_get_checksum_calc_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_checksum_calc_duration);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 

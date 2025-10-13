@@ -357,6 +357,8 @@ static void s_s3_default_prepare_request_finish(
         /* Create checksum context from config if needed */
         struct aws_s3_upload_request_checksum_context *checksum_context =
             aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        
+        checksum_context->checksum_calc_duration_ns = &request->send_data.metrics->time_metrics.checksum_calc_duration_ns;
 
         aws_s3_message_util_assign_body(
             meta_request->allocator, &request->request_body, NULL, message, checksum_context);

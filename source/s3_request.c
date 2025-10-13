@@ -224,6 +224,10 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *
     metrics->time_metrics.deliver_end_timestamp_ns = -1;
     metrics->time_metrics.deliver_duration_ns = -1;
 
+    metrics->time_metrics.checksum_calc_start_timestamp_ns = -1;
+    metrics->time_metrics.checksum_calc_end_timestamp_ns = -1;
+    metrics->time_metrics.checksum_calc_duration_ns = -1;
+
     metrics->req_resp_info_metrics.response_status = -1;
 
     aws_ref_count_init(&metrics->ref_count, metrics, s_s3_request_metrics_destroy); /**/
@@ -568,4 +572,40 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics) {
     AWS_PRECONDITION(metrics);
     return metrics->crt_info_metrics.retry_attempt;
+}
+
+int aws_s3_request_metrics_get_checksum_calc_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_checksum_calc_start_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_checksum_calc_start_time);
+    if (metrics->time_metrics.checksum_calc_start_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_checksum_calc_start_time = metrics->time_metrics.checksum_calc_start_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_checksum_calc_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_checksum_calc_end_time) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_checksum_calc_end_time);
+    if (metrics->time_metrics.checksum_calc_end_timestamp_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_checksum_calc_end_time = metrics->time_metrics.checksum_calc_end_timestamp_ns;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_checksum_calc_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_checksum_duration) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_checksum_duration);
+    if (metrics->time_metrics.checksum_calc_duration_ns < 0) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_checksum_duration = metrics->time_metrics.checksum_calc_duration_ns;
+    return AWS_OP_SUCCESS;
 }

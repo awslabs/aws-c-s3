@@ -49,6 +49,9 @@ static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checks
     context->location = checksum_config->location;
     context->encoded_checksum_size = aws_get_digest_size_from_checksum_algorithm(context->algorithm);
 
+    /* initialize checksum calculation duration to NULL */
+    context->checksum_calc_duration_ns = NULL;
+
     /* Convert to base64 encoded size */
     size_t encoded_size = 0;
     if (aws_base64_compute_encoded_len(context->encoded_checksum_size, &encoded_size)) {

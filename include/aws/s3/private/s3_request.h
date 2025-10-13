@@ -90,6 +90,14 @@ struct aws_s3_request_metrics {
         /* The time duration for the request from start of delivery to finish of delivery (deliver_end_timestamp_ns -
          * deliver_start_timestamp_ns). When deliver_duration_ns is 0, means data not available. */
         int64_t deliver_duration_ns;
+        
+        /* The time stamp when checksum calculation started. -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
+        int64_t checksum_calc_start_timestamp_ns;
+        /* The time stamp when checksum calculation finished. -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
+        int64_t checksum_calc_end_timestamp_ns; /* Valid timestamps are from `aws_high_res_clock_get_ticks` */
+        /* The time duration for checksum calculation (checksum_calc_end_timestamp_ns - checksum_calc_start_timestamp_ns).
+         * When checksum_calc_end_timestamp_ns is -1, means data not available. Units are from `aws_high_res_clock_get_ticks` */
+        int64_t checksum_calc_duration_ns;
     } time_metrics;
 
     struct {
