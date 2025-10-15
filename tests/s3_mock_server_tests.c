@@ -329,6 +329,7 @@ TEST_CASE(multipart_upload_with_n_retries_mock_server) {
     struct aws_s3_tester_client_options client_options = {
         .part_size = MB_TO_BYTES(part_size),
         .tls_usage = AWS_S3_TLS_DISABLED,
+        .max_active_connections_override = 1,
     };
 
     struct aws_s3_client *client = NULL;
