@@ -1606,21 +1606,21 @@ uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_me
 
 /* Get the request start timestamp from aws_s3_request_metrics. Always available. */
 AWS_S3_API
-void aws_s3_request_metrics_get_request_start_timestamp_ns(
+void aws_s3_request_metrics_get_s3_request_first_attempt_start_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *out_request_start_time);
+    uint64_t *out_s3_request_first_attempt_start_time);
 
 /* Get the request end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
  * available. */
 AWS_S3_API
-int aws_s3_request_metrics_get_request_end_timestamp_ns(
+int aws_s3_request_metrics_get_s3_request_last_attempt_end_timestamp_ns(
     const struct aws_s3_request_metrics *metrics,
-    uint64_t *out_request_end_time);
+    uint64_t *out_s3_request_last_attempt_end_time);
 
 /* Get the request duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
  * available. */
 AWS_S3_API
-int aws_s3_request_metrics_get_request_duration_ns(
+int aws_s3_request_metrics_get_s3_request_total_duration_ns(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_request_duration);
 
