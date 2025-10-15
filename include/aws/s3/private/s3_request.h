@@ -44,8 +44,8 @@ struct aws_s3_request_metrics {
 
         /* The total time duration for the complete request lifecycle from initial start to final completion,
          * including all retry attempts, backoff delays, and connection establishment time
-         * (s3_request_last_attempt_end_timestamp_ns - s3_request_first_attempt_start_timestamp_ns). This represents the end-to-end user
-         * experience time. This will be available with the last attempt. */
+         * (s3_request_last_attempt_end_timestamp_ns - s3_request_first_attempt_start_timestamp_ns). This represents the
+         * end-to-end user experience time. This will be available with the last attempt. */
         int64_t s3_request_total_duration_ns;
 
         /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps

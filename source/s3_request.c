@@ -121,7 +121,8 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
 
         // metrics persisted to the next request
         request->send_data.metrics->crt_info_metrics.retry_attempt = request->num_times_prepared;
-        request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns = first_attempt_start_timestamp_ns;
+        request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns =
+            first_attempt_start_timestamp_ns;
     }
 
     request->send_data.message = message;

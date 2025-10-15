@@ -144,7 +144,7 @@ static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metr
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, aws_s3_request_metrics_get_error_code(metrics));
 
     /* Get all those time stamp */
-    ASSERT_SUCCESS(s_validate_time_metrics(metrics, true));    
+    ASSERT_SUCCESS(s_validate_time_metrics(metrics, true));
 
     enum aws_s3_request_type request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
@@ -176,7 +176,7 @@ static int s_validate_upload_part_metrics(struct aws_s3_request_metrics *metrics
     ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
     ASSERT_STR_EQUALS("UploadPart", aws_string_c_str(operation_name));
 
-    ASSERT_SUCCESS(s_validate_time_metrics(metrics, is_last_attempt));   
+    ASSERT_SUCCESS(s_validate_time_metrics(metrics, is_last_attempt));
 
     return AWS_OP_SUCCESS;
 }
@@ -231,18 +231,19 @@ static int s_validate_retry_metrics(
     aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
     ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
 
-
     /* All of the middle should be Upload Parts*/
     size_t failed_count = 0;
-    for(size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i = i + expected_failures + 1){
+    for (size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i = i + expected_failures + 1) {
         aws_array_list_get_at(metrics_list, &metrics, i);
-        for(size_t j = i; j < i + expected_failures; j++){
-            aws_array_list_get_at(metrics_list, &metrics2, j+1);
+        for (size_t j = i; j < i + expected_failures; j++) {
+            aws_array_list_get_at(metrics_list, &metrics2, j + 1);
             ASSERT_TRUE(metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
             failed_count++;
             aws_array_list_get_at(metrics_list, (void **)&metrics, j);
             ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, false));
-            ASSERT_INT_EQUALS(metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns, metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
+            ASSERT_INT_EQUALS(
+                metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns,
+                metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
             ASSERT_INT_EQUALS(metrics->crt_info_metrics.retry_attempt + 1, metrics2->crt_info_metrics.retry_attempt);
             metrics = metrics2;
         }
