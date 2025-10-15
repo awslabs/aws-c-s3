@@ -34,19 +34,19 @@ struct aws_s3_request_metrics {
         /* The time stamp when the request was first initiated by the client, including the very first attempt.
          * This timestamp is set once at the beginning and never updated during retries. Timestamps are from
          * `aws_high_res_clock_get_ticks`. This will always be available. */
-        int64_t request_start_timestamp_ns;
+        int64_t s3_request_first_attempt_start_timestamp_ns;
 
         /* The time stamp when the request completely finished (success or final failure), including all retry
          * attempts. This is set when the request reaches its final state - either successful completion or
          * exhaustion of all retry attempts. Timestamps are from `aws_high_res_clock_get_ticks`. This will
          * be available with the last attempt. */
-        int64_t request_end_timestamp_ns;
+        int64_t s3_request_last_attempt_end_timestamp_ns;
 
         /* The total time duration for the complete request lifecycle from initial start to final completion,
          * including all retry attempts, backoff delays, and connection establishment time
-         * (request_end_timestamp_ns - request_start_timestamp_ns). This represents the end-to-end user
+         * (s3_request_last_attempt_end_timestamp_ns - s3_request_first_attempt_start_timestamp_ns). This represents the end-to-end user
          * experience time. This will be available with the last attempt. */
-        int64_t request_duration_ns;
+        int64_t s3_request_total_duration_ns;
 
         /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps
          * are from `aws_high_res_clock_get_ticks`. This will always be available. */
@@ -164,8 +164,6 @@ struct aws_s3_request_metrics {
         int error_code;
         /* Retry attempt. */
         uint32_t retry_attempt;
-        /* The part number if it is a multipart request */
-        uint32_t part_number;
     } crt_info_metrics;
 
     struct aws_ref_count ref_count;
@@ -176,6 +174,17 @@ struct aws_s3_request {
 
     /* Linked list node used for queuing. */
     struct aws_linked_list_node node;
+
+    /* Timestamp when retry attempt started. Overwritten on each retry and copied to new attempt's setup data.
+     * -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
+    int64_t retry_start_timestamp_ns;
+    /* Timestamp when retry attempt ended. Overwritten on each retry and copied to new attempt's setup data.
+     * -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
+    int64_t retry_end_timestamp_ns;
+    /* Time duration for retry attempt (retry_end_timestamp_ns - retry_start_timestamp_ns).
+     * Overwritten on each retry and copied to new attempt's setup data.
+     * When retry_end_timestamp_ns is -1, means data not available. */
+    int64_t retry_duration_ns;
 
     /* Linked list node used for tracking the request is active from HTTP level. */
     struct aws_linked_list_node cancellable_http_streams_list_node;

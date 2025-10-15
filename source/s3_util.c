@@ -723,17 +723,6 @@ void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, str
         metrics->time_metrics.total_duration_ns =
             metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
 
-        if (metrics->time_metrics.receive_start_timestamp_ns != -1) {
-            metrics->time_metrics.service_call_duration_ns = metrics->time_metrics.receive_start_timestamp_ns -
-                                                             metrics->time_metrics.conn_acquire_start_timestamp_ns;
-        }
-
-        if (metrics->crt_info_metrics.error_code != AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
-            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.request_end_timestamp_ns);
-            metrics->time_metrics.request_duration_ns =
-                metrics->time_metrics.request_end_timestamp_ns - metrics->time_metrics.request_start_timestamp_ns;
-        }
-
         if (meta_request->telemetry_callback != NULL) {
             struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
             event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metrics);
