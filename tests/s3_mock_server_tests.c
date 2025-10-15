@@ -28,18 +28,18 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
     bool is_success = (error_code == AWS_ERROR_SUCCESS);
 
     /* Always available */
-    aws_s3_request_metrics_get_request_start_timestamp_ns(metrics, &start);
+    aws_s3_request_metrics_get_s3_request_first_attempt_start_timestamp_ns(metrics, &start);
     ASSERT_TRUE(start > 0);
     /* Available on last attempt only */
     if (is_last_attempt) {
-        ASSERT_SUCCESS(aws_s3_request_metrics_get_request_end_timestamp_ns(metrics, &end));
+        ASSERT_SUCCESS(aws_s3_request_metrics_get_s3_request_last_attempt_end_timestamp_ns(metrics, &end));
         ASSERT_TRUE(end > 0);
-        ASSERT_SUCCESS(aws_s3_request_metrics_get_request_duration_ns(metrics, &duration));
+        ASSERT_SUCCESS(aws_s3_request_metrics_get_s3_request_total_duration_ns(metrics, &duration));
         ASSERT_TRUE(duration > 0);
         ASSERT_UINT_EQUALS(end - start, duration);
     } else {
-        ASSERT_FAILS(aws_s3_request_metrics_get_request_end_timestamp_ns(metrics, &end));
-        ASSERT_FAILS(aws_s3_request_metrics_get_request_duration_ns(metrics, &end));
+        ASSERT_FAILS(aws_s3_request_metrics_get_s3_request_last_attempt_end_timestamp_ns(metrics, &end));
+        ASSERT_FAILS(aws_s3_request_metrics_get_s3_request_total_duration_ns(metrics, &end));
     }
 
     aws_s3_request_metrics_get_start_timestamp_ns(metrics, &start);
@@ -87,8 +87,7 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
         ASSERT_TRUE(duration > 0);
         ASSERT_UINT_EQUALS(end - start, duration);
 
-        if (metrics->req_resp_info_metrics.request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
-            metrics->crt_info_metrics.part_number > 0) {
+        if (metrics->req_resp_info_metrics.request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
             ASSERT_SUCCESS(aws_s3_request_metrics_get_delivery_start_timestamp_ns(metrics, &start));
             ASSERT_TRUE(start > 0);
             ASSERT_SUCCESS(aws_s3_request_metrics_get_delivery_end_timestamp_ns(metrics, &end));
@@ -99,7 +98,7 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
         }
     }
 
-    if (!is_last_attempt) {
+    if (metrics->crt_info_metrics.retry_attempt > 0) {
         ASSERT_SUCCESS(aws_s3_request_metrics_get_retry_delay_start_timestamp_ns(metrics, &start));
         ASSERT_TRUE(start > 0);
         ASSERT_SUCCESS(aws_s3_request_metrics_get_retry_delay_end_timestamp_ns(metrics, &end));
@@ -107,6 +106,10 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
         ASSERT_SUCCESS(aws_s3_request_metrics_get_retry_delay_duration_ns(metrics, &duration));
         ASSERT_TRUE(duration > 0);
         ASSERT_UINT_EQUALS(end - start, duration);
+    } else {
+        ASSERT_FAILS(aws_s3_request_metrics_get_retry_delay_start_timestamp_ns(metrics, &start));
+        ASSERT_FAILS(aws_s3_request_metrics_get_retry_delay_end_timestamp_ns(metrics, &end));
+        ASSERT_FAILS(aws_s3_request_metrics_get_retry_delay_duration_ns(metrics, &duration));
     }
 
     return AWS_OP_SUCCESS;
@@ -141,51 +144,8 @@ static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metr
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, aws_s3_request_metrics_get_error_code(metrics));
 
     /* Get all those time stamp */
-    uint64_t time_stamp = 0;
+    ASSERT_SUCCESS(s_validate_time_metrics(metrics, true));    
 
-    aws_s3_request_metrics_get_request_start_timestamp_ns(metrics, &time_stamp);
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    aws_s3_request_metrics_get_request_end_timestamp_ns(metrics, &time_stamp);
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    aws_s3_request_metrics_get_request_duration_ns(metrics, &time_stamp);
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-
-    aws_s3_request_metrics_get_start_timestamp_ns(metrics, &time_stamp);
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    aws_s3_request_metrics_get_end_timestamp_ns(metrics, &time_stamp);
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    aws_s3_request_metrics_get_total_duration_ns(metrics, &time_stamp);
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_send_start_timestamp_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_send_end_timestamp_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_sending_duration_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_receive_start_timestamp_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_receive_end_timestamp_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_receiving_duration_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
-
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_service_call_duration_ns(metrics, &time_stamp));
-    ASSERT_FALSE(time_stamp == 0);
-    time_stamp = 0;
     enum aws_s3_request_type request_type = 0;
     aws_s3_request_metrics_get_request_type(metrics, &request_type);
     ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, request_type);
@@ -197,7 +157,7 @@ static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metr
     return AWS_OP_SUCCESS;
 }
 
-static int s_validate_upload_part_metrics(struct aws_s3_request_metrics *metrics) {
+static int s_validate_upload_part_metrics(struct aws_s3_request_metrics *metrics, bool is_last_attempt) {
     struct aws_http_headers *response_headers = NULL;
     struct aws_byte_cursor header_value;
     enum aws_s3_request_type request_type = 0;
@@ -216,6 +176,8 @@ static int s_validate_upload_part_metrics(struct aws_s3_request_metrics *metrics
     ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
     ASSERT_STR_EQUALS("UploadPart", aws_string_c_str(operation_name));
 
+    ASSERT_SUCCESS(s_validate_time_metrics(metrics, is_last_attempt));   
+
     return AWS_OP_SUCCESS;
 }
 
@@ -227,6 +189,8 @@ static int s_validate_complete_multipart_upload_metrics(struct aws_s3_request_me
     ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD, request_type);
     ASSERT_SUCCESS(aws_s3_request_metrics_get_operation_name(metrics, &operation_name));
     ASSERT_STR_EQUALS("CompleteMultipartUpload", aws_string_c_str(operation_name));
+
+    ASSERT_SUCCESS(s_validate_time_metrics(metrics, true));
 
     return AWS_OP_SUCCESS;
 }
@@ -245,7 +209,7 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
     for (size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i++) {
         metrics = NULL;
         aws_array_list_get_at(metrics_list, (void **)&metrics, i);
-        ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics));
+        ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true)); /* assuming all requests were success */
     }
 
     /* Last metrics should be CompleteMPU*/
@@ -262,48 +226,36 @@ static int s_validate_retry_metrics(
     uint32_t parts,
     struct aws_allocator *allocator) {
     struct aws_s3_request_metrics *metrics = NULL, *metrics2 = NULL;
+
+    /* First metrics should be the CreateMPU */
+    aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
+    ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
+
+
+    /* All of the middle should be Upload Parts*/
     size_t failed_count = 0;
-
-    for (size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i++) {
-        metrics = NULL;
-        aws_array_list_get_at(metrics_list, (void **)&metrics, i);
-        if (aws_s3_request_metrics_get_error_code(metrics) != AWS_ERROR_SUCCESS) {
+    for(size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i = i + expected_failures + 1){
+        aws_array_list_get_at(metrics_list, &metrics, i);
+        for(size_t j = i; j < i + expected_failures; j++){
+            aws_array_list_get_at(metrics_list, &metrics2, j+1);
+            ASSERT_TRUE(metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
             failed_count++;
+            aws_array_list_get_at(metrics_list, (void **)&metrics, j);
+            ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, false));
+            ASSERT_INT_EQUALS(metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns, metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
+            ASSERT_INT_EQUALS(metrics->crt_info_metrics.retry_attempt + 1, metrics2->crt_info_metrics.retry_attempt);
+            metrics = metrics2;
         }
-        if (metrics->crt_info_metrics.part_number != 0) {
-            for (size_t j = i + 1; j < aws_array_list_length(metrics_list); j++) {
-                metrics2 = NULL;
-                aws_array_list_get_at(metrics_list, (void **)&metrics2, j);
-                if (metrics2->crt_info_metrics.part_number == metrics->crt_info_metrics.part_number) {
-                    ASSERT_INT_EQUALS(
-                        metrics2->time_metrics.request_start_timestamp_ns,
-                        metrics->time_metrics.request_start_timestamp_ns);
-                }
-            }
-        }
+        ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true));
     }
-
-    // verify time metrics
-    struct aws_hash_table hash_table;
-
-    aws_hash_table_init(&hash_table, allocator, parts, aws_hash_ptr, aws_ptr_eq, NULL, NULL);
-
-    for (size_t i = (aws_array_list_length(metrics_list)); i-- > 0;) {
-        metrics = NULL;
-        aws_array_list_get_at(metrics_list, (void **)&metrics, i);
-        int was_created = -1;
-        aws_hash_table_put(
-            &hash_table, (void *)(uintptr_t)metrics->crt_info_metrics.part_number, (void *)(uintptr_t)1, &was_created);
-        if (was_created == 1 || metrics->crt_info_metrics.part_number == 0) {
-            ASSERT_SUCCESS(s_validate_time_metrics(metrics, true));
-        } else {
-            ASSERT_SUCCESS(s_validate_time_metrics(metrics, false));
-        }
-    }
-
-    aws_hash_table_clean_up(&hash_table);
 
     ASSERT_UINT_EQUALS(expected_failures * parts, failed_count);
+
+    /* Last metrics should be CompleteMPU*/
+    metrics = NULL;
+    aws_array_list_get_at(metrics_list, (void **)&metrics, aws_array_list_length(metrics_list) - 1);
+    ASSERT_SUCCESS(s_validate_complete_multipart_upload_metrics(metrics));
+
     return AWS_OP_SUCCESS;
 }
 
@@ -409,9 +361,6 @@ TEST_CASE(multipart_upload_with_n_retries_mock_server) {
         // check if number of metrics received for each part is n
         aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-        ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(
-            &meta_request_test_results.synced_data.metrics,
-            parts * 2 + (parts > 1 ? 2 : 0) /*1 create, 1 complete, 2 parts with 4 retries each*/));
         uint32_t expected_failures = (uint32_t)(uintptr_t)tester.user_data - 1;
         ASSERT_SUCCESS(s_validate_retry_metrics(
             &meta_request_test_results.synced_data.metrics, expected_failures, parts, allocator));
