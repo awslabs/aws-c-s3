@@ -35,6 +35,10 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->operation_name = aws_s3_request_type_to_operation_name_static_string(request_type);
 
+    request->retry_start_timestamp_ns = -1;
+    request->retry_end_timestamp_ns = -1;
+    request->retry_duration_ns = -1;
+
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
     request->should_allocate_buffer_from_pool = (flags & AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL) != 0;
