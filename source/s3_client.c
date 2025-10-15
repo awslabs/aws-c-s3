@@ -2462,8 +2462,7 @@ void aws_s3_client_notify_connection_finished(
         }
 
         /* Ask the retry strategy to schedule a retry of the request. */
-        aws_high_res_clock_get_ticks(
-            (uint64_t *)&request->retry_start_timestamp_ns);
+        aws_high_res_clock_get_ticks((uint64_t *)&request->retry_start_timestamp_ns);
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
 
@@ -2485,8 +2484,11 @@ void aws_s3_client_notify_connection_finished(
 
 reset_connection:
 
-    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
-    request->send_data.metrics->time_metrics.s3_request_total_duration_ns = request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns - request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+    aws_high_res_clock_get_ticks(
+        (uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+    request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
+        request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
+        request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
 
     if (connection->retry_token != NULL) {
         /* If we have a retry token and successfully finished, record that success. */

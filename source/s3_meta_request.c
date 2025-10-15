@@ -1518,10 +1518,10 @@ static void s_s3_meta_request_stream_metrics(
     s3_metrics->time_metrics.send_end_timestamp_ns = http_metrics->send_end_timestamp_ns;
     s3_metrics->time_metrics.sending_duration_ns = http_metrics->sending_duration_ns;
     s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
-    
+
     if (s3_metrics->time_metrics.receive_start_timestamp_ns != -1) {
-        s3_metrics->time_metrics.service_call_duration_ns =
-            s3_metrics->time_metrics.receive_start_timestamp_ns - s3_metrics->time_metrics.conn_acquire_start_timestamp_ns;
+        s3_metrics->time_metrics.service_call_duration_ns = s3_metrics->time_metrics.receive_start_timestamp_ns -
+                                                            s3_metrics->time_metrics.conn_acquire_start_timestamp_ns;
     }
 
     s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
