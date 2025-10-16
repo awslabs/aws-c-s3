@@ -223,8 +223,7 @@ static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_lis
 static int s_validate_retry_metrics(
     struct aws_array_list *metrics_list,
     uint32_t expected_failures,
-    uint32_t parts,
-    struct aws_allocator *allocator) {
+    uint32_t parts) {
     struct aws_s3_request_metrics *metrics = NULL, *metrics2 = NULL;
 
     /* First metrics should be the CreateMPU */
@@ -365,7 +364,7 @@ TEST_CASE(multipart_upload_with_n_retries_mock_server) {
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
         uint32_t expected_failures = (uint32_t)(uintptr_t)tester.user_data - 1;
         ASSERT_SUCCESS(s_validate_retry_metrics(
-            &meta_request_test_results.synced_data.metrics, expected_failures, parts, allocator));
+            &meta_request_test_results.synced_data.metrics, expected_failures, parts));
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     }

@@ -145,6 +145,8 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
+        /* The the extended request ID header value. */
+        struct aws_string *amz_id_2;
         /* S3 operation name for the request */
         struct aws_string *operation_name;
         /* The type of request made */

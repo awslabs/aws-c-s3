@@ -219,6 +219,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
     aws_string_destroy(metrics->req_resp_info_metrics.host_address);
     aws_string_destroy(metrics->req_resp_info_metrics.request_id);
+    aws_string_destroy(metrics->req_resp_info_metrics.amz_id_2);
     aws_string_destroy(metrics->req_resp_info_metrics.operation_name);
     aws_string_destroy(metrics->crt_info_metrics.ip_address);
 
