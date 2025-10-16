@@ -1380,6 +1380,10 @@ static int s_s3_meta_request_incoming_headers(
         }
         if (request->send_data.amz_id_2 == NULL && aws_byte_cursor_eq(name, &g_amz_id_2_header_name)) {
             request->send_data.amz_id_2 = aws_string_new_from_cursor(connection->request->allocator, value);
+            if (collect_metrics) {
+                request->send_data.metrics->req_resp_info_metrics.amz_id_2 =
+                    aws_string_new_from_cursor(connection->request->allocator, value);
+            }
         }
         if (collect_metrics) {
             aws_http_headers_add(request->send_data.metrics->req_resp_info_metrics.response_headers, *name, *value);
@@ -1518,6 +1522,12 @@ static void s_s3_meta_request_stream_metrics(
     s3_metrics->time_metrics.send_end_timestamp_ns = http_metrics->send_end_timestamp_ns;
     s3_metrics->time_metrics.sending_duration_ns = http_metrics->sending_duration_ns;
     s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
+
+    if (s3_metrics->time_metrics.receive_start_timestamp_ns != -1) {
+        s3_metrics->time_metrics.service_call_duration_ns = s3_metrics->time_metrics.receive_start_timestamp_ns -
+                                                            s3_metrics->time_metrics.conn_acquire_start_timestamp_ns;
+    }
+
     s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
     s3_metrics->time_metrics.receiving_duration_ns = http_metrics->receiving_duration_ns;
 
@@ -1902,6 +1912,7 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
             aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
             metrics->time_metrics.total_duration_ns =
                 metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
         }
 
         if (meta_request->telemetry_callback != NULL) {

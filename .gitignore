@@ -71,3 +71,4 @@ benchmarks/dashboard-stack/package-lock.json
 
 # virtual environment
 .venv/
+.cache/
