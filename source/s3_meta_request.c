@@ -1380,6 +1380,10 @@ static int s_s3_meta_request_incoming_headers(
         }
         if (request->send_data.amz_id_2 == NULL && aws_byte_cursor_eq(name, &g_amz_id_2_header_name)) {
             request->send_data.amz_id_2 = aws_string_new_from_cursor(connection->request->allocator, value);
+            if (collect_metrics) {
+                request->send_data.metrics->req_resp_info_metrics.amz_id_2 =
+                    aws_string_new_from_cursor(connection->request->allocator, value);
+            }
         }
         if (collect_metrics) {
             aws_http_headers_add(request->send_data.metrics->req_resp_info_metrics.response_headers, *name, *value);

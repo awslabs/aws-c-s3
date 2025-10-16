@@ -141,7 +141,7 @@ struct aws_s3_tester_client_options {
     uint32_t setup_region : 1;
     uint32_t use_proxy : 1;
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
-    size_t max_active_connections_override;
+    uint32_t max_active_connections_override;
     void *factory_user_data;
 };
 
