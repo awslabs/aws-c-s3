@@ -1387,8 +1387,8 @@ static int s_s3_meta_request_incoming_headers(
             request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
             uint64_t object_range_start = 0;
             uint64_t object_range_end = 0;
-            if (aws_s3_parse_content_range_cursor(
-                    *value, &object_range_start, &object_range_end, NULL /*Object Size*/)) {
+            uint64_t object_size = 0;
+            if (aws_s3_parse_content_range_cursor(*value, &object_range_start, &object_range_end, &object_size)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Could not parse content range header (%s)",
@@ -1398,7 +1398,12 @@ static int s_s3_meta_request_incoming_headers(
             } else {
                 if (request->part_range_end != 0) {
                     AWS_FATAL_ASSERT(request->part_range_start == object_range_start);
-                    AWS_FATAL_ASSERT(request->part_range_end == object_range_end);
+                    if (request->part_range_end != object_range_end) {
+                        /* In the case where the object size is less than the range requested, it will return the bytes
+                         * to the object size. Range is inclusive */
+                        AWS_FATAL_ASSERT(object_range_start + object_size - 1 == object_range_end);
+                        AWS_FATAL_ASSERT(request->part_range_end > object_range_end);
+                    }
                 }
             }
         }
