@@ -1284,7 +1284,8 @@ static bool s_header_value_from_list(
     return false;
 }
 
-static void s_get_part_response_headers_checksum_helper(
+/* Return if we found the checksum from headers or not. */
+static bool s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
@@ -1308,9 +1309,10 @@ static void s_get_part_response_headers_checksum_helper(
                     aws_checksum_new(meta_request->allocator, algorithm);
                 AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 static int s_s3_meta_request_incoming_headers(
@@ -1355,9 +1357,26 @@ static int s_s3_meta_request_incoming_headers(
 
     if (successful_response && meta_request->checksum_config.validate_response_checksum &&
         request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
-        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` :) */
+        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` */
         s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
+
+#if DEBUG_BUILD
+    /* Only perform this validation during debug build, since it's a programming bug and "expensive" for each response
+     * received */
+    if (successful_response && request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
+        uint64_t object_size = 0;
+        uint64_t object_range_start = 0;
+        uint64_t object_range_end = 0;
+        if (aws_s3_parse_content_range_response_header(
+                meta_request->allocator, headers, &object_range_start, &object_range_end, &object_size) ==
+            AWS_OP_SUCCESS) {
+            /* Validate that the content-range response matches the request. */
+            AWS_ASSERT(request->part_range_start == object_range_start);
+            AWS_ASSERT(request->part_range_end == object_range_end);
+        }
+    }
+#endif /* DEBUG_BUILD */
 
     /* Only record headers if an error has taken place, or if the request_desc has asked for them. */
     bool should_record_headers = !successful_response || request->record_response_headers;
@@ -1963,6 +1982,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 AWS_ASSERT(request->part_number >= 1);
+                /* Make sure the response body is delivered in the sequential order */
+                AWS_FATAL_ASSERT(request->part_range_start == meta_request->io_threaded_data.next_deliver_range_start);
+                meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
                     if (meta_request->meta_request_level_running_response_sum) {

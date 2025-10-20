@@ -277,6 +277,9 @@ struct aws_s3_meta_request {
          * This is an optimization, we could have just copied the array when the task runs,
          * but swapping two array-lists back and forth avoids an allocation. */
         struct aws_array_list event_delivery_array;
+
+        /* The range start for the next response body delivery */
+        uint64_t next_deliver_range_start;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
