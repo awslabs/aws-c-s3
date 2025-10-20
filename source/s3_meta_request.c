@@ -1396,8 +1396,10 @@ static int s_s3_meta_request_incoming_headers(
                     aws_error_str(aws_last_error()));
                 return AWS_OP_ERR;
             } else {
-                AWS_FATAL_ASSERT(request->part_range_start == object_range_start);
-                AWS_FATAL_ASSERT(request->part_range_end == object_range_end);
+                if (request->part_range_end != 0) {
+                    AWS_FATAL_ASSERT(request->part_range_start == object_range_start);
+                    AWS_FATAL_ASSERT(request->part_range_end == object_range_end);
+                }
             }
         }
 
@@ -1983,6 +1985,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 AWS_ASSERT(request->part_number >= 1);
+                if (request->part_number == 1) {
+                    meta_request->io_threaded_data.next_deliver_range_start = request->part_range_start;
+                }
                 /* Make sure the response body is delivered in the sequential order */
                 AWS_FATAL_ASSERT(request->part_range_start == meta_request->io_threaded_data.next_deliver_range_start);
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
