@@ -487,6 +487,14 @@ static bool s_s3_auto_ranged_put_update(
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
 
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+        if (meta_request->vtable->synced_update_stub && meta_request->vtable->synced_update_stub(meta_request)) {
+            /* TEST ONLY, allow test to stub here. */
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            return true;
+        }
+#endif
+
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             /* If resuming and list part has not been sent, do it now. */
             if (!auto_ranged_put->synced_data.list_parts_state.started) {
@@ -1248,10 +1256,13 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
         aws_future_http_message_set_error(part_prep->on_complete, aws_last_error());
         goto on_done;
     }
-    if (client->vtable->after_prepare_upload_part_finish) {
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    if (client->vtable->after_prepare_upload_part_finish_stub) {
         /* TEST ONLY, allow test to stub here. */
-        client->vtable->after_prepare_upload_part_finish(request, message);
+        client->vtable->after_prepare_upload_part_finish_stub(request, message);
     }
+#endif
 
     /* Success! */
     aws_future_http_message_set_result_by_move(part_prep->on_complete, &message);
@@ -1779,6 +1790,8 @@ static void s_s3_auto_ranged_put_request_finished(
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
+/* NOTES: the implementation has been copy/pasted to `s_pause_meta_request_synced` for testing purpose, if changed made
+ * here, please update the other function correspondingly. */
 static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {

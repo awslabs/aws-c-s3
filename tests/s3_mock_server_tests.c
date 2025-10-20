@@ -487,7 +487,7 @@ TEST_CASE(multipart_upload_checksum_with_retry_before_finish_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->after_prepare_upload_part_finish =
+    patched_client_vtable->after_prepare_upload_part_finish_stub =
         s_after_prepare_upload_part_finish_retry_before_finish_sending;
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
@@ -547,7 +547,7 @@ TEST_CASE(multipart_upload_checksum_with_retry_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->after_prepare_upload_part_finish = s_after_prepare_upload_part_finish;
+    patched_client_vtable->after_prepare_upload_part_finish_stub = s_after_prepare_upload_part_finish;
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
     {
@@ -629,7 +629,7 @@ TEST_CASE(multipart_upload_checksum_fio_with_retry_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->after_prepare_upload_part_finish =
+    patched_client_vtable->after_prepare_upload_part_finish_stub =
         s_after_prepare_upload_part_finish_retry_before_finish_sending;
     struct aws_s3_file_io_options fio_opts = {
         .should_stream = true,

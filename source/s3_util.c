@@ -90,6 +90,25 @@ const size_t g_streaming_buffer_size = MB_TO_BYTES(1);
  */
 const uint64_t g_streaming_object_size_threshold = TB_TO_BYTES(1);
 
+/**
+ * TODO: update this default part size 17/16 MiB based on S3 best practice.
+ * Default part size is 8 MiB to reach the best performance from the experiments we had.
+ * Default max part size is 5GiB as the current server limit.
+ **/
+const uint64_t g_default_part_size_fallback = MB_TO_BYTES(8);
+const uint64_t g_default_max_part_size = 5368709120ULL;
+
+/* TODO: Use a reasonable alignment with the update of the buffer pool */
+const uint64_t g_s3_optimal_range_size_alignment = 1;
+/**
+ * The most parts in memory will be:
+ * - All downloaded parts to deliver them in the right order (download)
+ * - All parts read into memory for preparing for the HTTP level (upload)
+ * - All transferring parts in HTTP
+ * So, it gives us at most 3 × (the max range size) × (concurrency) in memory.
+ */
+static const uint32_t s_optimal_range_size_memory_divisor = 3;
+
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
     AWS_PRECONDITION(dest);
@@ -398,44 +417,57 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     aws_byte_buf_clean_up(&user_agent_buffer);
 }
 
-int aws_s3_parse_content_range_response_header(
-    struct aws_allocator *allocator,
-    struct aws_http_headers *response_headers,
+int aws_s3_parse_content_range_cursor(
+    struct aws_byte_cursor content_range_cursor,
     uint64_t *out_range_start,
     uint64_t *out_range_end,
     uint64_t *out_object_size) {
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(response_headers);
-
-    struct aws_byte_cursor content_range_header_value;
-
-    if (aws_http_headers_get(response_headers, g_content_range_header_name, &content_range_header_value)) {
-        aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
-        return AWS_OP_ERR;
-    }
-
-    int result = AWS_OP_ERR;
-
-    uint64_t range_start = 0;
-    uint64_t range_end = 0;
-    uint64_t object_size = 0;
-
-    struct aws_string *content_range_header_value_str =
-        aws_string_new_from_cursor(allocator, &content_range_header_value);
 
     /* Expected Format of header is: "bytes StartByte-EndByte/TotalObjectSize" */
-    int num_fields_found = sscanf(
-        (const char *)content_range_header_value_str->bytes,
-        "bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64,
-        &range_start,
-        &range_end,
-        &object_size);
 
-    if (num_fields_found < 3) {
-        aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
-        goto clean_up;
+    /* Check if it starts with "bytes " */
+    struct aws_byte_cursor bytes_prefix = aws_byte_cursor_from_c_str("bytes ");
+    if (!aws_byte_cursor_starts_with(&content_range_cursor, &bytes_prefix)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
 
+    /* Skip past "bytes " */
+    aws_byte_cursor_advance(&content_range_cursor, bytes_prefix.len);
+
+    /* Parse range start */
+    struct aws_byte_cursor range_start_cursor;
+    AWS_ZERO_STRUCT(range_start_cursor);
+    if (!aws_byte_cursor_next_split(&content_range_cursor, '-', &range_start_cursor)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    uint64_t range_start = 0;
+    if (aws_byte_cursor_utf8_parse_u64(range_start_cursor, &range_start)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+    /* Move the cursor to pass the `-` */
+    aws_byte_cursor_advance(&content_range_cursor, range_start_cursor.len + 1);
+    /* Parse range end */
+    struct aws_byte_cursor range_end_cursor;
+    AWS_ZERO_STRUCT(range_end_cursor);
+    if (!aws_byte_cursor_next_split(&content_range_cursor, '/', &range_end_cursor)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    uint64_t range_end = 0;
+    if (aws_byte_cursor_utf8_parse_u64(range_end_cursor, &range_end)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    /* Move the cursor to pass the `/` */
+    aws_byte_cursor_advance(&content_range_cursor, range_end_cursor.len + 1);
+    /* Parse object size (remaining part) */
+    uint64_t object_size = 0;
+    if (aws_byte_cursor_utf8_parse_u64(content_range_cursor, &object_size)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    /* Set output values */
     if (out_range_start != NULL) {
         *out_range_start = range_start;
     }
@@ -448,13 +480,23 @@ int aws_s3_parse_content_range_response_header(
         *out_object_size = object_size;
     }
 
-    result = AWS_OP_SUCCESS;
+    return AWS_OP_SUCCESS;
+}
 
-clean_up:
-    aws_string_destroy(content_range_header_value_str);
-    content_range_header_value_str = NULL;
+int aws_s3_parse_content_range_response_header(
+    struct aws_http_headers *response_headers,
+    uint64_t *out_range_start,
+    uint64_t *out_range_end,
+    uint64_t *out_object_size) {
+    AWS_ERROR_PRECONDITION(response_headers);
+    struct aws_byte_cursor content_range_header_value;
 
-    return result;
+    if (aws_http_headers_get(response_headers, g_content_range_header_name, &content_range_header_value)) {
+        aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
+        return AWS_OP_ERR;
+    }
+    return aws_s3_parse_content_range_cursor(
+        content_range_header_value, out_range_start, out_range_end, out_object_size);
 }
 
 int aws_s3_parse_content_length_response_header(
@@ -785,5 +827,196 @@ int aws_s3_check_headers_for_checksum(
         }
     }
     *out_checksum = NULL;
+    return AWS_OP_SUCCESS;
+}
+
+static void s_s3_range_size_alignment(uint64_t *range_size) {
+    /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
+     * what's the best round up for the part size. */
+    if (*range_size > g_s3_optimal_range_size_alignment && *range_size % g_s3_optimal_range_size_alignment != 0) {
+        /* Only apply alignment for sizes above minimum to avoid excessive rounding */
+        *range_size = ((*range_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
+    }
+}
+
+int aws_s3_calculate_client_optimal_range_size(
+    uint64_t memory_limit_in_bytes,
+    uint32_t max_connections,
+    uint64_t *out_client_optimal_range_size) {
+
+    AWS_PRECONDITION(out_client_optimal_range_size);
+
+    /* Validate input parameters */
+    if (memory_limit_in_bytes == 0 || max_connections == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Invalid parameters for client optimal range size calculation: memory_limit=%" PRIu64
+            ", max_connections=%" PRIu32,
+            memory_limit_in_bytes,
+            max_connections);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* Calculate memory-constrained range size using the formula:
+     * MemoryLimit / concurrency / s_optimal_range_size_memory_divisor
+     *
+     * The division by s_optimal_range_size_memory_divisor accounts for:
+     * - All downloaded parts to deliver them in the right order (download)
+     * - All parts read into memory for preparing for the HTTP level (upload)
+     * - All transferring parts in HTTP
+     */
+    uint64_t memory_constrained_size = memory_limit_in_bytes / max_connections / s_optimal_range_size_memory_divisor;
+
+    /* Apply minimum constraint first */
+    uint64_t optimal_size = memory_constrained_size;
+    if (optimal_size < g_default_part_size_fallback) {
+        optimal_size = g_default_part_size_fallback;
+    } else {
+        s_s3_range_size_alignment(&optimal_size);
+    }
+
+    /* Apply maximum constraint */
+    if (optimal_size > g_default_max_part_size) {
+        optimal_size = g_default_max_part_size;
+    }
+
+    *out_client_optimal_range_size = optimal_size;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_GENERAL,
+        "Calculated client optimal range size: memory_limit=%" PRIu64 ", max_connections=%" PRIu32
+        ", client_optimal_range_size=%" PRIu64,
+        memory_limit_in_bytes,
+        max_connections,
+        optimal_size);
+
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_calculate_request_optimal_range_size(
+    uint64_t client_optimal_range_size,
+    uint64_t estimated_object_stored_part_size,
+    uint64_t *out_request_optimal_range_size) {
+
+    AWS_PRECONDITION(out_request_optimal_range_size);
+
+    /* Validate input parameters */
+    if (client_optimal_range_size == 0) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_GENERAL,
+            "Invalid client_optimal_range_size for request optimal range size calculation: %" PRIu64,
+            client_optimal_range_size);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* Apply the minimum constraint from the formula:
+     * min(client_optimal_range_size, estimated_object_stored_part_size)
+     * If estimated_object_stored_part_size is 0 (unknown), use client_optimal_range_size
+     */
+    uint64_t optimal_size = client_optimal_range_size;
+    if (estimated_object_stored_part_size > 0 && estimated_object_stored_part_size < client_optimal_range_size) {
+        optimal_size = estimated_object_stored_part_size;
+
+        /* Apply minimum constraint first to avoid excessive alignment */
+        if (optimal_size < g_default_part_size_fallback) {
+            optimal_size = g_default_part_size_fallback;
+        } else {
+            s_s3_range_size_alignment(&optimal_size);
+        }
+    }
+
+    *out_request_optimal_range_size = optimal_size;
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_GENERAL,
+        "Calculated request optimal range size: client_optimal_range_size=%" PRIu64 ", estimated_part_size=%" PRIu64
+        ", request_optimal_range_size=%" PRIu64,
+        client_optimal_range_size,
+        estimated_object_stored_part_size,
+        optimal_size);
+
+    return AWS_OP_SUCCESS;
+}
+
+static bool s_is_quote_or_space_char(uint8_t c) {
+    return c == '"' || c == ' ';
+}
+
+int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uint32_t *out_num_parts) {
+
+    AWS_PRECONDITION(out_num_parts);
+    /* Strip quotes if present (ETags often come wrapped in quotes) */
+    struct aws_byte_cursor etag_cursor = aws_byte_cursor_trim_pred(&etag_header_value, s_is_quote_or_space_char);
+
+    /* Handle empty or invalid ETag */
+    if (etag_cursor.len == 0) {
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Empty ETag header value");
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* Use aws_byte_cursor_next_split to iterate through dash-separated parts */
+    struct aws_byte_cursor substr = {0};
+    struct aws_byte_cursor remaining_cursor = etag_cursor;
+    int split_count = 0;
+    struct aws_byte_cursor parts_count = {0};
+
+    /* Count splits and extract parts */
+    while (aws_byte_cursor_next_split(&remaining_cursor, '-', &substr)) {
+        split_count++;
+        if (split_count == 2) {
+            /* The ETag should follow the pattern <hash>-<parts_count>, so the second part is the parts count. */
+            parts_count = substr;
+        }
+        if (split_count > 2) {
+            /* More than 2 parts - invalid format */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Invalid ETag format - multiple dashes found: " PRInSTR,
+                AWS_BYTE_CURSOR_PRI(etag_header_value));
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+    }
+
+    if (split_count == 1) {
+        /* No dash found - this is a single-part upload */
+        *out_num_parts = 1;
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_GENERAL, "Single-part ETag detected (no dash): " PRInSTR, AWS_BYTE_CURSOR_PRI(etag_cursor));
+        return AWS_OP_SUCCESS;
+    } else if (split_count == 2) {
+        /* Exactly one dash - multipart upload format */
+        /* Parse the number after the dash */
+        uint64_t num_parts_u64;
+        if (aws_byte_cursor_utf8_parse_u64(parts_count, &num_parts_u64)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Invalid ETag format - could not parse number of parts: " PRInSTR,
+                AWS_BYTE_CURSOR_PRI(parts_count));
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+
+        /* Validate the number is within reasonable bounds */
+        if (num_parts_u64 == 0 || num_parts_u64 > g_s3_max_num_upload_parts) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Invalid number of parts in ETag: %" PRIu64 " (must be 1-%" PRIu32 ")",
+                num_parts_u64,
+                g_s3_max_num_upload_parts);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+
+        *out_num_parts = (uint32_t)num_parts_u64;
+    } else {
+        /* Should not reach here due to early exit above, but handle just in case */
+        AWS_LOGF_ERROR(AWS_LS_S3_GENERAL, "Unexpected split count: %d", split_count);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_GENERAL,
+        "Extracted %" PRIu32 " parts from ETag: " PRInSTR,
+        *out_num_parts,
+        AWS_BYTE_CURSOR_PRI(etag_header_value));
+
     return AWS_OP_SUCCESS;
 }
