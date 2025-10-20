@@ -613,11 +613,7 @@ static int s_discover_object_range_and_size(
                     object_range_end = content_length - 1; /* range-end is inclusive */
                 }
             } else if (aws_s3_parse_content_range_response_header(
-                           meta_request->allocator,
-                           request->send_data.response_headers,
-                           &object_range_start,
-                           &object_range_end,
-                           &object_size)) {
+                           request->send_data.response_headers, &object_range_start, &object_range_end, &object_size)) {
 
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
@@ -648,7 +644,7 @@ static int s_discover_object_range_and_size(
             if (first_part_size > 0) {
                 /* Parse the object size from the part response. */
                 if (aws_s3_parse_content_range_response_header(
-                        meta_request->allocator, request->send_data.response_headers, NULL, NULL, &object_size)) {
+                        request->send_data.response_headers, NULL, NULL, &object_size)) {
 
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
@@ -693,11 +689,7 @@ static int s_discover_object_range_and_size(
 
             /* Parse the object size from the part response. */
             if (aws_s3_parse_content_range_response_header(
-                    meta_request->allocator,
-                    request->send_data.response_headers,
-                    &object_range_start,
-                    &object_range_end,
-                    &object_size)) {
+                    request->send_data.response_headers, &object_range_start, &object_range_end, &object_size)) {
 
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,

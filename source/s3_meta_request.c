@@ -1361,23 +1361,6 @@ static int s_s3_meta_request_incoming_headers(
         s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
 
-#if DEBUG_BUILD
-    /* Only perform this validation during debug build, since it's a programming bug and "expensive" for each response
-     * received */
-    if (successful_response && request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
-        uint64_t object_size = 0;
-        uint64_t object_range_start = 0;
-        uint64_t object_range_end = 0;
-        if (aws_s3_parse_content_range_response_header(
-                meta_request->allocator, headers, &object_range_start, &object_range_end, &object_size) ==
-            AWS_OP_SUCCESS) {
-            /* Validate that the content-range response matches the request. */
-            AWS_ASSERT(request->part_range_start == object_range_start);
-            AWS_ASSERT(request->part_range_end == object_range_end);
-        }
-    }
-#endif /* DEBUG_BUILD */
-
     /* Only record headers if an error has taken place, or if the request_desc has asked for them. */
     bool should_record_headers = !successful_response || request->record_response_headers;
 
@@ -1400,6 +1383,24 @@ static int s_s3_meta_request_incoming_headers(
         if (request->send_data.amz_id_2 == NULL && aws_byte_cursor_eq(name, &g_amz_id_2_header_name)) {
             request->send_data.amz_id_2 = aws_string_new_from_cursor(connection->request->allocator, value);
         }
+        if (aws_byte_cursor_eq(name, &g_content_range_header_name) && successful_response &&
+            request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
+            uint64_t object_range_start = 0;
+            uint64_t object_range_end = 0;
+            if (aws_s3_parse_content_range_cursor(
+                    *value, &object_range_start, &object_range_end, NULL /*Object Size*/)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Could not parse content range header (%s)",
+                    (void *)meta_request,
+                    aws_error_str(aws_last_error()));
+                return AWS_OP_ERR;
+            } else {
+                AWS_FATAL_ASSERT(request->part_range_start == object_range_start);
+                AWS_FATAL_ASSERT(request->part_range_end == object_range_end);
+            }
+        }
+
         if (collect_metrics) {
             aws_http_headers_add(request->send_data.metrics->req_resp_info_metrics.response_headers, *name, *value);
         }

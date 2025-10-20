@@ -249,8 +249,17 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
  * object-size. All output arguments are optional.*/
 AWS_S3_API
 int aws_s3_parse_content_range_response_header(
-    struct aws_allocator *allocator,
     struct aws_http_headers *response_headers,
+    uint64_t *out_range_start,
+    uint64_t *out_range_end,
+    uint64_t *out_object_size);
+
+/* Given a Content-Range header value as a byte cursor, parses the range-start, range-end and
+ * object-size. All output arguments are optional. This is an optimized version that doesn't
+ * require string allocation. */
+AWS_S3_API
+int aws_s3_parse_content_range_cursor(
+    struct aws_byte_cursor content_range_cursor,
     uint64_t *out_range_start,
     uint64_t *out_range_end,
     uint64_t *out_object_size);

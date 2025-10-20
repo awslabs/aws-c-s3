@@ -314,7 +314,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
     {
         uint64_t object_size = 0ULL;
 
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        ASSERT_FAILS(aws_s3_parse_content_range_response_header(response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
     }
 
@@ -326,8 +326,8 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
         uint64_t range_start = 0ULL;
         uint64_t range_end = 0ULL;
 
-        ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(
-            allocator, response_headers, &range_start, &range_end, &object_size));
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_range_response_header(response_headers, &range_start, &range_end, &object_size));
         ASSERT_TRUE(range_start == 55ULL);
         ASSERT_TRUE(range_end == 100ULL);
         ASSERT_TRUE(object_size == 12345ULL);
@@ -337,8 +337,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
     {
         uint64_t object_size = 0ULL;
 
-        ASSERT_SUCCESS(
-            aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(object_size == 12345ULL);
     }
 
@@ -347,7 +346,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
     /* Try to parse an invalid header. */
     {
         uint64_t object_size = 0ULL;
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        ASSERT_FAILS(aws_s3_parse_content_range_response_header(response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
 

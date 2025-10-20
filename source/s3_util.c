@@ -417,44 +417,52 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     aws_byte_buf_clean_up(&user_agent_buffer);
 }
 
-int aws_s3_parse_content_range_response_header(
-    struct aws_allocator *allocator,
-    struct aws_http_headers *response_headers,
+int aws_s3_parse_content_range_cursor(
+    struct aws_byte_cursor content_range_cursor,
     uint64_t *out_range_start,
     uint64_t *out_range_end,
     uint64_t *out_object_size) {
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(response_headers);
-
-    struct aws_byte_cursor content_range_header_value;
-
-    if (aws_http_headers_get(response_headers, g_content_range_header_name, &content_range_header_value)) {
-        aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
-        return AWS_OP_ERR;
-    }
-
-    int result = AWS_OP_ERR;
-
-    uint64_t range_start = 0;
-    uint64_t range_end = 0;
-    uint64_t object_size = 0;
-
-    struct aws_string *content_range_header_value_str =
-        aws_string_new_from_cursor(allocator, &content_range_header_value);
 
     /* Expected Format of header is: "bytes StartByte-EndByte/TotalObjectSize" */
-    int num_fields_found = sscanf(
-        (const char *)content_range_header_value_str->bytes,
-        "bytes %" PRIu64 "-%" PRIu64 "/%" PRIu64,
-        &range_start,
-        &range_end,
-        &object_size);
 
-    if (num_fields_found < 3) {
-        aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
-        goto clean_up;
+    /* Check if it starts with "bytes " */
+    struct aws_byte_cursor bytes_prefix = aws_byte_cursor_from_c_str("bytes ");
+    if (!aws_byte_cursor_starts_with(&content_range_cursor, &bytes_prefix)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
 
+    /* Skip past "bytes " */
+    aws_byte_cursor_advance(&content_range_cursor, bytes_prefix.len);
+
+    /* Parse range start */
+    struct aws_byte_cursor range_start_cursor;
+    if (!aws_byte_cursor_next_split(&content_range_cursor, '-', &range_start_cursor)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    uint64_t range_start = 0;
+    if (aws_byte_cursor_utf8_parse_u64(range_start_cursor, &range_start)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    /* Parse range end */
+    struct aws_byte_cursor range_end_cursor;
+    if (!aws_byte_cursor_next_split(&content_range_cursor, '/', &range_end_cursor)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    uint64_t range_end = 0;
+    if (aws_byte_cursor_utf8_parse_u64(range_end_cursor, &range_end)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    /* Parse object size (remaining part) */
+    uint64_t object_size = 0;
+    if (aws_byte_cursor_utf8_parse_u64(content_range_cursor, &object_size)) {
+        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+    }
+
+    /* Set output values */
     if (out_range_start != NULL) {
         *out_range_start = range_start;
     }
@@ -467,13 +475,23 @@ int aws_s3_parse_content_range_response_header(
         *out_object_size = object_size;
     }
 
-    result = AWS_OP_SUCCESS;
+    return AWS_OP_SUCCESS;
+}
 
-clean_up:
-    aws_string_destroy(content_range_header_value_str);
-    content_range_header_value_str = NULL;
+int aws_s3_parse_content_range_response_header(
+    struct aws_http_headers *response_headers,
+    uint64_t *out_range_start,
+    uint64_t *out_range_end,
+    uint64_t *out_object_size) {
+    AWS_ERROR_PRECONDITION(response_headers);
+    struct aws_byte_cursor content_range_header_value;
 
-    return result;
+    if (aws_http_headers_get(response_headers, g_content_range_header_name, &content_range_header_value)) {
+        aws_raise_error(AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
+        return AWS_OP_ERR;
+    }
+    return aws_s3_parse_content_range_cursor(
+        content_range_header_value, out_range_start, out_range_end, out_object_size);
 }
 
 int aws_s3_parse_content_length_response_header(
