@@ -436,6 +436,7 @@ int aws_s3_parse_content_range_cursor(
 
     /* Parse range start */
     struct aws_byte_cursor range_start_cursor;
+    AWS_ZERO_STRUCT(range_start_cursor);
     if (!aws_byte_cursor_next_split(&content_range_cursor, '-', &range_start_cursor)) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
@@ -444,9 +445,11 @@ int aws_s3_parse_content_range_cursor(
     if (aws_byte_cursor_utf8_parse_u64(range_start_cursor, &range_start)) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
-
+    /* Move the cursor to pass the `-` */
+    aws_byte_cursor_advance(&content_range_cursor, range_start_cursor.len + 1);
     /* Parse range end */
     struct aws_byte_cursor range_end_cursor;
+    AWS_ZERO_STRUCT(range_end_cursor);
     if (!aws_byte_cursor_next_split(&content_range_cursor, '/', &range_end_cursor)) {
         return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
@@ -456,6 +459,8 @@ int aws_s3_parse_content_range_cursor(
         return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
 
+    /* Move the cursor to pass the `/` */
+    aws_byte_cursor_advance(&content_range_cursor, range_end_cursor.len + 1);
     /* Parse object size (remaining part) */
     uint64_t object_size = 0;
     if (aws_byte_cursor_utf8_parse_u64(content_range_cursor, &object_size)) {
