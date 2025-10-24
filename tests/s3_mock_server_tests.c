@@ -434,6 +434,7 @@ TEST_CASE(multipart_upload_with_n_retries_mock_server) {
 }
 
 static void s_upload_part_force_fail(struct aws_s3_request *request, struct aws_http_message *message) {
+    (void)request;
     if (message == NULL) {
         return;
     }
