@@ -139,7 +139,8 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     request->send_data.metrics->time_metrics.retry_delay_start_timestamp_ns = request->retry_start_timestamp_ns;
     request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns = request->retry_end_timestamp_ns;
     if (request->retry_end_timestamp_ns != -1) {
-        request->send_data.metrics->time_metrics.retry_delay_duration_ns = request->retry_end_timestamp_ns - request->retry_start_timestamp_ns;
+        request->send_data.metrics->time_metrics.retry_delay_duration_ns =
+            request->retry_end_timestamp_ns - request->retry_start_timestamp_ns;
     }
 
     /* set pointer to request */
@@ -569,15 +570,10 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_request_id(
-    const struct aws_s3_request_metrics *metrics,
-    const struct aws_string **out_request_id) {
+int aws_s3_request_metrics_get_request_id(const struct aws_s3_request_metrics *metrics, size_t *out_request_id) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(out_request_id);
-    if (metrics->crt_info_metrics.request_id == NULL) {
-        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
-    }
-    *out_request_id = metrics->crt_info_metrics.request_id;
+    *out_request_id = (size_t)metrics->crt_info_metrics.request_id;
     return AWS_OP_SUCCESS;
 }
 

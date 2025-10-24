@@ -262,7 +262,7 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
  *         https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
  *         If an error occurs, call aws_raise_error(E) with a proper error code and return NULL.
  */
-typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request *meta_request,
+typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request * meta_request,
                                                                          void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
@@ -429,7 +429,7 @@ typedef int(aws_s3_meta_request_upload_review_fn)(
  * @return The aws_s3express_credentials_provider.
  */
 typedef struct aws_s3express_credentials_provider *(
-    aws_s3express_provider_factory_fn)(struct aws_allocator *allocator,
+    aws_s3express_provider_factory_fn)(struct aws_allocator * allocator,
                                        struct aws_s3_client *client,
                                        aws_simple_completion_callback on_provider_shutdown_callback,
                                        void *shutdown_user_data,
@@ -1570,7 +1570,7 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
 
 /* Get the pointer to the request that attempt was made from. Always available. */
 AWS_S3_API
-int aws_s3_request_metrics_get_request_id(const struct aws_s3_request_metrics *metrics, size_t *request_id);
+int aws_s3_request_metrics_get_request_id(const struct aws_s3_request_metrics *metrics, size_t *out_request_id);
 
 /* Get the thread ID of the thread that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if
  * data not available */

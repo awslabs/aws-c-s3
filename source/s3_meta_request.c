@@ -1374,7 +1374,7 @@ static int s_s3_meta_request_incoming_headers(
         if (request->send_data.request_id == NULL && aws_byte_cursor_eq(name, &g_request_id_header_name)) {
             request->send_data.request_id = aws_string_new_from_cursor(connection->request->allocator, value);
             if (collect_metrics) {
-                request->send_data.metrics->req_resp_info_metrics.request_id =
+                request->send_data.metrics->req_resp_info_metrics.request_attempt_id =
                     aws_string_new_from_cursor(connection->request->allocator, value);
             }
         }
