@@ -6,6 +6,7 @@
 #include <aws/s3/private/s3_default_buffer_pool.h>
 
 #include <aws/common/array_list.h>
+#include <aws/common/hash_table.h>
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/system_info.h>
@@ -50,6 +51,7 @@ struct aws_s3_default_buffer_ticket {
     size_t chunks_used;
     bool forced;
     struct aws_s3_buffer_pool *pool;
+    bool is_special_block; /* True if this ticket is from a special-sized block */
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
@@ -80,6 +82,12 @@ static const size_t s_max_chunk_size_for_buffer_reuse = MB_TO_BYTES(64);
  * we still consider 1GiB available for normal buffer usage. */
 static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage = 80;
 
+/* Structure to track special-sized blocks */
+struct s3_special_block_list {
+    uint64_t buffer_size;         /* Size of buffers in this list */
+    struct aws_array_list blocks; /* Array of uint8_t* pointers to allocated blocks */
+};
+
 struct aws_s3_default_buffer_pool {
     struct aws_allocator *base_allocator;
     struct aws_mutex mutex;
@@ -97,6 +105,10 @@ struct aws_s3_default_buffer_pool {
     size_t primary_reserved;
     size_t primary_used;
 
+    size_t special_blocks_allocated;
+    size_t special_blocks_reserved;
+    size_t special_blocks_used;
+
     size_t secondary_reserved;
     size_t secondary_used;
 
@@ -105,6 +117,11 @@ struct aws_s3_default_buffer_pool {
     struct aws_array_list blocks;
 
     struct aws_linked_list pending_reserves;
+
+    /* Special-sized blocks: hash table mapping size -> struct s3_special_block_list * */
+    /* TODO: let's discuss about the special list lifetime. Should we just keep it with the memory pool? Concern is that
+     * the pool will live with the client, and may result in all sorts of special lists to be around. */
+    struct aws_hash_table special_blocks;
 };
 
 struct s3_pending_reserve {
@@ -264,6 +281,7 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
      * being wasted. */
     buffer_pool->primary_size_cutoff = chunk_size * 4;
     buffer_pool->mem_limit = adjusted_mem_lim;
+
     int mutex_error = aws_mutex_init(&buffer_pool->mutex);
     AWS_FATAL_ASSERT(mutex_error == AWS_OP_SUCCESS);
 
@@ -274,6 +292,16 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         sizeof(struct s3_buffer_pool_block));
 
     aws_linked_list_init(&buffer_pool->pending_reserves);
+
+    /* Initialize special blocks hash table */
+    aws_hash_table_init(
+        &buffer_pool->special_blocks,
+        buffer_pool->base_allocator,
+        0, /* initial capacity */
+        aws_hash_uint64_t_by_identity,
+        aws_hash_compare_uint64_t_eq,
+        NULL,
+        NULL);
 
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
@@ -311,6 +339,23 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
         aws_mem_release(buffer_pool->base_allocator, pending);
     }
 
+    /* Clean up special blocks */
+    for (struct aws_hash_iter iter = aws_hash_iter_begin(&buffer_pool->special_blocks); !aws_hash_iter_done(&iter);
+         aws_hash_iter_next(&iter)) {
+        struct s3_special_block_list *special_list = iter.element.value;
+
+        /* Free all allocated blocks */
+        for (size_t i = 0; i < aws_array_list_length(&special_list->blocks); ++i) {
+            uint8_t *block_ptr = NULL;
+            aws_array_list_get_at(&special_list->blocks, &block_ptr, i);
+            aws_mem_release(buffer_pool->base_allocator, block_ptr);
+        }
+
+        aws_array_list_clean_up(&special_list->blocks);
+        aws_mem_release(buffer_pool->base_allocator, special_list);
+    }
+    aws_hash_table_clean_up(&buffer_pool->special_blocks);
+
     aws_mutex_clean_up(&buffer_pool->mutex);
     struct aws_allocator *base = buffer_pool->base_allocator;
     aws_mem_release(base, buffer_pool);
@@ -331,6 +376,30 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
             ++i;
         }
     }
+    for (struct aws_hash_iter iter = aws_hash_iter_begin(&buffer_pool->special_blocks); !aws_hash_iter_done(&iter);
+         aws_hash_iter_next(&iter)) {
+        /* Try to trim all special blocks */
+        struct s3_special_block_list *special_list = iter.element.value;
+
+        for (size_t i = 0; i < aws_array_list_length(&special_list->blocks);) {
+            struct s3_buffer_pool_block *block;
+            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+
+            if (block->alloc_bit_mask == 0) {
+                buffer_pool->special_blocks_allocated -= block->block_size;
+                aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
+                aws_array_list_erase(&special_list->blocks, i);
+                /* do not increment since we just released element */
+            } else {
+                ++i;
+            }
+        }
+        if (aws_array_list_length(&special_list->blocks) == 0 && buffer_pool->special_blocks_reserved == 0) {
+            /* Remove the special list from the map, since nothing reserved for the list and no allocation as well. */
+            aws_hash_table_remove(&buffer_pool->special_blocks, &special_list->buffer_size, NULL, NULL);
+            aws_mem_release(buffer_pool->base_allocator, special_list);
+        }
+    }
 }
 
 void aws_s3_default_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
@@ -340,7 +409,7 @@ void aws_s3_default_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
     aws_mutex_unlock(&pool->mutex);
 }
 
-struct aws_s3_default_buffer_ticket *s_try_reserve(
+struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_reserve_meta meta);
 
@@ -350,94 +419,129 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
     struct aws_s3_buffer_pool *pool = ticket->pool;
     struct aws_s3_default_buffer_pool *buffer_pool = pool->impl;
 
-    if (ticket->ptr == NULL) {
-        /* Ticket was never used, make sure to clean up reserved count. */
-        aws_mutex_lock(&buffer_pool->mutex);
-        if (ticket->size <= buffer_pool->primary_size_cutoff) {
-            buffer_pool->primary_reserved -= ticket->size;
-        } else {
-            buffer_pool->secondary_reserved -= ticket->size;
-        }
-        aws_mutex_unlock(&buffer_pool->mutex);
-        aws_mem_release(buffer_pool->base_allocator, ticket);
-        aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
-        return;
-    }
-
-    aws_mutex_lock(&buffer_pool->mutex);
-    if (ticket->size <= buffer_pool->primary_size_cutoff) {
-
-        size_t chunks_used = ticket->size / buffer_pool->chunk_size;
-        if (ticket->size % buffer_pool->chunk_size != 0) {
-            ++chunks_used; /* round up */
-        }
-
-        bool found = false;
-        for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
-            struct s3_buffer_pool_block *block;
-            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
-
-            if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
-                size_t alloc_i = (ticket->ptr - block->block_ptr) / buffer_pool->chunk_size;
-
-                block->alloc_bit_mask = s_clear_bits(block->alloc_bit_mask, alloc_i, chunks_used);
-                buffer_pool->primary_used -= ticket->size;
-
-                found = true;
-                break;
-            }
-        }
-
-        AWS_FATAL_ASSERT(found);
-    } else {
-        aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
-        buffer_pool->secondary_used -= ticket->size;
-    }
-
-    if (ticket->forced) {
-        buffer_pool->forced_used -= ticket->size;
-    }
-
-    aws_mem_release(buffer_pool->base_allocator, ticket);
-    aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
-
+    /* Initialize lists for pending reserve management */
     struct aws_linked_list pending_reserves_to_remove;
     aws_linked_list_init(&pending_reserves_to_remove);
 
     struct aws_linked_list pending_reserves_to_complete;
     aws_linked_list_init(&pending_reserves_to_complete);
+    struct aws_linked_list_node *node = NULL;
 
-    /* Capture all the pending reserves that are done (currently can only happen when request is canceled, which cancels
-     * pending futures) */
-    struct aws_linked_list_node *node = aws_linked_list_begin(&buffer_pool->pending_reserves);
-    while (node != aws_linked_list_end(&buffer_pool->pending_reserves)) {
-        struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
-        struct aws_linked_list_node *current_node = node;
-        node = aws_linked_list_next(node);
-        if (aws_future_s3_buffer_ticket_is_done(pending_reserve->ticket_future)) {
-            AWS_FATAL_ASSERT(aws_future_s3_buffer_ticket_get_error(pending_reserve->ticket_future) != AWS_OP_SUCCESS);
-            aws_linked_list_remove(current_node);
-            aws_linked_list_push_back(&pending_reserves_to_remove, current_node);
-        }
-    }
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_mutex_lock(&buffer_pool->mutex);
+        struct s3_special_block_list *special_list = NULL;
 
-    /* Capture all the pending reserves that can be completed. They will actually be completed once outside the mutex.
-     */
-    while (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
-        node = aws_linked_list_front(&buffer_pool->pending_reserves);
-        struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
-
-        pending_reserve->ticket = s_try_reserve(pool, pending_reserve->meta);
-
-        if (pending_reserve->ticket != NULL) {
-            aws_linked_list_pop_front(&buffer_pool->pending_reserves);
-            aws_linked_list_push_back(&pending_reserves_to_complete, node);
+        if (ticket->ptr == NULL) {
+            /* Ticket was never used, make sure to clean up reserved count. */
+            if (ticket->is_special_block) {
+                buffer_pool->special_blocks_reserved -= ticket->size;
+            } else if (ticket->size <= buffer_pool->primary_size_cutoff) {
+                buffer_pool->primary_reserved -= ticket->size;
+            } else {
+                buffer_pool->secondary_reserved -= ticket->size;
+            }
+            aws_mem_release(buffer_pool->base_allocator, ticket);
+            aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
         } else {
-            break;
-        }
-    }
+            /* Handle special block returns */
+            if (ticket->is_special_block) {
+                struct aws_hash_element *elem = NULL;
+                aws_hash_table_find(&buffer_pool->special_blocks, (uint64_t *)&ticket->size, &elem);
+                /* TODO: the lifetime between the ticket and the special block, let's assume the block will always be
+                 * available first. */
+                AWS_FATAL_ASSERT(elem != NULL);
+                special_list = elem->value;
 
-    aws_mutex_unlock(&buffer_pool->mutex);
+                bool found = false;
+                for (size_t i = 0; i < aws_array_list_length(&special_list->blocks); ++i) {
+                    struct s3_buffer_pool_block *block;
+                    aws_array_list_get_at_ptr(&special_list->blocks, (void **)&block, i);
+                    if (block->block_ptr == ticket->ptr) {
+                        /* Make sure the block is marked as used. */
+                        AWS_FATAL_ASSERT(block->alloc_bit_mask == UINT16_MAX);
+                        block->alloc_bit_mask = 0;
+                        found = true;
+                        break;
+                    }
+                }
+                /* Make sure we do find where the ticket buffer from the list. */
+                AWS_FATAL_ASSERT(found);
+                buffer_pool->special_blocks_used -= ticket->size;
+            } else if (ticket->size <= buffer_pool->primary_size_cutoff) {
+
+                size_t chunks_used = ticket->size / buffer_pool->chunk_size;
+                if (ticket->size % buffer_pool->chunk_size != 0) {
+                    ++chunks_used; /* round up */
+                }
+
+                bool found = false;
+                for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks); ++i) {
+                    struct s3_buffer_pool_block *block;
+                    aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+
+                    if (block->block_ptr <= ticket->ptr && block->block_ptr + block->block_size > ticket->ptr) {
+                        size_t alloc_i = (ticket->ptr - block->block_ptr) / buffer_pool->chunk_size;
+
+                        block->alloc_bit_mask = s_clear_bits(block->alloc_bit_mask, alloc_i, chunks_used);
+                        buffer_pool->primary_used -= ticket->size;
+
+                        found = true;
+                        break;
+                    }
+                }
+
+                AWS_FATAL_ASSERT(found);
+
+                if (ticket->forced) {
+                    buffer_pool->forced_used -= ticket->size;
+                }
+            } else {
+                aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
+                buffer_pool->secondary_used -= ticket->size;
+
+                if (ticket->forced) {
+                    buffer_pool->forced_used -= ticket->size;
+                }
+            }
+        }
+        aws_mem_release(buffer_pool->base_allocator, ticket);
+        aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
+
+        /* Capture all the pending reserves that are done (currently can only happen when request is canceled, which
+         * cancels pending futures) */
+        node = aws_linked_list_begin(&buffer_pool->pending_reserves);
+        while (node != aws_linked_list_end(&buffer_pool->pending_reserves)) {
+            struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+            struct aws_linked_list_node *current_node = node;
+            node = aws_linked_list_next(node);
+            if (aws_future_s3_buffer_ticket_is_done(pending_reserve->ticket_future)) {
+                AWS_FATAL_ASSERT(
+                    aws_future_s3_buffer_ticket_get_error(pending_reserve->ticket_future) != AWS_OP_SUCCESS);
+                aws_linked_list_remove(current_node);
+                aws_linked_list_push_back(&pending_reserves_to_remove, current_node);
+            }
+        }
+        /* Capture all the pending reserves that can be completed. They will actually be completed once outside the
+         * mutex.
+         */
+        while (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
+            node = aws_linked_list_front(&buffer_pool->pending_reserves);
+            struct s3_pending_reserve *pending_reserve = AWS_CONTAINER_OF(node, struct s3_pending_reserve, node);
+
+            pending_reserve->ticket = s_try_reserve_synced(pool, pending_reserve->meta);
+
+            if (pending_reserve->ticket != NULL) {
+                aws_linked_list_pop_front(&buffer_pool->pending_reserves);
+                aws_linked_list_push_back(&pending_reserves_to_complete, node);
+            } else {
+                break;
+            }
+        }
+
+        aws_mutex_unlock(&buffer_pool->mutex);
+    }
+    /* END CRITICAL SECTION */
 
     /* release completed pending nodes outside of lock to avoid any deadlocks */
     while (!aws_linked_list_empty(&pending_reserves_to_remove)) {
@@ -462,26 +566,37 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
     }
 }
 
-struct aws_s3_default_buffer_ticket *s_try_reserve(
+struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
+
     struct aws_s3_default_buffer_ticket *ticket = NULL;
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
-                           buffer_pool->secondary_reserved;
+                           buffer_pool->secondary_reserved + buffer_pool->special_blocks_reserved +
+                           buffer_pool->special_blocks_used;
+    struct aws_hash_element *elem = NULL;
+    aws_hash_table_find(&buffer_pool->special_blocks, (uint64_t *)&meta.size, &elem);
+    bool from_special = elem != NULL;
 
     /*
      * If we are allocating from secondary and there is unused space in
-     * primary, trim the primary in hopes we can free up enough memory.
+     * the blocks, trim the blocks in hopes we can free up enough memory.
      * TODO: something smarter, like partial trim?
      */
-    if (meta.size > buffer_pool->primary_size_cutoff && (meta.size + overall_taken) > buffer_pool->mem_limit &&
+    if (meta.size > buffer_pool->primary_size_cutoff && !from_special &&
+        (meta.size + overall_taken) > buffer_pool->mem_limit &&
         (buffer_pool->primary_allocated >
-         (buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->block_size))) {
+         (buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->block_size)) &&
+        (buffer_pool->special_blocks_allocated >
+         (buffer_pool->special_blocks_used + buffer_pool->special_blocks_reserved +
+          buffer_pool->primary_size_cutoff))) {
+
         s_buffer_pool_trim_synced(buffer_pool);
         overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
-                        buffer_pool->secondary_reserved;
+                        buffer_pool->secondary_reserved + buffer_pool->special_blocks_reserved +
+                        buffer_pool->special_blocks_used;
     }
 
     /* Don't let forced buffers account for 100% of the memory limit */
@@ -496,7 +611,11 @@ struct aws_s3_default_buffer_ticket *s_try_reserve(
         ticket->size = meta.size;
         ticket->pool = buffer_pool_wrapper;
 
-        if (meta.size <= buffer_pool->primary_size_cutoff) {
+        /* Check if this is a special-sized allocation */
+        if (from_special) {
+            ticket->is_special_block = true;
+            buffer_pool->special_blocks_reserved += meta.size;
+        } else if (meta.size <= buffer_pool->primary_size_cutoff) {
             buffer_pool->primary_reserved += meta.size;
         } else {
             buffer_pool->secondary_reserved += meta.size;
@@ -526,7 +645,7 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
         ticket->pool = buffer_pool_wrapper;
 
     } else {
-        ticket = s_try_reserve(buffer_pool_wrapper, meta);
+        ticket = s_try_reserve_synced(buffer_pool_wrapper, meta);
     }
 
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(buffer_pool->base_allocator);
@@ -626,7 +745,37 @@ static struct aws_byte_buf s_acquire_buffer_synced(
 
     AWS_PRECONDITION(ticket->ptr == NULL);
 
-    if (ticket->size <= buffer_pool->primary_size_cutoff) {
+    /* Check if this is a special-sized allocation */
+    if (ticket->is_special_block) {
+        struct aws_hash_element *elem = NULL;
+        aws_hash_table_find(&buffer_pool->special_blocks, (uint64_t *)&ticket->size, &elem);
+        AWS_FATAL_ASSERT(elem != NULL);
+        struct s3_special_block_list *special_list = elem->value;
+        /* Look for space in existing blocks */
+        for (size_t i = 0; i < aws_array_list_length(&special_list->blocks); ++i) {
+            struct s3_buffer_pool_block *block;
+            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+            /* Try to find if any block in the list is not used. */
+            if (block->alloc_bit_mask == 0) {
+                block->alloc_bit_mask = UINT16_MAX;
+                ticket->ptr = block->block_ptr;
+                AWS_ASSERT(ticket->size == block->block_size);
+                break;
+            }
+        }
+        if (!ticket->ptr) {
+            /* No available blocks, allocate a new one. */
+            struct s3_buffer_pool_block block;
+            block.alloc_bit_mask = UINT16_MAX;
+            block.block_ptr = aws_mem_acquire(buffer_pool->base_allocator, special_list->buffer_size);
+            block.block_size = special_list->buffer_size;
+            aws_array_list_push_back(&special_list->blocks, &block);
+            ticket->ptr = block.block_ptr;
+            buffer_pool->special_blocks_allocated += special_list->buffer_size;
+        }
+        buffer_pool->special_blocks_used += ticket->size;
+        buffer_pool->special_blocks_reserved -= ticket->size;
+    } else if (ticket->size <= buffer_pool->primary_size_cutoff) {
         ticket->ptr = s_primary_acquire_synced(buffer_pool, ticket);
     } else {
         ticket->ptr = aws_mem_acquire(buffer_pool->base_allocator, ticket->size);
@@ -665,4 +814,58 @@ struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usa
 
     aws_mutex_unlock(&buffer_pool->mutex);
     return ret;
+}
+
+int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, uint64_t buffer_size) {
+    AWS_PRECONDITION(buffer_pool_wrapper);
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+
+    if (buffer_size < buffer_pool->primary_size_cutoff) {
+        /* For size that can fit in the primary allocation, there is no needs for a special list. */
+        AWS_LOG_WARN("skip creating the special size list, use the primary allocation will meet the requirement.");
+        return AWS_OP_SUCCESS;
+    }
+    aws_mutex_lock(&buffer_pool->mutex);
+
+    /* Check if this size already exists */
+    struct aws_hash_element *elem = NULL;
+    aws_hash_table_find(&buffer_pool->special_blocks, &buffer_size, &elem);
+
+    if (elem != NULL) {
+        /* Already exists, nothing to do */
+        aws_mutex_unlock(&buffer_pool->mutex);
+        return AWS_OP_SUCCESS;
+    }
+
+    /* Create new special block list */
+    struct s3_special_block_list *special_list =
+        aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct s3_special_block_list));
+
+    special_list->buffer_size = buffer_size;
+
+    /* Initialize blocks array and pending reserves list */
+    if (aws_array_list_init_dynamic(&special_list->blocks, buffer_pool->base_allocator, 0, sizeof(uint8_t *))) {
+        aws_mem_release(buffer_pool->base_allocator, special_list);
+        aws_mutex_unlock(&buffer_pool->mutex);
+        return AWS_OP_ERR;
+    }
+
+    /* Add to hash table */
+    if (aws_hash_table_put(&buffer_pool->special_blocks, &buffer_size, special_list, NULL)) {
+        aws_array_list_clean_up(&special_list->blocks);
+        aws_mem_release(buffer_pool->base_allocator, special_list);
+        aws_mutex_unlock(&buffer_pool->mutex);
+        return AWS_OP_ERR;
+    }
+
+    aws_mutex_unlock(&buffer_pool->mutex);
+
+    AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Added special block size: %zu bytes", buffer_size);
+
+    return AWS_OP_SUCCESS;
+}
+
+void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size) {
+    /* TODO: just trim */
 }

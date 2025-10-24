@@ -144,6 +144,29 @@ typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_al
                                                                    struct aws_s3_buffer_pool_config config,
                                                                    void *user_data);
 
+/**
+ * Optimize the buffer pool for allocations of a specific size.
+ * Creates a separate list of blocks dedicated to this size for better memory efficiency.
+ * Allocations of exactly this size will use these special blocks instead of the regular primary/secondary storage.
+ *
+ * @param buffer_pool The buffer pool to optimize
+ * @param buffer_size The size to optimize for (must be > 0)
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure
+ */
+AWS_S3_API
+int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t buffer_size);
+
+/**
+ * Release all special-sized blocks from the buffer pool.
+ * This frees all memory allocated for the special size optimization.
+ * Should be called when done with the special-sized allocations.
+ *
+ * @param buffer_pool The buffer pool
+ * @param buffer_size The special size to release blocks for
+ */
+AWS_S3_API
+void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_pool, size_t buffer_size);
+
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
 
