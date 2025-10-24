@@ -144,7 +144,7 @@ struct aws_s3_request_metrics {
         /* The host address of the request. */
         struct aws_string *host_address;
         /* The the request ID header value. */
-        struct aws_string *request_id;
+        struct aws_string *request_attempt_id;
         /* The the extended request ID header value. */
         struct aws_string *amz_id_2;
         /* S3 operation name for the request */
@@ -158,6 +158,8 @@ struct aws_s3_request_metrics {
         struct aws_string *ip_address;
         /* The pointer to the connection that request was made from */
         void *connection_id;
+        /* The pointer to the request that the request attempt was made from */
+        void *request_id;
         /* The aws_thread_id_t to the thread that request ran on */
         aws_thread_id_t thread_id;
         /* The stream-id, which is the idex when the stream was activated. */
@@ -183,10 +185,6 @@ struct aws_s3_request {
     /* Timestamp when retry attempt ended. Overwritten on each retry and copied to new attempt's setup data.
      * -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
     int64_t retry_end_timestamp_ns;
-    /* Time duration for retry attempt (retry_end_timestamp_ns - retry_start_timestamp_ns).
-     * Overwritten on each retry and copied to new attempt's setup data.
-     * When retry_end_timestamp_ns is -1, means data not available. */
-    int64_t retry_duration_ns;
 
     /* Linked list node used for tracking the request is active from HTTP level. */
     struct aws_linked_list_node cancellable_http_streams_list_node;
