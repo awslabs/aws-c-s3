@@ -2168,9 +2168,10 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
              * request now and release it. */
             /* Update the error code for the metrics of the request here since we never acquire/release a connection */
             request->send_data.metrics->crt_info_metrics.error_code = AWS_ERROR_S3_CANCELED;
-            
+
             /* Record end times as well */
-            aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+            aws_high_res_clock_get_ticks(
+                (uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
             request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
                 request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
                 request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;

@@ -245,9 +245,10 @@ static int s_validate_retry_metrics(struct aws_array_list *metrics_list, uint32_
     ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
 
     /* All of the middle should be Upload Parts*/
-    /* This check assumes each request fails 'expected_failures' number of times and then succeeds. 
-     * So for each part, we would have expected_failures + 1 attempts. 
-     * We make sure all of the attempts have the same request_first_attempt_start_time and the last attempt has an end time. */
+    /* This check assumes each request fails 'expected_failures' number of times and then succeeds.
+     * So for each part, we would have expected_failures + 1 attempts.
+     * We make sure all of the attempts have the same request_first_attempt_start_time and the last attempt has an end
+     * time. */
     size_t failed_count = 0;
     for (size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i = i + expected_failures + 1) {
         aws_array_list_get_at(metrics_list, &metrics, i);
@@ -283,18 +284,18 @@ static int s_validate_fail_metrics(struct aws_array_list *metrics_list, uint32_t
     aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
     ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
 
-    /* It is difficult to simulate forced failure and be precise about how a request fails if there are multiple connections. 
-     * Assuming, the first request itself is failing, all of the other parts are force cancelled. 
-     * If there are n parts, we would record n + 5 metrics. 5 retries for the first part alone. */
+    /* It is difficult to simulate forced failure and be precise about how a request fails if there are multiple
+     * connections. Assuming, the first request itself is failing, all of the other parts are force cancelled. If there
+     * are n parts, we would record n + 5 metrics. 5 retries for the first part alone. */
 
     /* First part fails 5 times */
     aws_array_list_get_at(metrics_list, &metrics, 1);
     ASSERT_TRUE(metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
-    for(size_t i = 1; i < 6; i++) {
+    for (size_t i = 1; i < 6; i++) {
         aws_array_list_get_at(metrics_list, &metrics2, i + 1);
         ASSERT_INT_EQUALS(
-                metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns,
-                metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
+            metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns,
+            metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
         ASSERT_INT_EQUALS(metrics->crt_info_metrics.retry_attempt + 1, metrics2->crt_info_metrics.retry_attempt);
         ASSERT_TRUE(metrics2->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
         ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, false));
@@ -303,12 +304,12 @@ static int s_validate_fail_metrics(struct aws_array_list *metrics_list, uint32_t
     ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true));
 
     /* Rest of the request should have been cancelled */
-    for(size_t i = 7; i < parts + 6; i++){
+    for (size_t i = 7; i < parts + 6; i++) {
         aws_array_list_get_at(metrics_list, &metrics, i);
         ASSERT_TRUE(metrics->crt_info_metrics.error_code == AWS_ERROR_S3_CANCELED);
         ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true));
     }
-    
+
     /* Last metrics should be AbortMPU*/
     metrics = NULL;
     aws_array_list_get_at(metrics_list, (void **)&metrics, aws_array_list_length(metrics_list) - 1);
@@ -488,8 +489,7 @@ TEST_CASE(multipart_upload_failure_with_mock_server) {
         // check if number of metrics received for each part is n
         aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &meta_request_test_results));
-        ASSERT_SUCCESS(
-            s_validate_fail_metrics(&meta_request_test_results.synced_data.metrics, parts));
+        ASSERT_SUCCESS(s_validate_fail_metrics(&meta_request_test_results.synced_data.metrics, parts));
 
         aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     }
