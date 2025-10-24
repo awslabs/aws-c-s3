@@ -37,7 +37,6 @@ struct aws_s3_request *aws_s3_request_new(
 
     request->retry_start_timestamp_ns = -1;
     request->retry_end_timestamp_ns = -1;
-    request->retry_duration_ns = -1;
 
     request->part_number = part_number;
     request->record_response_headers = (flags & AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS) != 0;
@@ -139,7 +138,12 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     /* copy delay duration since previous attempt */
     request->send_data.metrics->time_metrics.retry_delay_start_timestamp_ns = request->retry_start_timestamp_ns;
     request->send_data.metrics->time_metrics.retry_delay_end_timestamp_ns = request->retry_end_timestamp_ns;
-    request->send_data.metrics->time_metrics.retry_delay_duration_ns = request->retry_duration_ns;
+    if (request->retry_end_timestamp_ns != -1) {
+        request->send_data.metrics->time_metrics.retry_delay_duration_ns = request->retry_end_timestamp_ns - request->retry_start_timestamp_ns;
+    }
+
+    /* set pointer to request */
+    request->send_data.metrics->crt_info_metrics.request_id = request;
 
     aws_http_message_acquire(message);
 }
@@ -218,7 +222,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_http_headers_release(metrics->req_resp_info_metrics.response_headers);
     aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
     aws_string_destroy(metrics->req_resp_info_metrics.host_address);
-    aws_string_destroy(metrics->req_resp_info_metrics.request_id);
+    aws_string_destroy(metrics->req_resp_info_metrics.request_attempt_id);
     aws_string_destroy(metrics->req_resp_info_metrics.amz_id_2);
     aws_string_destroy(metrics->req_resp_info_metrics.operation_name);
     aws_string_destroy(metrics->crt_info_metrics.ip_address);
@@ -291,15 +295,15 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
     return NULL;
 }
 
-int aws_s3_request_metrics_get_request_id(
+int aws_s3_request_metrics_get_request_attempt_id(
     const struct aws_s3_request_metrics *metrics,
-    const struct aws_string **out_request_id) {
+    const struct aws_string **out_request_attempt_id) {
     AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(out_request_id);
-    if (metrics->req_resp_info_metrics.request_id == NULL) {
+    AWS_PRECONDITION(out_request_attempt_id);
+    if (metrics->req_resp_info_metrics.request_attempt_id == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    *out_request_id = metrics->req_resp_info_metrics.request_id;
+    *out_request_attempt_id = metrics->req_resp_info_metrics.request_attempt_id;
     return AWS_OP_SUCCESS;
 }
 
@@ -562,6 +566,18 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
     *connection_id = (size_t)metrics->crt_info_metrics.connection_id;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_request_metrics_get_request_id(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_request_id) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_request_id);
+    if (metrics->crt_info_metrics.request_id == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_request_id = metrics->crt_info_metrics.request_id;
     return AWS_OP_SUCCESS;
 }
 
