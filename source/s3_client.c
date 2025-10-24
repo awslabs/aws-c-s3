@@ -2166,6 +2166,15 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         } else if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
             /* Unless the request is marked "always send", if this meta request has a finish result, then finish the
              * request now and release it. */
+            /* Update the error code for the metrics of the request here since we never acquire/release a connection */
+            request->send_data.metrics->crt_info_metrics.error_code = AWS_ERROR_S3_CANCELED;
+            
+            /* Record end times as well */
+            aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+            request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
+                request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
+                request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
         } else if (
@@ -2559,7 +2568,6 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
     AWS_PRECONDITION(request);
 
     aws_high_res_clock_get_ticks((uint64_t *)&request->retry_end_timestamp_ns);
-    request->retry_duration_ns = request->retry_end_timestamp_ns - request->retry_start_timestamp_ns;
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
