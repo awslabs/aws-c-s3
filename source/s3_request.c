@@ -308,6 +308,18 @@ int aws_s3_request_metrics_get_request_attempt_id(
     return AWS_OP_SUCCESS;
 }
 
+int aws_s3_request_metrics_get_amz_id_2(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_amz_id_2) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_amz_id_2);
+    if (metrics->req_resp_info_metrics.amz_id_2 == NULL) {
+        return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+    }
+    *out_amz_id_2 = metrics->req_resp_info_metrics.amz_id_2;
+    return AWS_OP_SUCCESS;
+}
+
 void aws_s3_request_metrics_get_start_timestamp_ns(const struct aws_s3_request_metrics *metrics, uint64_t *start_time) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(start_time);

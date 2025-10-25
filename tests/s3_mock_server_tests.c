@@ -118,9 +118,9 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
 static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metrics *metrics) {
     struct aws_http_headers *response_headers = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
-    const struct aws_string *request_id = NULL;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_attempt_id(metrics, &request_id));
-    ASSERT_TRUE(aws_string_eq_c_str(request_id, "12345"));
+    const struct aws_string *request_attempt_id = NULL;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_attempt_id(metrics, &request_attempt_id));
+    ASSERT_TRUE(aws_string_eq_c_str(request_attempt_id, "12345"));
     const struct aws_string *ip_address = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(metrics, &ip_address));
     /* Should be default local ip for ipv6/ipv4 */
