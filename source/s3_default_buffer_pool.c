@@ -365,6 +365,7 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
 }
 
 void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
+    /* Trim primary blocks */
     for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks);) {
         struct s3_buffer_pool_block *block;
         aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
@@ -378,14 +379,15 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
             ++i;
         }
     }
+
+    /* Trim special blocks */
     for (struct aws_hash_iter iter = aws_hash_iter_begin(&buffer_pool->special_blocks); !aws_hash_iter_done(&iter);
          aws_hash_iter_next(&iter)) {
-        /* Try to trim all special blocks */
         struct s3_special_block_list *special_list = iter.element.value;
 
         for (size_t i = 0; i < aws_array_list_length(&special_list->blocks);) {
             struct s3_buffer_pool_block *block;
-            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+            aws_array_list_get_at_ptr(&special_list->blocks, (void **)&block, i);
 
             if (block->alloc_bit_mask == 0) {
                 buffer_pool->special_blocks_allocated -= block->block_size;
@@ -397,9 +399,8 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
             }
         }
         if (aws_array_list_length(&special_list->blocks) == 0 && buffer_pool->special_blocks_reserved == 0) {
-            /* Remove the special list from the map, since nothing reserved for the list and no allocation as well. */
-            aws_hash_table_remove(&buffer_pool->special_blocks, (void *)special_list->buffer_size, NULL, NULL);
-            aws_mem_release(buffer_pool->base_allocator, special_list);
+            /* Remove the element iter points to as it's not being used. */
+            aws_hash_iter_delete(&iter, true);
         }
     }
 }
@@ -443,8 +444,6 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
             } else {
                 buffer_pool->secondary_reserved -= ticket->size;
             }
-            aws_mem_release(buffer_pool->base_allocator, ticket);
-            aws_mem_release(buffer_pool->base_allocator, ticket_wrapper);
         } else {
             /* Handle special block returns */
             if (ticket->is_special_block) {
@@ -568,6 +567,44 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
     }
 }
 
+static bool s_should_trim_for_reserve_synced(
+    bool from_special,
+    size_t to_reserve,
+    struct aws_s3_default_buffer_pool *buffer_pool) {
+    if (from_special || to_reserve <= buffer_pool->primary_size_cutoff) {
+        /* Only trim when it will be allocated from secondary, which is directly from malloc. */
+        return false;
+    }
+    /* The tracked usage SHOULD NOT overflow. */
+    size_t total_allocated =
+        buffer_pool->primary_allocated + buffer_pool->secondary_used + buffer_pool->special_blocks_allocated;
+    size_t total_allocation_needs = 0;
+    if (aws_add_size_checked(total_allocated, to_reserve, &total_allocation_needs)) {
+        /* Will overflow, trim it. */
+        return true;
+    }
+    if (total_allocation_needs < buffer_pool->mem_limit) {
+        /* No need to trim as we still have space to allocate the new block. */
+        return false;
+    }
+
+    size_t primary_overallocation = 0;
+    aws_sub_size_checked(buffer_pool->primary_allocated, buffer_pool->primary_used, &primary_overallocation);
+    aws_sub_size_checked(primary_overallocation, buffer_pool->primary_reserved, &primary_overallocation);
+    size_t special_overallocation = 0;
+    aws_sub_size_checked(
+        buffer_pool->special_blocks_allocated, buffer_pool->special_blocks_used, &special_overallocation);
+    aws_sub_size_checked(special_overallocation, buffer_pool->special_blocks_reserved, &special_overallocation);
+    /* Use max if overflow */
+    size_t total_overallocation = aws_add_size_saturating(special_overallocation, primary_overallocation);
+    if (total_overallocation < to_reserve) {
+        /* If the overallocation is less than the new block, trim it won't help, skip trimming. */
+        return false;
+    }
+
+    return true;
+}
+
 struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
@@ -587,14 +624,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
      * the blocks, trim the blocks in hopes we can free up enough memory.
      * TODO: something smarter, like partial trim?
      */
-    if (meta.size > buffer_pool->primary_size_cutoff && !from_special &&
-        (meta.size + overall_taken) > buffer_pool->mem_limit &&
-        (buffer_pool->primary_allocated >
-         (buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->block_size)) &&
-        (buffer_pool->special_blocks_allocated >
-         (buffer_pool->special_blocks_used + buffer_pool->special_blocks_reserved +
-          buffer_pool->primary_size_cutoff))) {
-
+    if (s_should_trim_for_reserve_synced(from_special, meta.size, buffer_pool)) {
         s_buffer_pool_trim_synced(buffer_pool);
         overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
                         buffer_pool->secondary_reserved + buffer_pool->special_blocks_reserved +
