@@ -154,7 +154,7 @@ typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_al
  * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure
  */
 AWS_S3_API
-int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t buffer_size);
+int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool, size_t buffer_size);
 
 /**
  * Release all special-sized blocks from the buffer pool.

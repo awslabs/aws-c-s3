@@ -59,6 +59,15 @@ struct aws_s3_default_buffer_pool_usage_stats {
     /* Secondary memory reserved, but not yet used. Accurate, maps directly to base allocator. */
     size_t secondary_reserved;
 
+    /* Overall memory allocated for special-sized blocks. */
+    size_t special_blocks_allocated;
+    /* Number of special block sizes created. */
+    size_t special_blocks_num;
+    /* Memory reserved in special-sized blocks. */
+    size_t special_blocks_reserved;
+    /* Memory used in special-sized blocks. */
+    size_t special_blocks_used;
+
     /* Bytes used in "forced" buffers (created even if they exceed memory limits).
      * This is always <= primary_used + secondary_used */
     size_t forced_used;

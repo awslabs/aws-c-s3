@@ -13,6 +13,8 @@
 #include <aws/io/future.h>
 #include <aws/s3/private/s3_util.h>
 
+#include <inttypes.h>
+
 /*
  * S3 Buffer Pool.
  * Fairly trivial implementation of "arena" style allocator.
@@ -298,8 +300,8 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         &buffer_pool->special_blocks,
         buffer_pool->base_allocator,
         0, /* initial capacity */
-        aws_hash_uint64_t_by_identity,
-        aws_hash_compare_uint64_t_eq,
+        aws_hash_ptr,
+        aws_ptr_eq,
         NULL,
         NULL);
 
@@ -346,9 +348,9 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
 
         /* Free all allocated blocks */
         for (size_t i = 0; i < aws_array_list_length(&special_list->blocks); ++i) {
-            uint8_t *block_ptr = NULL;
-            aws_array_list_get_at(&special_list->blocks, &block_ptr, i);
-            aws_mem_release(buffer_pool->base_allocator, block_ptr);
+            struct s3_buffer_pool_block *block;
+            aws_array_list_get_at_ptr(&special_list->blocks, (void **)&block, i);
+            aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
         }
 
         aws_array_list_clean_up(&special_list->blocks);
@@ -396,7 +398,7 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
         }
         if (aws_array_list_length(&special_list->blocks) == 0 && buffer_pool->special_blocks_reserved == 0) {
             /* Remove the special list from the map, since nothing reserved for the list and no allocation as well. */
-            aws_hash_table_remove(&buffer_pool->special_blocks, &special_list->buffer_size, NULL, NULL);
+            aws_hash_table_remove(&buffer_pool->special_blocks, (void *)special_list->buffer_size, NULL, NULL);
             aws_mem_release(buffer_pool->base_allocator, special_list);
         }
     }
@@ -447,7 +449,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
             /* Handle special block returns */
             if (ticket->is_special_block) {
                 struct aws_hash_element *elem = NULL;
-                aws_hash_table_find(&buffer_pool->special_blocks, (uint64_t *)&ticket->size, &elem);
+                aws_hash_table_find(&buffer_pool->special_blocks, (void *)ticket->size, &elem);
                 /* TODO: the lifetime between the ticket and the special block, let's assume the block will always be
                  * available first. */
                 AWS_FATAL_ASSERT(elem != NULL);
@@ -577,7 +579,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
                            buffer_pool->secondary_reserved + buffer_pool->special_blocks_reserved +
                            buffer_pool->special_blocks_used;
     struct aws_hash_element *elem = NULL;
-    aws_hash_table_find(&buffer_pool->special_blocks, (uint64_t *)&meta.size, &elem);
+    aws_hash_table_find(&buffer_pool->special_blocks, (void *)meta.size, &elem);
     bool from_special = elem != NULL;
 
     /*
@@ -745,21 +747,34 @@ static struct aws_byte_buf s_acquire_buffer_synced(
 
     AWS_PRECONDITION(ticket->ptr == NULL);
 
+    AWS_LOGF_INFO(
+        AWS_LS_S3_CLIENT,
+        "s_acquire_buffer_synced: size=%zu, is_special_block=%d",
+        ticket->size,
+        ticket->is_special_block);
+
     /* Check if this is a special-sized allocation */
     if (ticket->is_special_block) {
         struct aws_hash_element *elem = NULL;
-        aws_hash_table_find(&buffer_pool->special_blocks, (uint64_t *)&ticket->size, &elem);
+        aws_hash_table_find(&buffer_pool->special_blocks, (void *)ticket->size, &elem);
         AWS_FATAL_ASSERT(elem != NULL);
         struct s3_special_block_list *special_list = elem->value;
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "Special block acquire: size=%zu, num_blocks=%zu",
+            ticket->size,
+            aws_array_list_length(&special_list->blocks));
         /* Look for space in existing blocks */
         for (size_t i = 0; i < aws_array_list_length(&special_list->blocks); ++i) {
             struct s3_buffer_pool_block *block;
-            aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+            aws_array_list_get_at_ptr(&special_list->blocks, (void **)&block, i);
+            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Checking block %zu: alloc_bit_mask=%u", i, block->alloc_bit_mask);
             /* Try to find if any block in the list is not used. */
             if (block->alloc_bit_mask == 0) {
                 block->alloc_bit_mask = UINT16_MAX;
                 ticket->ptr = block->block_ptr;
                 AWS_ASSERT(ticket->size == block->block_size);
+                AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Reusing existing block %zu", i);
                 break;
             }
         }
@@ -772,6 +787,11 @@ static struct aws_byte_buf s_acquire_buffer_synced(
             aws_array_list_push_back(&special_list->blocks, &block);
             ticket->ptr = block.block_ptr;
             buffer_pool->special_blocks_allocated += special_list->buffer_size;
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "Allocated special block: size=%" PRIu64 ", total_allocated=%zu",
+                special_list->buffer_size,
+                buffer_pool->special_blocks_allocated);
         }
         buffer_pool->special_blocks_used += ticket->size;
         buffer_pool->special_blocks_reserved -= ticket->size;
@@ -809,6 +829,10 @@ struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usa
         .primary_num_blocks = aws_array_list_length(&buffer_pool->blocks),
         .secondary_used = buffer_pool->secondary_used,
         .secondary_reserved = buffer_pool->secondary_reserved,
+        .special_blocks_allocated = buffer_pool->special_blocks_allocated,
+        .special_blocks_num = aws_hash_table_get_entry_count(&buffer_pool->special_blocks),
+        .special_blocks_reserved = buffer_pool->special_blocks_reserved,
+        .special_blocks_used = buffer_pool->special_blocks_used,
         .forced_used = buffer_pool->forced_used,
     };
 
@@ -816,21 +840,23 @@ struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usa
     return ret;
 }
 
-int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, uint64_t buffer_size) {
+int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size) {
     AWS_PRECONDITION(buffer_pool_wrapper);
 
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     if (buffer_size < buffer_pool->primary_size_cutoff) {
         /* For size that can fit in the primary allocation, there is no needs for a special list. */
-        AWS_LOG_WARN("skip creating the special size list, use the primary allocation will meet the requirement.");
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "skip creating the special size list, use the primary allocation will meet the requirement.");
         return AWS_OP_SUCCESS;
     }
     aws_mutex_lock(&buffer_pool->mutex);
 
     /* Check if this size already exists */
     struct aws_hash_element *elem = NULL;
-    aws_hash_table_find(&buffer_pool->special_blocks, &buffer_size, &elem);
+    aws_hash_table_find(&buffer_pool->special_blocks, (void *)buffer_size, &elem);
 
     if (elem != NULL) {
         /* Already exists, nothing to do */
@@ -845,14 +871,15 @@ int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_w
     special_list->buffer_size = buffer_size;
 
     /* Initialize blocks array and pending reserves list */
-    if (aws_array_list_init_dynamic(&special_list->blocks, buffer_pool->base_allocator, 0, sizeof(uint8_t *))) {
+    if (aws_array_list_init_dynamic(
+            &special_list->blocks, buffer_pool->base_allocator, 0, sizeof(struct s3_buffer_pool_block))) {
         aws_mem_release(buffer_pool->base_allocator, special_list);
         aws_mutex_unlock(&buffer_pool->mutex);
         return AWS_OP_ERR;
     }
 
     /* Add to hash table */
-    if (aws_hash_table_put(&buffer_pool->special_blocks, &buffer_size, special_list, NULL)) {
+    if (aws_hash_table_put(&buffer_pool->special_blocks, (void *)buffer_size, special_list, NULL)) {
         aws_array_list_clean_up(&special_list->blocks);
         aws_mem_release(buffer_pool->base_allocator, special_list);
         aws_mutex_unlock(&buffer_pool->mutex);
@@ -867,5 +894,7 @@ int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_w
 }
 
 void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size) {
+    (void)buffer_pool_wrapper;
+    (void)buffer_size;
     /* TODO: just trim */
 }
