@@ -90,7 +90,6 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     /* If this is not the first time request is prepared, e.g. this is a retry,
      * send out previous metrics and reinitialize metrics structure.
      */
-    int64_t first_attempt_start_timestamp_ns = -1;
 
     if (request->num_times_prepared > 0 && request->send_data.metrics != NULL) {
         /* If there is a metrics from previous attempt, complete it now. */
@@ -109,6 +108,8 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
             aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
             aws_s3_meta_request_unlock_synced_data(meta_request);
         }
+
+        int64_t first_attempt_start_timestamp_ns = -1;
 
         /* retain the first attempt timestamp since we should not re-initialize it. */
         first_attempt_start_timestamp_ns = metric->time_metrics.s3_request_first_attempt_start_timestamp_ns;
@@ -130,7 +131,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.start_timestamp_ns);
 
     /* Set s3 request start timestamp if first attempt*/
-    if (first_attempt_start_timestamp_ns == -1) {
+    if (request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns == -1) {
         request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns =
             request->send_data.metrics->time_metrics.start_timestamp_ns;
     }

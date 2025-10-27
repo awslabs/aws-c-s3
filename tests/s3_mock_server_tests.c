@@ -292,7 +292,7 @@ static int s_validate_fail_metrics(struct aws_array_list *metrics_list, uint32_t
     aws_array_list_get_at(metrics_list, &metrics, 1);
     ASSERT_TRUE(metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
     size_t request_ptr = (size_t)metrics->crt_info_metrics.request_ptr;
-    size_t request_start_time = metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+    int64_t request_start_time = metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
     for (size_t i = 1; i < 6; i++) {
         aws_array_list_get_at(metrics_list, &metrics2, i + 1);
         ASSERT_INT_EQUALS(
