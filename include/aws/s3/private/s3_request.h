@@ -144,7 +144,7 @@ struct aws_s3_request_metrics {
         /* The host address of the request. */
         struct aws_string *host_address;
         /* The the request ID header value. */
-        struct aws_string *request_attempt_id;
+        struct aws_string *request_id;
         /* The the extended request ID header value. */
         struct aws_string *amz_id_2;
         /* S3 operation name for the request */
@@ -157,9 +157,9 @@ struct aws_s3_request_metrics {
         /* The IP address of the request connected to */
         struct aws_string *ip_address;
         /* The pointer to the connection that request was made from */
-        void *connection_id;
+        void *connection_ptr;
         /* The pointer to the request that the request attempt was made from */
-        void *request_id;
+        void *request_ptr;
         /* The aws_thread_id_t to the thread that request ran on */
         aws_thread_id_t thread_id;
         /* The stream-id, which is the idex when the stream was activated. */

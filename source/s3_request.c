@@ -144,7 +144,7 @@ void aws_s3_request_setup_send_data(struct aws_s3_request *request, struct aws_h
     }
 
     /* set pointer to request */
-    request->send_data.metrics->crt_info_metrics.request_id = request;
+    request->send_data.metrics->crt_info_metrics.request_ptr = request;
 
     aws_http_message_acquire(message);
 }
@@ -223,7 +223,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_http_headers_release(metrics->req_resp_info_metrics.response_headers);
     aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
     aws_string_destroy(metrics->req_resp_info_metrics.host_address);
-    aws_string_destroy(metrics->req_resp_info_metrics.request_attempt_id);
+    aws_string_destroy(metrics->req_resp_info_metrics.request_id);
     aws_string_destroy(metrics->req_resp_info_metrics.amz_id_2);
     aws_string_destroy(metrics->req_resp_info_metrics.operation_name);
     aws_string_destroy(metrics->crt_info_metrics.ip_address);
@@ -296,15 +296,15 @@ struct aws_s3_request_metrics *aws_s3_request_metrics_release(struct aws_s3_requ
     return NULL;
 }
 
-int aws_s3_request_metrics_get_request_attempt_id(
+int aws_s3_request_metrics_get_request_id(
     const struct aws_s3_request_metrics *metrics,
-    const struct aws_string **out_request_attempt_id) {
+    const struct aws_string **out_request_id) {
     AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(out_request_attempt_id);
-    if (metrics->req_resp_info_metrics.request_attempt_id == NULL) {
+    AWS_PRECONDITION(out_request_id);
+    if (metrics->req_resp_info_metrics.request_id == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    *out_request_attempt_id = metrics->req_resp_info_metrics.request_attempt_id;
+    *out_request_id = metrics->req_resp_info_metrics.request_id;
     return AWS_OP_SUCCESS;
 }
 
@@ -572,20 +572,20 @@ int aws_s3_request_metrics_get_ip_address(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_id) {
+int aws_s3_request_metrics_get_connection_ptr(const struct aws_s3_request_metrics *metrics, size_t *connection_ptr) {
     AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(connection_id);
-    if (metrics->crt_info_metrics.connection_id == NULL) {
+    AWS_PRECONDITION(connection_ptr);
+    if (metrics->crt_info_metrics.connection_ptr == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    *connection_id = (size_t)metrics->crt_info_metrics.connection_id;
+    *connection_ptr = (size_t)metrics->crt_info_metrics.connection_ptr;
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_request_id(const struct aws_s3_request_metrics *metrics, size_t *out_request_id) {
+int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_request_ptr) {
     AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(out_request_id);
-    *out_request_id = (size_t)metrics->crt_info_metrics.request_id;
+    AWS_PRECONDITION(out_request_ptr);
+    *out_request_ptr = (size_t)metrics->crt_info_metrics.request_ptr;
     return AWS_OP_SUCCESS;
 }
 

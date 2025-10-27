@@ -1374,7 +1374,7 @@ static int s_s3_meta_request_incoming_headers(
         if (request->send_data.request_id == NULL && aws_byte_cursor_eq(name, &g_request_id_header_name)) {
             request->send_data.request_id = aws_string_new_from_cursor(connection->request->allocator, value);
             if (collect_metrics) {
-                request->send_data.metrics->req_resp_info_metrics.request_attempt_id =
+                request->send_data.metrics->req_resp_info_metrics.request_id =
                     aws_string_new_from_cursor(connection->request->allocator, value);
             }
         }
@@ -1534,7 +1534,7 @@ static void s_s3_meta_request_stream_metrics(
     s3_metrics->crt_info_metrics.stream_id = http_metrics->stream_id;
 
     /* Also related metrics from the request/response. */
-    s3_metrics->crt_info_metrics.connection_id = (void *)connection->http_connection;
+    s3_metrics->crt_info_metrics.connection_ptr = (void *)connection->http_connection;
     const struct aws_socket_endpoint *endpoint = aws_http_connection_get_remote_endpoint(connection->http_connection);
     request->send_data.metrics->crt_info_metrics.ip_address =
         aws_string_new_from_c_str(request->allocator, endpoint->address);

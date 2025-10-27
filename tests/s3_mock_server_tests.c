@@ -118,9 +118,9 @@ static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool 
 static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metrics *metrics) {
     struct aws_http_headers *response_headers = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_response_headers(metrics, &response_headers));
-    const struct aws_string *request_attempt_id = NULL;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_attempt_id(metrics, &request_attempt_id));
-    ASSERT_TRUE(aws_string_eq_c_str(request_attempt_id, "12345"));
+    const struct aws_string *request_id = NULL;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_request_id(metrics, &request_id));
+    ASSERT_TRUE(aws_string_eq_c_str(request_id, "12345"));
     const struct aws_string *ip_address = NULL;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_ip_address(metrics, &ip_address));
     /* Should be default local ip for ipv6/ipv4 */
@@ -139,8 +139,8 @@ static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metr
     ASSERT_TRUE(host_address->len > 0);
     aws_thread_id_t thread_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
-    size_t connection_id = 0;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_id(metrics, &connection_id));
+    size_t connection_ptr = 0;
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_ptr(metrics, &connection_ptr));
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, aws_s3_request_metrics_get_error_code(metrics));
 
     /* Get all those time stamp */
@@ -291,6 +291,8 @@ static int s_validate_fail_metrics(struct aws_array_list *metrics_list, uint32_t
     /* First part fails 5 times */
     aws_array_list_get_at(metrics_list, &metrics, 1);
     ASSERT_TRUE(metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
+    size_t request_ptr = (size_t)metrics->crt_info_metrics.request_ptr;
+    size_t request_start_time = metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
     for (size_t i = 1; i < 6; i++) {
         aws_array_list_get_at(metrics_list, &metrics2, i + 1);
         ASSERT_INT_EQUALS(
@@ -299,6 +301,8 @@ static int s_validate_fail_metrics(struct aws_array_list *metrics_list, uint32_t
         ASSERT_INT_EQUALS(metrics->crt_info_metrics.retry_attempt + 1, metrics2->crt_info_metrics.retry_attempt);
         ASSERT_TRUE(metrics2->crt_info_metrics.error_code != AWS_ERROR_SUCCESS);
         ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, false));
+        ASSERT_INT_EQUALS(request_start_time, metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
+        ASSERT_TRUE(request_ptr == (size_t)metrics2->crt_info_metrics.request_ptr);
         metrics = metrics2;
     }
     ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true));
