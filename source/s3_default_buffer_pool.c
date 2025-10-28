@@ -605,7 +605,7 @@ static bool s_should_trim_for_reserve_synced(
     overflow |=
         aws_sub_size_checked(special_overallocation, buffer_pool->special_blocks_reserved, &special_overallocation);
     /* The already allocated should be reasonable and not cause overflow. Otherwise, bugs in the code. */
-    AWS_ASSERT(!overflow);
+    AWS_FATAL_ASSERT(!overflow);
     /* Use max if overflow */
     size_t total_overallocation = aws_add_size_saturating(special_overallocation, primary_overallocation);
     if (total_overallocation < to_reserve) {
