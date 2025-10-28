@@ -87,7 +87,7 @@ static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage
 /* Structure to track special-sized blocks */
 struct s3_special_block_list {
     struct aws_allocator *allocator;
-    uint64_t buffer_size;         /* Size of buffers in this list */
+    size_t buffer_size;           /* Size of buffers in this list */
     struct aws_array_list blocks; /* Array of uint8_t* pointers to allocated blocks */
 };
 
@@ -595,12 +595,17 @@ static bool s_should_trim_for_reserve_synced(
     }
 
     size_t primary_overallocation = 0;
-    aws_sub_size_checked(buffer_pool->primary_allocated, buffer_pool->primary_used, &primary_overallocation);
-    aws_sub_size_checked(primary_overallocation, buffer_pool->primary_reserved, &primary_overallocation);
+    int overflow = 0;
+    overflow |=
+        aws_sub_size_checked(buffer_pool->primary_allocated, buffer_pool->primary_used, &primary_overallocation);
+    overflow |= aws_sub_size_checked(primary_overallocation, buffer_pool->primary_reserved, &primary_overallocation);
     size_t special_overallocation = 0;
-    aws_sub_size_checked(
+    overflow |= aws_sub_size_checked(
         buffer_pool->special_blocks_allocated, buffer_pool->special_blocks_used, &special_overallocation);
-    aws_sub_size_checked(special_overallocation, buffer_pool->special_blocks_reserved, &special_overallocation);
+    overflow |=
+        aws_sub_size_checked(special_overallocation, buffer_pool->special_blocks_reserved, &special_overallocation);
+    /* The already allocated should be reasonable and not cause overflow. Otherwise, bugs in the code. */
+    AWS_ASSERT(!overflow);
     /* Use max if overflow */
     size_t total_overallocation = aws_add_size_saturating(special_overallocation, primary_overallocation);
     if (total_overallocation < to_reserve) {
@@ -825,7 +830,7 @@ static struct aws_byte_buf s_acquire_buffer_synced(
             buffer_pool->special_blocks_allocated += special_list->buffer_size;
             AWS_LOGF_INFO(
                 AWS_LS_S3_CLIENT,
-                "Allocated special block: size=%" PRIu64 ", total_allocated=%zu",
+                "Allocated special block: size=%zu, total_allocated=%zu",
                 special_list->buffer_size,
                 buffer_pool->special_blocks_allocated);
         }
