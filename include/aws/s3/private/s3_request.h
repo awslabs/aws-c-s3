@@ -31,6 +31,23 @@ struct aws_s3_request_metrics {
     struct aws_allocator *allocator;
 
     struct {
+        /* The time stamp when the request was first initiated by the client, including the very first attempt.
+         * This timestamp is set once at the beginning and never updated during retries. Timestamps are from
+         * `aws_high_res_clock_get_ticks`. This will always be available. */
+        int64_t s3_request_first_attempt_start_timestamp_ns;
+
+        /* The time stamp when the request completely finished (success or final failure), including all retry
+         * attempts. This is set when the request reaches its final state - either successful completion or
+         * exhaustion of all retry attempts. Timestamps are from `aws_high_res_clock_get_ticks`. This will
+         * be available with the last attempt. */
+        int64_t s3_request_last_attempt_end_timestamp_ns;
+
+        /* The total time duration for the complete request lifecycle from initial start to final completion,
+         * including all retry attempts, backoff delays, and connection establishment time
+         * (s3_request_last_attempt_end_timestamp_ns - s3_request_first_attempt_start_timestamp_ns). This represents the
+         * end-to-end user experience time. This will be available with the last attempt. */
+        int64_t s3_request_total_duration_ns;
+
         /* The time stamp when the request started by S3 client, which is prepared time by the client. Timestamps
          * are from `aws_high_res_clock_get_ticks`. This will always be available. */
         int64_t start_timestamp_ns;
@@ -90,6 +107,31 @@ struct aws_s3_request_metrics {
         /* The time duration for the request from start of delivery to finish of delivery (deliver_end_timestamp_ns -
          * deliver_start_timestamp_ns). When deliver_duration_ns is 0, means data not available. */
         int64_t deliver_duration_ns;
+
+        /* The time stamp when the request started to acquire connection. -1 means data not available. Timestamp
+         * are from `aws_high_res_clock_get_ticks` */
+        int64_t conn_acquire_start_timestamp_ns;
+        /* The time stamp when the request finished to acquire connection. -1 means data not available.
+         * Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t conn_acquire_end_timestamp_ns;
+        /* The time duration for the request from start acquiring connection to finish acquiring connection
+         * (conn_acquire_end_timestamp_ns - conn_acquire_start_timestamp_ns). When conn_acquire_end_timestamp_ns is -1,
+         * means data not available. */
+        int64_t conn_acquire_duration_ns;
+
+        /* The time stamp when the request started to delay for retry. -1 means data not available. Timestamp
+         * are from `aws_high_res_clock_get_ticks` */
+        int64_t retry_delay_start_timestamp_ns;
+        /* The time stamp when the request finished to delay for retry. -1 means data not available.
+         * Timestamp are from `aws_high_res_clock_get_ticks` */
+        int64_t retry_delay_end_timestamp_ns;
+        /* The time duration for the request from start retry delay to finish retry delay (retry_delay_end_timestamp_ns
+         * - retry_delay_start_timestamp_ns). When retry_delay_end_timestamp_ns is -1, means data not available. */
+        int64_t retry_delay_duration_ns;
+
+        /* The time duration for the service call from connection acquisition to first response byte. -1 means data not
+         * available. */
+        int64_t service_call_duration_ns;
     } time_metrics;
 
     struct {
@@ -103,6 +145,8 @@ struct aws_s3_request_metrics {
         struct aws_string *host_address;
         /* The the request ID header value. */
         struct aws_string *request_id;
+        /* The the extended request ID header value. */
+        struct aws_string *extended_request_id;
         /* S3 operation name for the request */
         struct aws_string *operation_name;
         /* The type of request made */
@@ -113,7 +157,9 @@ struct aws_s3_request_metrics {
         /* The IP address of the request connected to */
         struct aws_string *ip_address;
         /* The pointer to the connection that request was made from */
-        void *connection_id;
+        void *connection_ptr;
+        /* The pointer to the request that the request attempt was made from */
+        void *request_ptr;
         /* The aws_thread_id_t to the thread that request ran on */
         aws_thread_id_t thread_id;
         /* The stream-id, which is the idex when the stream was activated. */
@@ -132,6 +178,13 @@ struct aws_s3_request {
 
     /* Linked list node used for queuing. */
     struct aws_linked_list_node node;
+
+    /* Timestamp when retry attempt started. Overwritten on each retry and copied to new attempt's setup data.
+     * -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
+    int64_t retry_start_timestamp_ns;
+    /* Timestamp when retry attempt ended. Overwritten on each retry and copied to new attempt's setup data.
+     * -1 means data not available. Timestamp from `aws_high_res_clock_get_ticks` */
+    int64_t retry_end_timestamp_ns;
 
     /* Linked list node used for tracking the request is active from HTTP level. */
     struct aws_linked_list_node cancellable_http_streams_list_node;
@@ -250,7 +303,7 @@ struct aws_s3_request {
 
         /* Returned request ID of this request. */
         struct aws_string *request_id;
-        /* Returned amz ID 2 of this request. */
+        /* Returned extended request id of this request. */
         struct aws_string *amz_id_2;
 
         /* The metrics for the request telemetry */

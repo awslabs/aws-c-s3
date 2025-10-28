@@ -1411,6 +1411,7 @@ int aws_s3_tester_client_new(
         .max_part_size = options->max_part_size,
         .s3express_provider_override_factory = options->s3express_provider_override_factory,
         .factory_user_data = options->factory_user_data,
+        .max_active_connections_override = options->max_active_connections_override,
         .enable_s3express = options->s3express_provider_override_factory != NULL,
     };
     struct aws_http_proxy_options proxy_options = {
