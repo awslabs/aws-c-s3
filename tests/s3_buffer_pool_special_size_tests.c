@@ -17,7 +17,7 @@ static int s_test_s3_buffer_pool_add_special_size_basic(struct aws_allocator *al
     ASSERT_NOT_NULL(buffer_pool);
 
     /* Add a special size larger than primary cutoff */
-    uint64_t special_size = MB_TO_BYTES(64);
+    size_t special_size = MB_TO_BYTES(64);
     int result = aws_s3_buffer_pool_add_special_size(buffer_pool, special_size);
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, result);
 
@@ -59,7 +59,7 @@ static int s_test_s3_buffer_pool_add_special_size_duplicate(struct aws_allocator
         allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(2)});
     ASSERT_NOT_NULL(buffer_pool);
 
-    uint64_t special_size = MB_TO_BYTES(64);
+    size_t special_size = MB_TO_BYTES(64);
 
     /* Add the same size twice */
     int result1 = aws_s3_buffer_pool_add_special_size(buffer_pool, special_size);
@@ -106,9 +106,9 @@ static int s_test_s3_buffer_pool_add_special_size_multiple(struct aws_allocator 
     ASSERT_NOT_NULL(buffer_pool);
 
     /* Add multiple special sizes */
-    uint64_t size1 = MB_TO_BYTES(64);
-    uint64_t size2 = MB_TO_BYTES(128);
-    uint64_t size3 = MB_TO_BYTES(256);
+    size_t size1 = MB_TO_BYTES(64);
+    size_t size2 = MB_TO_BYTES(128);
+    size_t size3 = MB_TO_BYTES(256);
 
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, aws_s3_buffer_pool_add_special_size(buffer_pool, size1));
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, aws_s3_buffer_pool_add_special_size(buffer_pool, size2));
@@ -117,8 +117,8 @@ static int s_test_s3_buffer_pool_add_special_size_multiple(struct aws_allocator 
     /* Allocate from each special size */
     struct aws_s3_buffer_ticket *tickets[3];
     struct aws_future_s3_buffer_ticket *futures[3];
-    uint64_t sizes[] = {size1, size2, size3};
-    uint64_t total_size = size1 + size2 + size3;
+    size_t sizes[] = {size1, size2, size3};
+    size_t total_size = size1 + size2 + size3;
 
     for (size_t i = 0; i < 3; ++i) {
         futures[i] =
@@ -167,7 +167,7 @@ static int s_test_s3_buffer_pool_add_special_size_below_cutoff(struct aws_alloca
     ASSERT_NOT_NULL(buffer_pool);
 
     struct aws_s3_default_buffer_pool_usage_stats stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
-    uint64_t small_size = stats.primary_cutoff - 1;
+    size_t small_size = stats.primary_cutoff - 1;
 
     /* Should succeed but log a warning */
     int result = aws_s3_buffer_pool_add_special_size(buffer_pool, small_size);
@@ -210,7 +210,7 @@ static int s_test_s3_buffer_pool_special_size_reuse(struct aws_allocator *alloca
         allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(2)});
     ASSERT_NOT_NULL(buffer_pool);
 
-    uint64_t special_size = MB_TO_BYTES(64);
+    size_t special_size = MB_TO_BYTES(64);
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, aws_s3_buffer_pool_add_special_size(buffer_pool, special_size));
 
     /* Allocate and release multiple times to test reuse */
@@ -254,7 +254,7 @@ static int s_test_s3_buffer_pool_special_size_mixed(struct aws_allocator *alloca
         allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(2)});
     ASSERT_NOT_NULL(buffer_pool);
 
-    uint64_t special_size = MB_TO_BYTES(64);
+    size_t special_size = MB_TO_BYTES(64);
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, aws_s3_buffer_pool_add_special_size(buffer_pool, special_size));
 
     /* Allocate mix of special and regular sizes */
@@ -318,7 +318,7 @@ static int s_test_s3_buffer_pool_special_size_with_limits(struct aws_allocator *
         });
     ASSERT_NOT_NULL(buffer_pool);
 
-    uint64_t special_size = MB_TO_BYTES(300);
+    size_t special_size = MB_TO_BYTES(300);
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, aws_s3_buffer_pool_add_special_size(buffer_pool, special_size));
 
     /* Allocate several buffers to verify special sizes respect memory limits */
@@ -430,7 +430,7 @@ static int s_test_s3_buffer_pool_special_size_trim(struct aws_allocator *allocat
         allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(2)});
     ASSERT_NOT_NULL(buffer_pool);
 
-    uint64_t special_size = MB_TO_BYTES(64);
+    size_t special_size = MB_TO_BYTES(64);
     ASSERT_INT_EQUALS(AWS_OP_SUCCESS, aws_s3_buffer_pool_add_special_size(buffer_pool, special_size));
 
     /* Allocate several special size buffers */
