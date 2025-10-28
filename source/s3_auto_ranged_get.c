@@ -787,7 +787,7 @@ static void s_s3_auto_ranged_get_request_finished(
                 error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
             }
-            /* Extract number of parts from ETag and calculate estimated part size */
+            /* Extract number of parts stored in S3 from ETag and calculate estimated part size */
             uint32_t num_parts = 0;
             if (aws_s3_extract_parts_from_etag(etag_header_value, &num_parts) == AWS_OP_SUCCESS && num_parts > 0) {
                 auto_ranged_get->estimated_object_stored_part_size = object_size / num_parts;
@@ -801,6 +801,7 @@ static void s_s3_auto_ranged_get_request_finished(
                     num_parts,
                     auto_ranged_get->estimated_object_stored_part_size);
             } else {
+                num_parts = 1;
                 /* Failed to parse ETags */
                 AWS_LOGF_WARN(
                     AWS_LS_S3_META_REQUEST,
@@ -809,6 +810,7 @@ static void s_s3_auto_ranged_get_request_finished(
                 auto_ranged_get->estimated_object_stored_part_size = g_default_part_size_fallback;
                 goto update_synced_data;
             }
+            auto_ranged_get->num_stored_parts = num_parts;
         }
 
         /* If we were able to discover the object-range/content length successfully, then any error code that was passed
@@ -824,10 +826,23 @@ static void s_s3_auto_ranged_get_request_finished(
             int error = aws_s3_calculate_request_optimal_range_size(
                 meta_request->client->optimal_range_size,
                 auto_ranged_get->estimated_object_stored_part_size,
+                meta_request->is_express,
                 &out_request_optimal_range_size);
             if (!error) {
+                /* Apply a buffer pool alignment to the calculated result. */
+                out_request_optimal_range_size = aws_s3_buffer_pool_align_range_size(
+                    meta_request->client->buffer_pool, out_request_optimal_range_size);
+
                 /* Override the part size to be optimal */
                 *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
+                uint64_t parts_threshold = aws_mul_u64_saturating(meta_request->client->ideal_connection_count, 2);
+                if (auto_ranged_get->num_stored_parts > parts_threshold) {
+                    /* If the number of parts is greater than the threshold, so that we will be reusing the buffers
+                     * enough from the buffer pool. Let's add a special block for the buffer pool to optimize the
+                     * case.*/
+                    aws_s3_buffer_pool_add_special_size(meta_request->client->buffer_pool, meta_request->part_size);
+                    meta_request->buffer_pool_optimized = true;
+                }
                 if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT) {
                     /* Update the first part size as well */
                     first_part_size = meta_request->part_size;

@@ -185,6 +185,10 @@ struct aws_s3_meta_request {
 
     enum aws_s3_meta_request_type type;
     struct aws_string *s3express_session_host;
+    /* Is the meta request made to s3express bucket or not. */
+    bool is_express;
+    /* If the buffer pool optimized for the specific size or not. */
+    bool buffer_pool_optimized;
 
     struct {
         struct aws_mutex lock;

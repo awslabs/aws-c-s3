@@ -830,15 +830,6 @@ int aws_s3_check_headers_for_checksum(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_range_size_alignment(uint64_t *range_size) {
-    /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
-     * what's the best round up for the part size. */
-    if (*range_size > g_s3_optimal_range_size_alignment && *range_size % g_s3_optimal_range_size_alignment != 0) {
-        /* Only apply alignment for sizes above minimum to avoid excessive rounding */
-        *range_size = ((*range_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
-    }
-}
-
 int aws_s3_calculate_client_optimal_range_size(
     uint64_t memory_limit_in_bytes,
     uint32_t max_connections,
@@ -871,10 +862,7 @@ int aws_s3_calculate_client_optimal_range_size(
     uint64_t optimal_size = memory_constrained_size;
     if (optimal_size < g_default_part_size_fallback) {
         optimal_size = g_default_part_size_fallback;
-    } else {
-        s_s3_range_size_alignment(&optimal_size);
     }
-
     /* Apply maximum constraint */
     if (optimal_size > g_default_max_part_size) {
         optimal_size = g_default_max_part_size;
@@ -896,6 +884,7 @@ int aws_s3_calculate_client_optimal_range_size(
 int aws_s3_calculate_request_optimal_range_size(
     uint64_t client_optimal_range_size,
     uint64_t estimated_object_stored_part_size,
+    bool is_express,
     uint64_t *out_request_optimal_range_size) {
 
     AWS_PRECONDITION(out_request_optimal_range_size);
@@ -920,9 +909,22 @@ int aws_s3_calculate_request_optimal_range_size(
         /* Apply minimum constraint first to avoid excessive alignment */
         if (optimal_size < g_default_part_size_fallback) {
             optimal_size = g_default_part_size_fallback;
-        } else {
-            s_s3_range_size_alignment(&optimal_size);
         }
+    }
+    /* Apply a reasonable upper bound to this. The goal to increase the part size is to have less connection to hit one
+     * single part from server so that we are not bottleneck by the server throughput on one part */
+    if (is_express) {
+        /* As in 2025, each part in S3 express can provide over 100 Gbps throughput.
+         *
+         * Each S3express part can provide a much high throughput than we currently asking for (More than 100Gbps per
+         * part throughput, which means it in theory can handle 100 concurrent connections to 1 part). So, 128MiB
+         * with 5GiB max part size gives 40 connections to hit one part. Have larger range(less connections to hit one
+         * part from server) won't help the goal mentioned above. */
+        optimal_size = aws_min_u64(optimal_size, MB_TO_BYTES(128));
+    } else {
+        /* As in 2025, each part in S3 general bucket can provide around 10 Gbps throughput.
+         * Use 2GiB to below the INT32_MAX. Given the 5GiB max part size */
+        optimal_size = aws_min_u64(optimal_size, GB_TO_BYTES(2));
     }
 
     *out_request_optimal_range_size = optimal_size;

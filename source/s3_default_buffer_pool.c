@@ -211,12 +211,14 @@ void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
 
 static int s_default_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size);
 static void s_default_pool_release_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size);
+static uint64_t s_default_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, uint64_t size);
 
 static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
     .reserve = s_default_pool_reserve,
     .trim = s_default_pool_trim,
     .add_special_size = s_default_pool_add_special_size,
     .release_special_size = s_default_pool_release_special_size,
+    .align_range_size = s_default_pool_align_range_size,
 };
 
 static void s_destroy_special_block_list(void *val) {
@@ -939,4 +941,22 @@ static void s_default_pool_release_special_size(struct aws_s3_buffer_pool *buffe
     /* Rely on trim to clean up instead of force it. */
     /* TODO: maybe a better lifetime management. */
     aws_s3_buffer_pool_trim(buffer_pool_wrapper);
+}
+
+static uint64_t s_default_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, uint64_t size) {
+    AWS_PRECONDITION(buffer_pool_wrapper);
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+
+    /* If chunk_size is 0, buffer reuse is disabled, return size unchanged */
+    if (buffer_pool->chunk_size == 0) {
+        return size;
+    }
+
+    uint64_t chunks_needed = size / buffer_pool->chunk_size;
+    if (size % buffer_pool->chunk_size != 0) {
+        ++chunks_needed; /* round up */
+    }
+    /* Return the aligned size */
+    return chunks_needed * buffer_pool->chunk_size;
 }
