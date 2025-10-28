@@ -1393,13 +1393,13 @@ int aws_s3_request_metrics_get_request_id(
 /**
  * Get the extended request ID from aws_s3_request_metrics.
  * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
- * If available, out_amz_id_2 will be set to a string. Be warned this string's lifetime is tied to the metrics
- * object.
+ * If available, out_extended_request_id will be set to a string. Be warned this string's lifetime is tied to the
+ * metrics object.
  **/
 AWS_S3_API
-int aws_s3_request_metrics_get_amz_id_2(
+int aws_s3_request_metrics_get_extended_request_id(
     const struct aws_s3_request_metrics *metrics,
-    const struct aws_string **out_amz_id_2);
+    const struct aws_string **out_extended_request_id);
 
 /* Get the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always
  * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
@@ -1574,10 +1574,10 @@ int aws_s3_request_metrics_get_ip_address(
     const struct aws_s3_request_metrics *metrics,
     const struct aws_string **out_ip_address);
 
-/* Get the id of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data
- * not available */
+/* Get the ptr address of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised
+ * if data not available */
 AWS_S3_API
-int aws_s3_request_metrics_get_connection_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_connection_ptr);
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *out_connection_ptr);
 
 /* Get the pointer to the request that attempt was made from. Always available. */
 AWS_S3_API

@@ -225,7 +225,7 @@ static void s_s3_request_metrics_destroy(void *arg) {
     aws_string_destroy(metrics->req_resp_info_metrics.request_path_query);
     aws_string_destroy(metrics->req_resp_info_metrics.host_address);
     aws_string_destroy(metrics->req_resp_info_metrics.request_id);
-    aws_string_destroy(metrics->req_resp_info_metrics.amz_id_2);
+    aws_string_destroy(metrics->req_resp_info_metrics.extended_request_id);
     aws_string_destroy(metrics->req_resp_info_metrics.operation_name);
     aws_string_destroy(metrics->crt_info_metrics.ip_address);
 
@@ -309,15 +309,15 @@ int aws_s3_request_metrics_get_request_id(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_amz_id_2(
+int aws_s3_request_metrics_get_extended_request_id(
     const struct aws_s3_request_metrics *metrics,
-    const struct aws_string **out_amz_id_2) {
+    const struct aws_string **out_extended_request_id) {
     AWS_PRECONDITION(metrics);
-    AWS_PRECONDITION(out_amz_id_2);
-    if (metrics->req_resp_info_metrics.amz_id_2 == NULL) {
+    AWS_PRECONDITION(out_extended_request_id);
+    if (metrics->req_resp_info_metrics.extended_request_id == NULL) {
         return aws_raise_error(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
     }
-    *out_amz_id_2 = metrics->req_resp_info_metrics.amz_id_2;
+    *out_extended_request_id = metrics->req_resp_info_metrics.extended_request_id;
     return AWS_OP_SUCCESS;
 }
 
@@ -573,7 +573,7 @@ int aws_s3_request_metrics_get_ip_address(
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_connection_ptr(const struct aws_s3_request_metrics *metrics, size_t *connection_ptr) {
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *connection_ptr) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(connection_ptr);
     if (metrics->crt_info_metrics.connection_ptr == NULL) {

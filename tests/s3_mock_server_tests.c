@@ -6,7 +6,6 @@
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
-#include <aws/common/hash_table.h>
 #include <aws/io/stream.h>
 #include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
@@ -140,7 +139,7 @@ static int s_validate_create_multipart_upload_metrics(struct aws_s3_request_metr
     aws_thread_id_t thread_id = 0;
     ASSERT_SUCCESS(aws_s3_request_metrics_get_thread_id(metrics, &thread_id));
     size_t connection_ptr = 0;
-    ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_ptr(metrics, &connection_ptr));
+    ASSERT_SUCCESS(aws_s3_request_metrics_get_connection_id(metrics, &connection_ptr));
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, aws_s3_request_metrics_get_error_code(metrics));
 
     /* Get all those time stamp */
@@ -262,6 +261,7 @@ static int s_validate_retry_metrics(struct aws_array_list *metrics_list, uint32_
                 metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns,
                 metrics2->time_metrics.s3_request_first_attempt_start_timestamp_ns);
             ASSERT_INT_EQUALS(metrics->crt_info_metrics.retry_attempt + 1, metrics2->crt_info_metrics.retry_attempt);
+            ASSERT_TRUE(metrics->crt_info_metrics.request_ptr == metrics2->crt_info_metrics.request_ptr);
             metrics = metrics2;
         }
         ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true));
@@ -473,7 +473,6 @@ TEST_CASE(multipart_upload_failure_with_mock_server) {
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
     {
-        /* 1. Trailer checksum */
         struct aws_s3_tester_meta_request_options put_options = {
             .allocator = allocator,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,

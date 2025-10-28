@@ -146,7 +146,7 @@ struct aws_s3_request_metrics {
         /* The the request ID header value. */
         struct aws_string *request_id;
         /* The the extended request ID header value. */
-        struct aws_string *amz_id_2;
+        struct aws_string *extended_request_id;
         /* S3 operation name for the request */
         struct aws_string *operation_name;
         /* The type of request made */
@@ -303,7 +303,7 @@ struct aws_s3_request {
 
         /* Returned request ID of this request. */
         struct aws_string *request_id;
-        /* Returned amz ID 2 of this request. */
+        /* Returned extended request id of this request. */
         struct aws_string *amz_id_2;
 
         /* The metrics for the request telemetry */
