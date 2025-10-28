@@ -102,6 +102,18 @@ struct aws_s3_buffer_pool_vtable {
      **/
     void (*trim)(struct aws_s3_buffer_pool *pool);
 
+    /**
+     * Optimize the buffer pool for allocations of a specific size.
+     * Creates a separate list of blocks dedicated to this size for better memory efficiency.
+     */
+    int (*add_special_size)(struct aws_s3_buffer_pool *pool, size_t buffer_size);
+
+    /**
+     * Release all special-sized blocks from the buffer pool.
+     * This frees all memory allocated for the special size optimization.
+     */
+    void (*release_special_size)(struct aws_s3_buffer_pool *pool, size_t buffer_size);
+
     /* Implement below for custom ref count behavior. Alternatively set those to null and init the ref count. */
     struct aws_s3_buffer_pool *(*acquire)(struct aws_s3_buffer_pool *pool);
     struct aws_s3_buffer_pool *(*release)(struct aws_s3_buffer_pool *pool);
