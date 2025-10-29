@@ -5048,6 +5048,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         };
 
         size_t object_size_mb = 30;
+        size_t object_size = MB_TO_BYTES(object_size_mb);
         struct aws_s3_tester_meta_request_options put_options = {
             .allocator = allocator,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -5069,6 +5070,8 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
         /*** GET FILE WITH CHECKSUM -- Head object first ***/
+        /* Get object will use the aligned part size based on the estimated part size stored in S3 */
+        uint64_t aligned_part_size = aws_s3_buffer_pool_align_range_size(client->buffer_pool, stored_part_size);
         aws_s3_meta_request_test_results_init(&test_results, allocator);
 
         struct aws_s3_tester_meta_request_options get_options_with_checksum = {
@@ -5095,9 +5098,10 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
         /* Second request made should be get with range and range from 0 to stored part size -1. */
         ASSERT_SUCCESS(
-            s_check_metrics_helper(&test_results, 1, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, stored_part_size - 1));
+            s_check_metrics_helper(&test_results, 1, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, aligned_part_size - 1));
+        /* The last part will be ending with the total size of the object */
         ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 2, AWS_S3_REQUEST_TYPE_GET_OBJECT, 2, stored_part_size, 2 * stored_part_size - 1));
+            &test_results, 2, AWS_S3_REQUEST_TYPE_GET_OBJECT, 2, aligned_part_size, object_size - 1));
 
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
@@ -5132,10 +5136,10 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             AWS_S3_REQUEST_TYPE_GET_OBJECT,
             2,
             (size_t)g_default_part_size_fallback,
-            (size_t)g_default_part_size_fallback + stored_part_size - 1));
+            (size_t)g_default_part_size_fallback + aligned_part_size - 1));
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
-        /*** GET FILE WITHOUT FORCING -- old behavior should be changed ***/
+        /*** GET FILE WITHOUT FORCING -- old behavior should NOT be changed ***/
         aws_s3_meta_request_test_results_init(&test_results, allocator);
 
         struct aws_s3_tester_meta_request_options get_options = {
