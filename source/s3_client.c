@@ -2201,6 +2201,16 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         } else if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
             /* Unless the request is marked "always send", if this meta request has a finish result, then finish the
              * request now and release it. */
+            /* Update the error code for the metrics of the request here since we never acquire/release a connection */
+            request->send_data.metrics->crt_info_metrics.error_code = AWS_ERROR_S3_CANCELED;
+
+            /* Record end times as well */
+            aws_high_res_clock_get_ticks(
+                (uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+            request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
+                request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
+                request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+
             s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
         } else if (
@@ -2334,6 +2344,8 @@ static void s_s3_client_acquired_retry_token(
     /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage */
     aws_s3_client_acquire(client);
 
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns);
+
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);
 
@@ -2390,6 +2402,11 @@ static void s_s3_client_on_acquire_http_connection(
 
         goto error_retry;
     }
+
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_end_timestamp_ns);
+    request->send_data.metrics->time_metrics.conn_acquire_duration_ns =
+        request->send_data.metrics->time_metrics.conn_acquire_end_timestamp_ns -
+        request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns;
 
     connection->http_connection = incoming_http_connection;
     aws_s3_meta_request_send_request(meta_request, connection);
@@ -2490,6 +2507,7 @@ void aws_s3_client_notify_connection_finished(
         }
 
         /* Ask the retry strategy to schedule a retry of the request. */
+        aws_high_res_clock_get_ticks((uint64_t *)&request->retry_start_timestamp_ns);
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
 
@@ -2510,6 +2528,12 @@ void aws_s3_client_notify_connection_finished(
     }
 
 reset_connection:
+
+    aws_high_res_clock_get_ticks(
+        (uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+    request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
+        request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
+        request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
 
     if (connection->retry_token != NULL) {
         /* If we have a retry token and successfully finished, record that success. */
@@ -2578,6 +2602,8 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
 
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
+
+    aws_high_res_clock_get_ticks((uint64_t *)&request->retry_end_timestamp_ns);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
