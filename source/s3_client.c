@@ -373,27 +373,6 @@ struct aws_s3_client *aws_s3_client_new(
     *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
         g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
 
-    /* Calculate optimal range size based on memory limits and connection count */
-    uint64_t calculated_optimal_range_size = 0;
-    if (aws_s3_calculate_client_optimal_range_size(
-            mem_limit, client->ideal_connection_count, &calculated_optimal_range_size) != AWS_OP_SUCCESS) {
-        /* Fall back to default if calculation fails */
-        calculated_optimal_range_size = g_default_part_size_fallback;
-        AWS_LOGF_WARN(
-            AWS_LS_S3_CLIENT, "id=%p: Failed to calculate optimal range size, falling back to default", (void *)client);
-    }
-    *(uint64_t *)&client->optimal_range_size = calculated_optimal_range_size;
-
-    AWS_LOGF_INFO(
-        AWS_LS_S3_CLIENT,
-        "id=%p: Calculated optimal range size: %" PRIu64 " bytes (%.2f MiB) based on memory_limit=%" PRIu64
-        " bytes, ideal_connection_count=%" PRIu32,
-        (void *)client,
-        client->optimal_range_size,
-        (double)client->optimal_range_size / (1024.0 * 1024.0),
-        (uint64_t)mem_limit,
-        client->ideal_connection_count);
-
     size_t part_size = (size_t)g_default_part_size_fallback;
     if (client_config->part_size != 0) {
         if (client_config->part_size > SIZE_MAX) {
@@ -437,6 +416,30 @@ struct aws_s3_client *aws_s3_client_new(
     if (client->buffer_pool == NULL) {
         goto on_error;
     }
+
+    /* Calculate optimal range size based on memory limits and connection count */
+    uint64_t calculated_optimal_range_size = 0;
+    if (aws_s3_calculate_client_optimal_range_size(
+            mem_limit, client->ideal_connection_count, &calculated_optimal_range_size) != AWS_OP_SUCCESS) {
+        /* Fall back to default if calculation fails */
+        calculated_optimal_range_size = g_default_part_size_fallback;
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT, "id=%p: Failed to calculate optimal range size, falling back to default", (void *)client);
+    }
+    /* Apply a buffer pool alignment to the calculated optimal range size */
+    calculated_optimal_range_size =
+        aws_s3_buffer_pool_align_range_size(client->buffer_pool, calculated_optimal_range_size);
+    *((uint64_t *)&client->optimal_range_size) = calculated_optimal_range_size;
+
+    AWS_LOGF_INFO(
+        AWS_LS_S3_CLIENT,
+        "id=%p: Calculated optimal range size: %" PRIu64 " bytes (%.2f MiB) based on memory_limit=%" PRIu64
+        " bytes, ideal_connection_count=%" PRIu32,
+        (void *)client,
+        client->optimal_range_size,
+        (double)client->optimal_range_size / (1024.0 * 1024.0),
+        (uint64_t)mem_limit,
+        client->ideal_connection_count);
 
     client->vtable = &s_s3_client_default_vtable;
 
@@ -1033,6 +1036,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);
         return NULL;
     }
+    meta_request->is_express = use_s3express_signing;
 
     bool error_occurred = false;
 
@@ -1368,10 +1372,18 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     part_size = out_part_size;
                 }
                 if (part_size != options->part_size && part_size != client->part_size) {
+                    /* If we already adjusted the part size, let's algin the part size with expected alignment from
+                     * buffer pool. */
+                    if (num_parts > 2) {
+                        /* If we have less than 2 parts, there is no need to align. */
+                        uint64_t aligned_part_size =
+                            aws_s3_buffer_pool_align_range_size(client->buffer_pool, part_size);
+                        /* Incase of overflow, fallback to no alignment. */
+                        aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
+                        part_size = (size_t)aligned_part_size;
+                    }
                     AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "The multipart upload part size has been adjusted to %" PRIu64 "",
-                        (uint64_t)part_size);
+                        AWS_LS_S3_META_REQUEST, "The multipart upload part size has been adjusted to %zu", part_size);
                 }
 
                 /* Default to client level setting */

@@ -76,8 +76,8 @@ struct aws_byte_buf aws_s3_buffer_ticket_claim(struct aws_s3_buffer_ticket *tick
 }
 
 int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool, size_t buffer_size) {
-    AWS_PRECONDITION(buffer_pool);
-    AWS_PRECONDITION(buffer_size > 0);
+    AWS_ERROR_PRECONDITION(buffer_pool);
+    AWS_ERROR_PRECONDITION(buffer_size > 0);
 
     if (buffer_pool->vtable->add_special_size) {
         return buffer_pool->vtable->add_special_size(buffer_pool, buffer_size);
@@ -93,4 +93,17 @@ void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_p
     if (buffer_pool->vtable->release_special_size) {
         buffer_pool->vtable->release_special_size(buffer_pool, buffer_size);
     }
+}
+
+uint64_t aws_s3_buffer_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t size) {
+    if (buffer_pool == NULL) {
+        return size;
+    }
+
+    if (buffer_pool->vtable->align_range_size) {
+        return buffer_pool->vtable->align_range_size(buffer_pool, size);
+    }
+
+    /* If vtable function not implemented, return size unchanged */
+    return size;
 }

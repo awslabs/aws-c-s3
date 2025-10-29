@@ -360,6 +360,7 @@ int aws_s3_calculate_client_optimal_range_size(
  *
  * @param client_optimal_range_size The client-level optimal range size from initialization
  * @param estimated_object_stored_part_size Estimated size of object stored parts in S3
+ * @param is_express If the request is a s3express request or not.
  * @param out_request_optimal_range_size Output parameter for calculated request-level optimal range size
  * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure (caller should fall back to client size)
  */
@@ -367,6 +368,7 @@ AWS_S3_API
 int aws_s3_calculate_request_optimal_range_size(
     uint64_t client_optimal_range_size,
     uint64_t estimated_object_stored_part_size,
+    bool is_express,
     uint64_t *out_request_optimal_range_size);
 
 /**
