@@ -454,3 +454,8 @@ generate_test_driver(${TEST_BINARY_NAME})
 if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     target_compile_definitions(${PROJECT_NAME}-tests PRIVATE "-DAWS_ENABLE_S3_ENDPOINT_RESOLVER")
 endif()
+
+# Fuzz tests
+include(AwsLibFuzzer)
+file(GLOB FUZZ_TESTS "fuzz/*.c")
+aws_add_fuzz_tests("${FUZZ_TESTS}" "" "")
