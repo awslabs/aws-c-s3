@@ -835,7 +835,8 @@ static void s_s3_auto_ranged_get_request_finished(
 
                 /* Override the part size to be optimal */
                 *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
-                uint64_t parts_threshold = aws_mul_u64_saturating(meta_request->client->ideal_connection_count, 2);
+                uint32_t max_connections = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
+                uint64_t parts_threshold = aws_mul_u64_saturating(max_connections, 2);
                 if (auto_ranged_get->num_stored_parts > parts_threshold) {
                     /* If the number of parts is greater than the threshold, so that we will be reusing the buffers
                      * enough from the buffer pool. Let's add a special block for the buffer pool to optimize the

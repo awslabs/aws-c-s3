@@ -5172,6 +5172,131 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
     return 0;
 }
 
+void s_s3_test_buffer_pool_optimize_before_finish(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data) {
+    (void)meta_request;
+    struct aws_s3_meta_request_test_results *meta_request_test_results =
+        (struct aws_s3_meta_request_test_results *)user_data;
+
+    struct aws_s3_default_buffer_pool_usage_stats pool_usage =
+        aws_s3_default_buffer_pool_get_usage(meta_request->client->buffer_pool);
+    /* Make sure the special block is used here. */
+    AWS_FATAL_ASSERT(pool_usage.special_blocks_num == 1);
+    AWS_FATAL_ASSERT(pool_usage.special_blocks_allocated > 0);
+    AWS_FATAL_ASSERT(result->did_validate);
+    AWS_FATAL_ASSERT(result->validation_algorithm == meta_request_test_results->algorithm);
+    AWS_FATAL_ASSERT(result->error_code == AWS_OP_SUCCESS);
+}
+
+AWS_TEST_CASE(
+    test_s3_round_trip_dynamic_range_size_download_multipart_with_buffer_pool_optimize,
+    s_test_s3_round_trip_dynamic_range_size_download_multipart_with_buffer_pool_optimize)
+static int s_test_s3_round_trip_dynamic_range_size_download_multipart_with_buffer_pool_optimize(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    size_t stored_part_size = MB_TO_BYTES(10);
+    size_t object_size_mb = 120;
+    /**
+     * Given the implementation in Oct. 2025:
+     * - The dynamic part size will be at least g_default_part_size_fallback, which is 8MiB.
+     * - The special size will be used only if there will be more than 2 times of max connections get object requests to
+     *      be made. (parts_threshold)
+     * - The buffer pool will create the special size blocks when it's larger than the primary cutoff.
+     * - The buffer pool will align the range size with the chunk size, which is the part size in the client config.
+     *
+     * Thus
+     * - We use 10MiB as the part size to upload, which will result in the dynamic adjustment to set the range to 10MiB
+     *      for download.
+     * - Set the max_active_connections_override to 5, so that the parts_threshold will be 2*5, which is 10.
+     * - Object size will need to be larger than 10 * 10, which is 100. We pick 120 here.
+     * - Set the part size to be 1MiB, so that the range size will be larger than the primary cutoff from the pool.
+     **/
+    struct aws_s3_tester_client_options client_options = {
+        .memory_limit_in_bytes = GB_TO_BYTES(2),
+        .max_active_connections_override = 5,
+        .part_size = MB_TO_BYTES(1),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+
+    {
+
+        ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+            allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/dynamic_size_multipart_with_pool")));
+        struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+        /* Configure file I/O options for streaming upload */
+        struct aws_s3_file_io_options fio_opts = {
+            .should_stream = true,
+            .direct_io = true,
+        };
+
+        struct aws_s3_tester_meta_request_options put_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .client = client,
+            .checksum_algorithm = AWS_SCA_CRC32,
+            .validate_get_response_checksum = false,
+            .fio_opts = &fio_opts,
+            .part_size = stored_part_size,
+            .put_options =
+                {
+                    .object_size_mb = (uint32_t)object_size_mb,
+                    .object_path_override = object_path,
+                    .file_on_disk = true,
+                    .full_object_checksum = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+        aws_s3_meta_request_test_results_clean_up(&test_results);
+
+        /*** GET FILE WITH CHECKSUM -- Head object first ***/
+        aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+        struct aws_s3_tester_meta_request_options get_options_with_checksum = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .client = client,
+            .expected_validate_checksum_alg = AWS_SCA_CRC32,
+            .validate_get_response_checksum = true,
+            .finish_callback = s_s3_test_buffer_pool_optimize_before_finish,
+            .get_options =
+                {
+                    .object_path = object_path,
+                    .file_on_disk = true,
+                    .force_dynamic_part_size = true,
+                },
+        };
+        ASSERT_SUCCESS(
+            aws_s3_tester_send_meta_request_with_options(&tester, &get_options_with_checksum, &test_results));
+        ASSERT_TRUE(test_results.did_validate);
+        /* After the meta request finishes, the special block is trimmed. */
+        struct aws_s3_default_buffer_pool_usage_stats pool_usage =
+            aws_s3_default_buffer_pool_get_usage(client->buffer_pool);
+        ASSERT_UINT_EQUALS(pool_usage.special_blocks_num, 0);
+        ASSERT_UINT_EQUALS(pool_usage.special_blocks_allocated, 0);
+        aws_s3_meta_request_test_results_clean_up(&test_results);
+    }
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(
     test_s3_round_trip_dynamic_range_size_download_single_part,
     s_test_s3_round_trip_dynamic_range_size_download_single_part)
