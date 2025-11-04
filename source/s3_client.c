@@ -1375,20 +1375,27 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         return NULL;
                     }
                     part_size = out_part_size;
-                }
-                if (part_size != options->part_size && part_size != client->part_size) {
-                    /* If we already adjusted the part size, let's algin the part size with expected alignment from
-                     * buffer pool. */
-                    if (num_parts > 2) {
-                        /* If we have less than 2 parts, there is no need to align. */
-                        uint64_t aligned_part_size =
-                            aws_s3_buffer_pool_align_range_size(client->buffer_pool, part_size);
-                        /* Incase of overflow, fallback to no alignment. */
-                        aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
-                        part_size = (size_t)aligned_part_size;
+                    if (part_size != options->part_size && part_size != client->part_size) {
+                        /* If we already adjusted the part size, let's algin the part size with expected alignment from
+                         * buffer pool. */
+                        if (num_parts > 2) {
+                            /* If we have less than 2 parts, there is no need to align. */
+                            uint64_t aligned_part_size =
+                                aws_s3_buffer_pool_align_range_size(client->buffer_pool, part_size);
+                            /* Incase of overflow, fallback to no alignment. */
+                            aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
+                            part_size = (size_t)aligned_part_size;
+                            /* update the number of parts as well. */
+                            num_parts = (uint32_t)(content_length / part_size);
+                            if ((content_length % part_size) > 0) {
+                                ++num_parts;
+                            }
+                        }
+                        AWS_LOGF_DEBUG(
+                            AWS_LS_S3_META_REQUEST,
+                            "The multipart upload part size has been adjusted to %zu",
+                            part_size);
                     }
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST, "The multipart upload part size has been adjusted to %zu", part_size);
                 }
 
                 /* Default to client level setting */
