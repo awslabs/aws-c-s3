@@ -821,15 +821,14 @@ static void s_s3_auto_ranged_get_request_finished(
             /* No part size has been set from user. Now we use the optimal part size based on the throughput and memory
              * limit */
             uint64_t out_request_optimal_range_size = 0;
-            int error = aws_s3_calculate_request_optimal_range_size(
-                meta_request->client->optimal_range_size,
-                auto_ranged_get->estimated_object_stored_part_size,
-                &out_request_optimal_range_size);
-            if (!error) {
+            if (aws_s3_calculate_request_optimal_range_size(
+                    meta_request->client->optimal_range_size,
+                    auto_ranged_get->estimated_object_stored_part_size,
+                    &out_request_optimal_range_size) == AWS_OP_SUCCESS) {
                 /* Override the part size to be optimal */
                 *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
                 if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT) {
-                    /* Update the first part size as well */
+                    /* Update the first part size as well, if we haven't made the request yet. */
                     first_part_size = meta_request->part_size;
                 }
             }
