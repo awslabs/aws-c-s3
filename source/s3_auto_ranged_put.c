@@ -1086,36 +1086,25 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->allocator = allocator;
     part_prep->request = request;
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
+    s_compute_request_body_size(meta_request, request);
 
     if (request->fio_streaming) {
         /* Create the request body stream for the HTTP to read directly from the file. If retry happens, just recreate
          * it. */
         aws_input_stream_release(request->request_body_stream);
-        s_compute_request_body_size(meta_request, request);
         AWS_ASSERT(meta_request->request_body_parallel_stream != NULL);
         int error_code = AWS_ERROR_SUCCESS;
-        if (request->content_length > SIZE_MAX) {
-            error_code = AWS_ERROR_INVALID_ARGUMENT;
-            /* The computed content length is larger than the size max. Log the error.*/
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Failed to prepare upload part, computed content length:%" PRIu64
-                ", is larger than the size max.",
-                (void *)meta_request,
-                (uint64_t)request->content_length);
-        } else {
-            request->request_body_stream = aws_part_streaming_input_stream_new(
-                allocator,
-                meta_request->request_body_parallel_stream,
-                request->ticket,
-                request->part_range_start,
-                (size_t)request->content_length,
-                meta_request->fio_opts.direct_io);
+        request->request_body_stream = aws_part_streaming_input_stream_new(
+            allocator,
+            meta_request->request_body_parallel_stream,
+            request->ticket,
+            request->part_range_start,
+            (size_t)request->content_length,
+            meta_request->fio_opts.direct_io);
 
-            if (request->num_times_prepared == 0) {
-                if (s_s3_new_upload_part_info_after_body(request, meta_request, false)) {
-                    error_code = aws_last_error_or_unknown();
-                }
+        if (request->num_times_prepared == 0) {
+            if (s_s3_new_upload_part_info_after_body(request, meta_request, false)) {
+                error_code = aws_last_error_or_unknown();
             }
         }
         /* Skip `aws_s3_meta_request_read_body` to buffer the part. invoke prepare upload part finish directly. */
@@ -1127,11 +1116,10 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
          * from an upload that had been paused) */
 
         /* Read the body */
-        s_compute_request_body_size(meta_request, request);
         if (request->request_body.capacity == 0) {
             AWS_FATAL_ASSERT(request->ticket);
             request->request_body = aws_s3_buffer_ticket_claim(request->ticket);
-            request->request_body.capacity = request->content_length;
+            request->request_body.capacity = (size_t)request->content_length;
         }
 
         part_prep->asyncstep_read_part =
