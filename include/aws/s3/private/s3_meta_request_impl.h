@@ -157,8 +157,6 @@ struct aws_s3_meta_request {
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
-    /* Hard limit on max connections set through the meta request option. */
-    const uint32_t max_active_connections_override;
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
