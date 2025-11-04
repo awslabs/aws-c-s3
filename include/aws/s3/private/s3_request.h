@@ -241,11 +241,9 @@ struct aws_s3_request {
     struct aws_s3_buffer_ticket *ticket;
 
     /* Beginning range of this part. */
-    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
     uint64_t part_range_start;
 
     /* Last byte of this part.*/
-    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
     uint64_t part_range_end;
 
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)

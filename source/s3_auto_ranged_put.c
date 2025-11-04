@@ -763,17 +763,18 @@ static bool s_s3_auto_ranged_put_update(
  * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
  * part.
  */
-static size_t s_compute_request_body_size(
+static void s_compute_request_body_size(
     const struct aws_s3_meta_request *meta_request,
-    uint32_t part_number,
-    uint64_t *offset_out) {
+    struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     size_t request_body_size = meta_request->part_size;
     /* Last part--adjust size to match remaining content length. */
-    if (auto_ranged_put->has_content_length && part_number == auto_ranged_put->total_num_parts_from_content_length) {
+    if (auto_ranged_put->has_content_length &&
+        request->part_number == auto_ranged_put->total_num_parts_from_content_length) {
         size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
 
         if (content_remainder > 0) {
@@ -781,9 +782,9 @@ static size_t s_compute_request_body_size(
         }
     }
     /* The part_number starts at 1 */
-    *offset_out = (part_number - 1) * meta_request->part_size;
-
-    return request_body_size;
+    request->part_range_start = (request->part_number - 1) * meta_request->part_size;
+    request->part_range_end = request->part_range_start + request_body_size - 1;
+    request->content_length = request_body_size;
 }
 
 static int s_verify_part_matches_checksum(
@@ -1090,17 +1091,15 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
         /* Create the request body stream for the HTTP to read directly from the file. If retry happens, just recreate
          * it. */
         aws_input_stream_release(request->request_body_stream);
-        uint64_t offset = 0;
-        size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+        s_compute_request_body_size(meta_request, request);
         AWS_ASSERT(meta_request->request_body_parallel_stream != NULL);
         request->request_body_stream = aws_part_streaming_input_stream_new(
             allocator,
             meta_request->request_body_parallel_stream,
             request->ticket,
-            offset,
-            request_body_size,
+            request->part_range_start,
+            request->content_length,
             meta_request->fio_opts.direct_io);
-        request->content_length = request_body_size;
         int error_code = AWS_ERROR_SUCCESS;
 
         if (request->num_times_prepared == 0) {
@@ -1117,15 +1116,15 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
          * from an upload that had been paused) */
 
         /* Read the body */
-        uint64_t offset = 0;
-        size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
+        s_compute_request_body_size(meta_request, request);
         if (request->request_body.capacity == 0) {
             AWS_FATAL_ASSERT(request->ticket);
             request->request_body = aws_s3_buffer_ticket_claim(request->ticket);
-            request->request_body.capacity = request_body_size;
+            request->request_body.capacity = request->content_length;
         }
 
-        part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
+        part_prep->asyncstep_read_part =
+            aws_s3_meta_request_read_body(meta_request, request->part_range_start, &request->request_body);
         aws_future_bool_register_callback(
             part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
     } else {
@@ -1159,20 +1158,20 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
             request->request_body.capacity);
         goto on_done;
     }
-    /* Reading succeeded. */
-    request->content_length = request->request_body.len;
     bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
-
-    uint64_t offset = 0;
-    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
     /* If Content-Length is defined, check that we read the expected amount */
-    if (has_content_length && (request->request_body.len < request_body_size)) {
+    if (has_content_length && (request->request_body.len < request->content_length)) {
         error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Request body is smaller than 'Content-Length' header said it would be",
             (void *)meta_request);
         goto on_done;
+    }
+    if (!has_content_length && (request->request_body.len < request->content_length)) {
+        /* The stream is not ready to provide enough data as expected. Update the tracking numbers. */
+        request->content_length = request->request_body.len;
+        request->part_range_end = request->part_range_start + request->content_length - 1;
     }
     request->is_noop = request->part_number >
                            1 && /* allow first part to have 0 length to support empty unknown content length objects. */
