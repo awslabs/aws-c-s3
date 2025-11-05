@@ -4987,6 +4987,33 @@ static int s_test_s3_round_trip_mpu_with_filepath_streaming_full_object_checksum
         AWS_TEST_FOC_CALLBACK);
 }
 
+static int s_check_metrics_upload_part_helper(
+    struct aws_s3_meta_request_test_results *test_results,
+    size_t expected_part_size,
+    size_t index) {
+    struct aws_s3_request_metrics *metrics = NULL;
+    /* The upload part can be completed out of order. Just make sure the range matches the part number */
+    ASSERT_SUCCESS(aws_array_list_get_at(&test_results->synced_data.succeed_metrics, (void **)&metrics, index));
+    enum aws_s3_request_type out_request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+    aws_s3_request_metrics_get_request_type(metrics, &out_request_type);
+    uint32_t part_number = 0;
+    aws_s3_request_metrics_get_part_number(metrics, &part_number);
+    ASSERT_TRUE(part_number >= 1); /* The part number starts at 1 */
+    /* calculate the expected range start and end based on the part number and part size. */
+    size_t expected_range_start = (part_number - 1) * expected_part_size;
+    size_t expected_range_end = part_number * expected_part_size - 1;
+
+    uint64_t range_start = 0;
+    uint64_t range_end = 0;
+    aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
+    aws_s3_request_metrics_get_part_range_end(metrics, &range_end);
+    ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_UPLOAD_PART, out_request_type);
+    ASSERT_UINT_EQUALS(expected_range_start, range_start);
+    ASSERT_UINT_EQUALS(expected_range_end, range_end);
+
+    return AWS_OP_SUCCESS;
+}
+
 static int s_check_metrics_helper(
     struct aws_s3_meta_request_test_results *test_results,
     size_t index,
@@ -4996,7 +5023,6 @@ static int s_check_metrics_helper(
     size_t expected_range_end) {
     struct aws_s3_request_metrics *metrics = NULL;
 
-    /* First metrics should be the CreateMPU */
     ASSERT_SUCCESS(aws_array_list_get_at(&test_results->synced_data.succeed_metrics, (void **)&metrics, index));
     enum aws_s3_request_type out_request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
     aws_s3_request_metrics_get_request_type(metrics, &out_request_type);
@@ -5066,6 +5092,9 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &test_results));
+        ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD, 0, 0, 0));
+        ASSERT_SUCCESS(s_check_metrics_upload_part_helper(&test_results, stored_part_size, 1));
+        ASSERT_SUCCESS(s_check_metrics_upload_part_helper(&test_results, stored_part_size, 2));
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
         /*** GET FILE WITH CHECKSUM -- Head object first ***/
