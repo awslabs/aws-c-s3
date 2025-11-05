@@ -121,8 +121,8 @@ static const uint32_t s_optimal_range_size_memory_divisor = 3;
  * server side limitation.
  */
 const uint32_t g_s3express_connection_limitation = 75;
-const uint64_t g_s3express_connection_limitation_part_size_threshold =
-    g_default_max_part_size / g_s3express_connection_limitation;
+#define AWS_S3EXPRESS_THRESHOLD_CALC (g_default_max_part_size / g_s3express_connection_limitation)
+const uint64_t g_s3express_connection_limitation_part_size_threshold = AWS_S3EXPRESS_THRESHOLD_CALC;
 const uint64_t g_s3express_connection_limitation_object_size_threshold = TB_TO_BYTES(4);
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
