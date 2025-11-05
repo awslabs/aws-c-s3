@@ -438,6 +438,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client->enable_read_backpressure && client->initial_read_window) {
         /* Make sure we can have at least 10 parts to be delivered. */
         uint64_t initial_read_window_cap = client->initial_read_window / 10;
+        initial_read_window_cap = aws_max_u64(initial_read_window_cap, g_default_part_size_fallback);
         calculated_optimal_range_size = aws_min_u64(calculated_optimal_range_size, initial_read_window_cap);
     }
     *((uint64_t *)&client->optimal_range_size) = calculated_optimal_range_size;
@@ -445,12 +446,13 @@ struct aws_s3_client *aws_s3_client_new(
     AWS_LOGF_INFO(
         AWS_LS_S3_CLIENT,
         "id=%p: Calculated optimal range size: %" PRIu64 " bytes (%.2f MiB) based on memory_limit=%" PRIu64
-        " bytes, ideal_connection_count=%" PRIu32,
+        " bytes, ideal_connection_count=%" PRIu32 ", and initial_read_window=%zu.",
         (void *)client,
         client->optimal_range_size,
         (double)client->optimal_range_size / (1024.0 * 1024.0),
         (uint64_t)mem_limit,
-        client->ideal_connection_count);
+        client->ideal_connection_count,
+        client->initial_read_window);
 
     client->vtable = &s_s3_client_default_vtable;
 
