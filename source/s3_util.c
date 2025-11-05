@@ -125,6 +125,8 @@ static const uint32_t s_optimal_range_size_memory_divisor = 3;
 const uint32_t g_s3express_connection_limitation = G_S3EXPRESS_CONNECTION_LIMITATION;
 const uint64_t g_s3express_connection_limitation_part_size_threshold =
     G_DEFAULT_MAX_PART_SIZE / G_S3EXPRESS_CONNECTION_LIMITATION;
+#undef G_S3EXPRESS_CONNECTION_LIMITATION
+#undef G_DEFAULT_MAX_PART_SIZE
 const uint64_t g_s3express_connection_limitation_object_size_threshold = TB_TO_BYTES(4);
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
