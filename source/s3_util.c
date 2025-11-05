@@ -96,7 +96,8 @@ const uint64_t g_streaming_object_size_threshold = TB_TO_BYTES(1);
  * Default max part size is 5GiB as the current server limit.
  **/
 const uint64_t g_default_part_size_fallback = MB_TO_BYTES(8);
-const uint64_t g_default_max_part_size = 5368709120ULL;
+#define G_DEFAULT_MAX_PART_SIZE 5368709120ULL
+const uint64_t g_default_max_part_size = G_DEFAULT_MAX_PART_SIZE;
 
 /* TODO: Use a reasonable alignment with the update of the buffer pool */
 const uint64_t g_s3_optimal_range_size_alignment = 1;
@@ -120,9 +121,10 @@ static const uint32_t s_optimal_range_size_memory_divisor = 3;
  * 2. If the object size is less than the threshold, we keep our previous behavior, as it's less likely to hit the
  * server side limitation.
  */
-const uint32_t g_s3express_connection_limitation = 75;
-#define AWS_S3EXPRESS_THRESHOLD_CALC (g_default_max_part_size / g_s3express_connection_limitation)
-const uint64_t g_s3express_connection_limitation_part_size_threshold = AWS_S3EXPRESS_THRESHOLD_CALC;
+#define G_S3EXPRESS_CONNECTION_LIMITATION 75
+const uint32_t g_s3express_connection_limitation = G_S3EXPRESS_CONNECTION_LIMITATION;
+const uint64_t g_s3express_connection_limitation_part_size_threshold =
+    G_DEFAULT_MAX_PART_SIZE / G_S3EXPRESS_CONNECTION_LIMITATION;
 const uint64_t g_s3express_connection_limitation_object_size_threshold = TB_TO_BYTES(4);
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
