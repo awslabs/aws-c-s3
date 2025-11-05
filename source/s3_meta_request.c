@@ -257,6 +257,7 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_meta_request_event));
 
     *((size_t *)&meta_request->part_size) = part_size;
+    *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     if (aws_s3_meta_request_checksum_config_storage_init(
             meta_request->allocator,

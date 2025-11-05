@@ -109,6 +109,22 @@ const uint64_t g_s3_optimal_range_size_alignment = 1;
  */
 static const uint32_t s_optimal_range_size_memory_divisor = 3;
 
+/**
+ * TODO: THIS IS A TEMP WORKAROUND, not the long term solution.
+ * As in Nov 2025, S3Express recommended to have no more than 75 connections to one single part.
+ *
+ * However, client don't know the part boundaries unless with an extra call. Thus, these are the workarounds to avoid
+ * the issue.
+ * 1. If the Part Size we set is larger than the possible size to hit the limitation, we are safe to make as many
+ * connections as we want.
+ * 2. If the object size is less than the threshold, we keep our previous behavior, as it's less likely to hit the
+ * server side limitation.
+ */
+const uint32_t g_s3express_connection_limitation = 75;
+const uint64_t g_s3express_connection_limitation_part_size_threshold =
+    g_default_max_part_size / g_s3express_connection_limitation;
+const uint64_t g_s3express_connection_limitation_object_size_threshold = TB_TO_BYTES(4);
+
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
     AWS_PRECONDITION(dest);

@@ -169,6 +169,14 @@ extern const uint64_t g_default_max_part_size;
 
 AWS_S3_API
 extern const uint64_t g_s3_optimal_range_size_alignment;
+
+AWS_S3_API
+extern const uint32_t g_s3express_connection_limitation;
+AWS_S3_API
+extern const uint64_t g_s3express_connection_limitation_part_size_threshold;
+AWS_S3_API
+extern const uint64_t g_s3express_connection_limitation_object_size_threshold;
+
 /**
  * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
  */
