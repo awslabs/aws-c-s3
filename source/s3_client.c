@@ -434,6 +434,12 @@ struct aws_s3_client *aws_s3_client_new(
     /* Apply a buffer pool alignment to the calculated optimal range size */
     calculated_optimal_range_size =
         aws_s3_buffer_pool_align_range_size(client->buffer_pool, calculated_optimal_range_size);
+    /* Note: cap the calculated optimal range size based on the initial window size to avoid blocking. */
+    if (client->enable_read_backpressure && client->initial_read_window) {
+        /* Make sure we can have at least 10 parts to be delivered. */
+        uint64_t initial_read_window_cap = client->initial_read_window / 10;
+        calculated_optimal_range_size = aws_min_u64(calculated_optimal_range_size, initial_read_window_cap);
+    }
     *((uint64_t *)&client->optimal_range_size) = calculated_optimal_range_size;
 
     AWS_LOGF_INFO(
