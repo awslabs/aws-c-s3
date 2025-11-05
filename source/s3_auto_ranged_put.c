@@ -759,15 +759,12 @@ static bool s_s3_auto_ranged_put_update(
 }
 
 /**
- * Helper to compute request body size.
- * Basically returns either part size or if content is not equally divisible into parts, the size of the remaining last
- * part.
+ * Helper to initialize the request ranges and content-length
+ * based on the request->part_number and meta_request->part_size
  */
-static void s_compute_request_body_size(
-    const struct aws_s3_meta_request *meta_request,
-    struct aws_s3_request *request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(request);
+static int s_compute_request_body_size(const struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(request);
 
     const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
@@ -781,10 +778,14 @@ static void s_compute_request_body_size(
             request_body_size = content_remainder;
         }
     }
-    /* The part_number starts at 1 */
-    request->part_range_start = (request->part_number - 1) * meta_request->part_size;
-    request->part_range_end = request->part_range_start + request_body_size - 1;
+    if (aws_mul_u64_checked(request->part_number - 1, meta_request->part_size, &request->part_range_start)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_add_u64_checked(request->part_range_start, request_body_size - 1, &request->part_range_end)) {
+        return AWS_OP_ERR;
+    }
     request->content_length = request_body_size;
+    return AWS_OP_SUCCESS;
 }
 
 static int s_verify_part_matches_checksum(
@@ -1086,7 +1087,10 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->allocator = allocator;
     part_prep->request = request;
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
-    s_compute_request_body_size(meta_request, request);
+    if (s_compute_request_body_size(meta_request, request)) {
+        s_s3_prepare_upload_part_finish(part_prep, aws_last_error_or_unknown());
+        return message_future;
+    }
 
     if (request->fio_streaming) {
         /* Create the request body stream for the HTTP to read directly from the file. If retry happens, just recreate
