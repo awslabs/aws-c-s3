@@ -172,6 +172,7 @@ struct aws_s3_request_metrics {
         bool memory_allocated_from_pool;
     } crt_info_metrics;
 
+    /* TODO: align the part info metrics with the others, eg: `aws_s3_mpu_part_info`. */
     struct {
         /* Beginning range of this part. */
         uint64_t part_range_start;

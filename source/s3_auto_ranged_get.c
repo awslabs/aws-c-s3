@@ -823,18 +823,17 @@ static void s_s3_auto_ranged_get_request_finished(
             /* No part size has been set from user. Now we use the optimal part size based on the throughput and memory
              * limit */
             uint64_t out_request_optimal_range_size = 0;
-            int error = aws_s3_calculate_request_optimal_range_size(
-                meta_request->client->optimal_range_size,
-                auto_ranged_get->estimated_object_stored_part_size,
-                meta_request->is_express,
-                &out_request_optimal_range_size);
-            if (!error) {
+
+            if (aws_s3_calculate_request_optimal_range_size(
+                    meta_request->client->optimal_range_size,
+                    auto_ranged_get->estimated_object_stored_part_size,
+                    meta_request->is_express,
+                    &out_request_optimal_range_size) == AWS_OP_SUCCESS) {
+                /* Override the part size to be optimal */
+                *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
                 /* Apply a buffer pool alignment to the calculated result. */
                 out_request_optimal_range_size = aws_s3_buffer_pool_align_range_size(
                     meta_request->client->buffer_pool, out_request_optimal_range_size);
-
-                /* Override the part size to be optimal */
-                *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
                 uint32_t max_connections = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
                 uint64_t parts_threshold = aws_mul_u64_saturating(max_connections, 2);
                 if (auto_ranged_get->num_stored_parts > parts_threshold) {
@@ -845,7 +844,7 @@ static void s_s3_auto_ranged_get_request_finished(
                     meta_request->buffer_pool_optimized = true;
                 }
                 if (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT) {
-                    /* Update the first part size as well */
+                    /* Update the first part size as well, if we haven't made the request yet. */
                     first_part_size = meta_request->part_size;
                 }
             }
@@ -953,8 +952,8 @@ update_synced_data:
                 if (empty_file_error) {
                     /*
                      * Try to download the object again using GET_OBJECT_WITH_PART_NUMBER_1. If the file is still
-                     * empty, successful response headers will be provided to users. If not, the newer version of the
-                     * file will be downloaded.
+                     * empty, successful response headers will be provided to users. If not, the newer version of
+                     * the file will be downloaded.
                      */
                     auto_ranged_get->synced_data.num_parts_requested = 0;
                     auto_ranged_get->synced_data.object_range_known = 0;
@@ -1016,7 +1015,8 @@ update_synced_data:
             }
             aws_s3_meta_request_set_fail_synced(meta_request, request, error_code);
             if (error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH) {
-                /* It's a mismatch of checksum, tell user that we validated the checksum and the algorithm we validated
+                /* It's a mismatch of checksum, tell user that we validated the checksum and the algorithm we
+                 * validated
                  */
                 meta_request->synced_data.finish_result.did_validate = true;
                 meta_request->synced_data.finish_result.validation_algorithm = request->validation_algorithm;
