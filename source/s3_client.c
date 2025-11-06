@@ -2214,14 +2214,17 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
     struct aws_linked_list left_over_requests;
     aws_linked_list_init(&left_over_requests);
+    uint32_t client_max_active_connections = aws_s3_client_get_max_active_connections(client, NULL);
+    uint32_t num_requests_network_io = s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX);
+    bool queue_is_empty = aws_linked_list_empty(&client->threaded_data.request_queue);
 
-    while (s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX) <
-               aws_s3_client_get_max_active_connections(client, NULL) &&
-           !aws_linked_list_empty(&client->threaded_data.request_queue)) {
+    while (num_requests_network_io < client_max_active_connections && !queue_is_empty) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
+        /* As the request removed from the queue. Decrement the preparing track */
+        --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         if (request->is_noop) {
             /* If request is no-op, finishes and cleans up the request */
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_SUCCESS);
@@ -2244,12 +2247,15 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         } else if ((uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) < max_active_connections) {
             /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);
-            /* As the request moved to network IO. Decrement the preparing track */
-            --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         } else {
             /* Push the request into the left-over list to be used in a future call of this function. */
             aws_linked_list_push_back(&left_over_requests, &request->node);
+            /* Increment the count as we put it back to the queue. */
+            ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
         }
+        client_max_active_connections = aws_s3_client_get_max_active_connections(client, NULL);
+        num_requests_network_io = s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX);
+        queue_is_empty = aws_linked_list_empty(&client->threaded_data.request_queue);
     }
 
     aws_s3_client_queue_requests_threaded(client, &left_over_requests, true);
