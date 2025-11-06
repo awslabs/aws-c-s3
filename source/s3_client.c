@@ -180,8 +180,9 @@ uint32_t aws_s3_client_get_max_active_connections(
     }
     if (meta_request) {
         if (meta_request->max_active_connections_override) {
-            /* Apply the meta request level override the max active connections. */
-            max_active_connections = meta_request->max_active_connections_override;
+            /* Apply the meta request level override the max active connections, but less than the client side settings.
+             */
+            max_active_connections = aws_min_u32(meta_request->max_active_connections_override, max_active_connections);
         }
         if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps > 0) {
             return aws_min_u32(
