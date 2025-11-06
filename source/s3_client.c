@@ -1906,6 +1906,12 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
+    if (meta_request->client_process_work_threaded_data.num_request_being_prepared >=
+        aws_s3_client_get_max_active_connections(client, meta_request)) {
+        /* Don't prepare more than it's allowed for the meta request */
+        return false;
+    }
+
     /* Nothing blocks the meta request to create more requests */
     return true;
 }
@@ -2119,6 +2125,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     request->tracked_by_client = true;
 
                     ++client->threaded_data.num_requests_being_prepared;
+                    ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
 
                     num_requests_in_flight =
                         (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
@@ -2213,12 +2220,13 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
            !aws_linked_list_empty(&client->threaded_data.request_queue)) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
-        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, request->meta_request);
+        struct aws_s3_meta_request *meta_request = request->meta_request;
+        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
         if (request->is_noop) {
             /* If request is no-op, finishes and cleans up the request */
-            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_SUCCESS);
+            s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_SUCCESS);
             request = aws_s3_request_release(request);
-        } else if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        } else if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
             /* Unless the request is marked "always send", if this meta request has a finish result, then finish the
              * request now and release it. */
             /* Update the error code for the metrics of the request here since we never acquire/release a connection */
@@ -2231,11 +2239,13 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
                 request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
                 request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
 
-            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
+            s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
-        } else if (
-            s_s3_client_get_num_requests_network_io(client, request->meta_request->type) < max_active_connections) {
+        } else if ((uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) < max_active_connections) {
+            /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);
+            /* As the request moved to network IO. Decrement the preparing track */
+            --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         } else {
             /* Push the request into the left-over list to be used in a future call of this function. */
             aws_linked_list_push_back(&left_over_requests, &request->node);
@@ -2278,6 +2288,7 @@ static void s_s3_client_create_connection_for_request_default(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    aws_atomic_fetch_add(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_add(&client->stats.num_requests_network_io[meta_request->type], 1);
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
@@ -2572,7 +2583,7 @@ reset_connection:
             aws_http_connection_close(connection->http_connection);
         }
     }
-
+    aws_atomic_fetch_sub(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_sub(&client->stats.num_requests_network_io[meta_request->type], 1);
 
     s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
