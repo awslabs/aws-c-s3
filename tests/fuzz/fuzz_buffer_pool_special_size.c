@@ -71,9 +71,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         num_reservations = available_for_reservations;
     }
 
-    /* Create buffer pool with reasonable defaults */
+    /* Create buffer pool with balanced memory limit to avoid OOM during fuzzing */
     size_t part_size = MB_TO_BYTES(8);
-    size_t memory_limit = GB_TO_BYTES(2);
+    size_t memory_limit = GB_TO_BYTES(1); /* 1GB - balanced between functionality and avoiding OOM */
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
         allocator, (struct aws_s3_buffer_pool_config){.part_size = part_size, .memory_limit = memory_limit});
 
@@ -335,14 +335,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         }
     }
 
+    for (size_t j = 0; j < valid_special_sizes; ++j) {
+        aws_s3_buffer_pool_release_special_size(buffer_pool, special_sizes[j]);
+    }
+    /* Force trim */
+    aws_s3_buffer_pool_trim(buffer_pool);
+
     /* Check final stats after release */
     struct aws_s3_default_buffer_pool_usage_stats final_stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
 
     /* Verify everything is released */
+    AWS_FATAL_ASSERT(final_stats.primary_allocated == 0);
     AWS_FATAL_ASSERT(final_stats.primary_used == 0);
     AWS_FATAL_ASSERT(final_stats.primary_reserved == 0);
     AWS_FATAL_ASSERT(final_stats.secondary_used == 0);
     AWS_FATAL_ASSERT(final_stats.secondary_reserved == 0);
+    AWS_FATAL_ASSERT(final_stats.special_blocks_allocated == 0);
     AWS_FATAL_ASSERT(final_stats.special_blocks_used == 0);
     AWS_FATAL_ASSERT(final_stats.special_blocks_reserved == 0);
     AWS_FATAL_ASSERT(final_stats.forced_used == 0);
@@ -359,7 +367,6 @@ cleanup:
     /* Check for memory leaks */
     AWS_FATAL_ASSERT(aws_mem_tracer_count(allocator) == 0);
     allocator = aws_mem_tracer_destroy(allocator);
-
     return 0;
 }
 
