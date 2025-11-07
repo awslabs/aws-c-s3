@@ -6,8 +6,6 @@
 #include <aws/s3/private/s3_default_buffer_pool.h>
 
 #include <aws/common/array_list.h>
-#include <aws/common/hash_table.h>
-#include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/system_info.h>
 #include <aws/io/future.h>
@@ -83,62 +81,6 @@ static const size_t s_max_chunk_size_for_buffer_reuse = MB_TO_BYTES(64);
  * For example: if mem_limit is 10GiB, and forced_use is 11GiB, and THIS number is 90(%),
  * we still consider 1GiB available for normal buffer usage. */
 static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage = 80;
-
-/* Structure to track special-sized blocks */
-struct s3_special_block_list {
-    struct aws_allocator *allocator;
-    size_t buffer_size;           /* Size of buffers in this list */
-    struct aws_array_list blocks; /* Array of uint8_t* pointers to allocated blocks */
-};
-
-struct aws_s3_default_buffer_pool {
-    struct aws_allocator *base_allocator;
-    struct aws_mutex mutex;
-
-    size_t block_size;
-    size_t chunk_size;
-    /* size at which allocations should go to secondary */
-    size_t primary_size_cutoff;
-
-    /* NOTE: See aws_s3_buffer_pool_usage_stats for descriptions of most fields */
-
-    size_t mem_limit;
-
-    size_t primary_allocated;
-    size_t primary_reserved;
-    size_t primary_used;
-
-    size_t special_blocks_allocated;
-    size_t special_blocks_reserved;
-    size_t special_blocks_used;
-
-    size_t secondary_reserved;
-    size_t secondary_used;
-
-    size_t forced_used;
-
-    struct aws_array_list blocks;
-
-    struct aws_linked_list pending_reserves;
-
-    /* Special-sized blocks: hash table mapping size -> struct s3_special_block_list * */
-    /* TODO: let's discuss about the special list lifetime. Should we just keep it with the memory pool? Concern is that
-     * the pool will live with the client, and may result in all sorts of special lists to be around. */
-    struct aws_hash_table special_blocks;
-};
-
-struct s3_pending_reserve {
-    struct aws_linked_list_node node;
-    struct aws_future_s3_buffer_ticket *ticket_future;
-    struct aws_s3_default_buffer_ticket *ticket;
-    struct aws_s3_buffer_pool_reserve_meta meta;
-};
-
-struct s3_buffer_pool_block {
-    size_t block_size;
-    uint8_t *block_ptr;
-    uint16_t alloc_bit_mask;
-};
 
 /*
  * Sets n bits at position starting with LSB.
@@ -394,7 +336,8 @@ static void s_buffer_pool_trim_special_blocks_synced(struct aws_s3_default_buffe
                 ++i;
             }
         }
-        if (aws_array_list_length(&special_list->blocks) == 0 && buffer_pool->special_blocks_reserved == 0) {
+        if (aws_array_list_length(&special_list->blocks) == 0 && buffer_pool->special_blocks_reserved == 0 &&
+            !buffer_pool->force_keeping_special_blocks) {
             /* Remove the element iter points to as it's not being used. */
             aws_hash_iter_delete(&iter, true);
         }
