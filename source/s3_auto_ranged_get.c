@@ -817,6 +817,7 @@ static void s_s3_auto_ranged_get_request_finished(
          * into this function is being handled and does not indicate an overall failure.*/
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
+        uint32_t max_connections = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
 
         if (auto_ranged_get->force_dynamic_part_size ||
             (!auto_ranged_get->part_size_set && !meta_request->client->part_size_set)) {
@@ -829,17 +830,27 @@ static void s_s3_auto_ranged_get_request_finished(
                     auto_ranged_get->estimated_object_stored_part_size,
                     meta_request->is_express,
                     &out_request_optimal_range_size) == AWS_OP_SUCCESS) {
+                /* Apply a buffer pool alignment to the calculated result. */
+                out_request_optimal_range_size = aws_s3_buffer_pool_align_range_size(
+                    meta_request->client->buffer_pool, out_request_optimal_range_size);
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Override the part size to be optimal. part_size=%" PRIu64 ".",
+                    (void *)meta_request,
+                    out_request_optimal_range_size);
                 /* Override the part size to be optimal */
                 *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
-                /* Apply a buffer pool alignment to the calculated result. */
-                out_request_optimal_range_size = aws_s3_buffer_pool_derive_aligned_buffer_size(
-                    meta_request->client->buffer_pool, out_request_optimal_range_size);
                 uint32_t max_connections = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
                 uint64_t parts_threshold = aws_mul_u64_saturating(max_connections, 2);
                 if (auto_ranged_get->num_stored_parts > parts_threshold) {
                     /* If the number of parts is greater than the threshold, so that we will be reusing the buffers
                      * enough from the buffer pool. Let's add a special block for the buffer pool to optimize the
                      * case.*/
+                    AWS_LOGF_INFO(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Apply buffer pool optimization for the size=%zu.",
+                        (void *)meta_request,
+                        meta_request->part_size);
                     aws_s3_buffer_pool_add_special_size(meta_request->client->buffer_pool, meta_request->part_size);
                     meta_request->buffer_pool_optimized = true;
                 }
@@ -860,6 +871,31 @@ static void s_s3_auto_ranged_get_request_finished(
                     true) != AWS_OP_SUCCESS) {
                 error_code = aws_last_error_or_unknown();
                 goto update_synced_data;
+            }
+        }
+
+        if (meta_request->is_express &&
+            meta_request->part_size < g_s3express_connection_limitation_part_size_threshold &&
+            object_size > g_s3express_connection_limitation_object_size_threshold) {
+            /**
+             * TODO: THIS IS A TEMP WORKAROUND, not the long term solution.
+             * 1. If the Part Size we set is larger than the possible size to hit the limitation, we are safe to
+             * make as many connections as we want.
+             * 2. If the object size is less than the threshold, we keep our previous behavior, as it's less likely
+             * to hit the server side limitation.
+             *
+             * Otherwise, we need to make sure the number of concurrent connections is lower than the limitation.
+             */
+            uint32_t max_active_connections_override = aws_min_u32(g_s3express_connection_limitation, max_connections);
+            if (max_active_connections_override < max_connections) {
+                /* Override the max active connections to be the limitation. */
+                *((uint32_t *)&meta_request->max_active_connections_override) =
+                    (uint32_t)max_active_connections_override;
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Override the max active connections for the meta request to be the limitation: %d",
+                    (void *)meta_request,
+                    max_active_connections_override);
             }
         }
 
