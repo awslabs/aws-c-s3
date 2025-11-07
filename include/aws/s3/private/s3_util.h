@@ -169,6 +169,14 @@ extern const uint64_t g_default_max_part_size;
 
 AWS_S3_API
 extern const uint64_t g_s3_optimal_range_size_alignment;
+
+AWS_S3_API
+extern const uint32_t g_s3express_connection_limitation;
+AWS_S3_API
+extern const uint64_t g_s3express_connection_limitation_part_size_threshold;
+AWS_S3_API
+extern const uint64_t g_s3express_connection_limitation_object_size_threshold;
+
 /**
  * Returns AWS_S3_REQUEST_TYPE_UNKNOWN if name doesn't map to an enum value.
  */
@@ -359,6 +367,7 @@ int aws_s3_calculate_client_optimal_range_size(
  *
  * @param client_optimal_range_size The client-level optimal range size from initialization
  * @param estimated_object_stored_part_size Estimated size of object stored parts in S3
+ * @param is_express If the request is a s3express request or not.
  * @param out_request_optimal_range_size Output parameter for calculated request-level optimal range size
  * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure (caller should fall back to client size)
  */
@@ -366,6 +375,7 @@ AWS_S3_API
 int aws_s3_calculate_request_optimal_range_size(
     uint64_t client_optimal_range_size,
     uint64_t estimated_object_stored_part_size,
+    bool is_express,
     uint64_t *out_request_optimal_range_size);
 
 /**

@@ -23,6 +23,12 @@ struct aws_s3_auto_ranged_get {
 
     /* Estimated object stored part size based on ETag analysis */
     uint64_t estimated_object_stored_part_size;
+    /* Number of parts stored in S3. We derive this from ETag, if ETag is not formatted as expected, this will be
+     * default to 1.
+     * Note: For S3Express Append, the object will be treated as a single part, even though, it can be multiple parts
+     * stored in S3.
+     */
+    uint64_t num_stored_parts;
     /* Part size was set or not from user for this meta request. */
     bool part_size_set;
     bool force_dynamic_part_size;

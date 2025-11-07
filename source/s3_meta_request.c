@@ -199,6 +199,7 @@ int aws_s3_meta_request_init_base(
 
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
+    aws_atomic_init_int(&meta_request->num_requests_network, 0);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
@@ -257,6 +258,7 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_meta_request_event));
 
     *((size_t *)&meta_request->part_size) = part_size;
+    *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     if (aws_s3_meta_request_checksum_config_storage_init(
             meta_request->allocator,
@@ -569,6 +571,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
+        if (meta_request->buffer_pool_optimized) {
+            aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
+        }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }

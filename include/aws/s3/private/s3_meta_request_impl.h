@@ -157,6 +157,8 @@ struct aws_s3_meta_request {
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
+    /* Hard limit on max connections set through the meta request option. */
+    const uint32_t max_active_connections_override;
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
@@ -165,6 +167,9 @@ struct aws_s3_meta_request {
     struct aws_s3_client *client;
 
     struct aws_s3_endpoint *endpoint;
+
+    /* Number of requests being sent/received over network for the meta request. */
+    struct aws_atomic_var num_requests_network;
 
     /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc...
      * After the meta request is finished, this will be reset along with the client reference.*/
@@ -185,6 +190,10 @@ struct aws_s3_meta_request {
 
     enum aws_s3_meta_request_type type;
     struct aws_string *s3express_session_host;
+    /* Is the meta request made to s3express bucket or not. */
+    bool is_express;
+    /* If the buffer pool optimized for the specific size or not. */
+    bool buffer_pool_optimized;
 
     struct {
         struct aws_mutex lock;
@@ -268,6 +277,9 @@ struct aws_s3_meta_request {
 
         /* True if this meta request is currently in the client's list. */
         bool scheduled;
+
+        /* Track the number of requests being prepared for this meta request. */
+        size_t num_request_being_prepared;
 
     } client_process_work_threaded_data;
 

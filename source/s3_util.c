@@ -96,7 +96,8 @@ const uint64_t g_streaming_object_size_threshold = TB_TO_BYTES(1);
  * Default max part size is 5GiB as the current server limit.
  **/
 const uint64_t g_default_part_size_fallback = MB_TO_BYTES(8);
-const uint64_t g_default_max_part_size = 5368709120ULL;
+#define G_DEFAULT_MAX_PART_SIZE 5368709120ULL
+const uint64_t g_default_max_part_size = G_DEFAULT_MAX_PART_SIZE;
 
 /* TODO: Use a reasonable alignment with the update of the buffer pool */
 const uint64_t g_s3_optimal_range_size_alignment = 1;
@@ -108,6 +109,25 @@ const uint64_t g_s3_optimal_range_size_alignment = 1;
  * So, it gives us at most 3 × (the max range size) × (concurrency) in memory.
  */
 static const uint32_t s_optimal_range_size_memory_divisor = 3;
+
+/**
+ * TODO: THIS IS A TEMP WORKAROUND, not the long term solution.
+ * As in Nov 2025, S3Express recommended to have no more than 75 connections to one single part.
+ *
+ * However, client don't know the part boundaries unless with an extra call. Thus, these are the workarounds to avoid
+ * the issue.
+ * 1. If the Part Size we set is larger than the possible size to hit the limitation, we are safe to make as many
+ * connections as we want.
+ * 2. If the object size is less than the threshold, we keep our previous behavior, as it's less likely to hit the
+ * server side limitation.
+ */
+#define G_S3EXPRESS_CONNECTION_LIMITATION 75
+const uint32_t g_s3express_connection_limitation = G_S3EXPRESS_CONNECTION_LIMITATION;
+const uint64_t g_s3express_connection_limitation_part_size_threshold =
+    G_DEFAULT_MAX_PART_SIZE / G_S3EXPRESS_CONNECTION_LIMITATION;
+#undef G_S3EXPRESS_CONNECTION_LIMITATION
+#undef G_DEFAULT_MAX_PART_SIZE
+const uint64_t g_s3express_connection_limitation_object_size_threshold = TB_TO_BYTES(4);
 
 void copy_http_headers(const struct aws_http_headers *src, struct aws_http_headers *dest) {
     AWS_PRECONDITION(src);
@@ -830,15 +850,6 @@ int aws_s3_check_headers_for_checksum(
     return AWS_OP_SUCCESS;
 }
 
-static void s_s3_range_size_alignment(uint64_t *range_size) {
-    /* TODO: Round up the part size should be part of the memory pool impl. We should let memory pool to decide
-     * what's the best round up for the part size. */
-    if (*range_size > g_s3_optimal_range_size_alignment && *range_size % g_s3_optimal_range_size_alignment != 0) {
-        /* Only apply alignment for sizes above minimum to avoid excessive rounding */
-        *range_size = ((*range_size / g_s3_optimal_range_size_alignment) + 1) * g_s3_optimal_range_size_alignment;
-    }
-}
-
 int aws_s3_calculate_client_optimal_range_size(
     uint64_t memory_limit_in_bytes,
     uint32_t max_connections,
@@ -871,10 +882,7 @@ int aws_s3_calculate_client_optimal_range_size(
     uint64_t optimal_size = memory_constrained_size;
     if (optimal_size < g_default_part_size_fallback) {
         optimal_size = g_default_part_size_fallback;
-    } else {
-        s_s3_range_size_alignment(&optimal_size);
     }
-
     /* Apply maximum constraint */
     if (optimal_size > g_default_max_part_size) {
         optimal_size = g_default_max_part_size;
@@ -896,6 +904,7 @@ int aws_s3_calculate_client_optimal_range_size(
 int aws_s3_calculate_request_optimal_range_size(
     uint64_t client_optimal_range_size,
     uint64_t estimated_object_stored_part_size,
+    bool is_express,
     uint64_t *out_request_optimal_range_size) {
 
     AWS_ERROR_PRECONDITION(out_request_optimal_range_size);
@@ -916,13 +925,25 @@ int aws_s3_calculate_request_optimal_range_size(
     uint64_t optimal_size = client_optimal_range_size;
     if (estimated_object_stored_part_size > 0 && estimated_object_stored_part_size < client_optimal_range_size) {
         optimal_size = estimated_object_stored_part_size;
-
-        /* Apply minimum constraint first to avoid excessive alignment */
-        if (optimal_size < g_default_part_size_fallback) {
-            optimal_size = g_default_part_size_fallback;
-        } else {
-            s_s3_range_size_alignment(&optimal_size);
-        }
+    }
+    /* Apply minimum constraint first to avoid excessive alignment */
+    if (optimal_size < g_default_part_size_fallback) {
+        optimal_size = g_default_part_size_fallback;
+    }
+    /* Apply a reasonable upper bound to this. The goal to increase the part size is to have less connection to hit one
+     * single part from server so that we are not bottleneck by the server throughput on one part */
+    if (is_express) {
+        /* As in 2025, each part in S3 express can provide over 100 Gbps throughput.
+         *
+         * Each S3express part can provide a much high throughput than we currently asking for (More than 100Gbps per
+         * part throughput, which means it in theory can handle 100 concurrent connections to 1 part). So, 128MiB
+         * with 5GiB max part size gives 40 connections to hit one part. Have larger range(less connections to hit one
+         * part from server) won't help the goal mentioned above. */
+        optimal_size = aws_min_u64(optimal_size, MB_TO_BYTES(128));
+    } else {
+        /* As in 2025, each part in S3 general bucket can provide around 10 Gbps throughput.
+         * Use 2GiB to below the INT32_MAX. Given the 5GiB max part size */
+        optimal_size = aws_min_u64(optimal_size, GB_TO_BYTES(2));
     }
 
     *out_request_optimal_range_size = optimal_size;

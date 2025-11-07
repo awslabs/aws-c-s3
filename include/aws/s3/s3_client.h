@@ -1005,6 +1005,10 @@ struct aws_s3_meta_request_options {
      * This will be ignored for other operations.
      */
     struct aws_byte_cursor copy_source_uri;
+
+    /* When set, this will cap the number of active connections for the meta request. When 0, the client will determine
+     * it based on client side settings. (Recommended) */
+    uint32_t max_active_connections_override;
 };
 
 /* Result details of a meta request.

@@ -102,6 +102,24 @@ struct aws_s3_buffer_pool_vtable {
      **/
     void (*trim)(struct aws_s3_buffer_pool *pool);
 
+    /**
+     * Optimize the buffer pool for allocations of a specific size.
+     * Creates a separate list of blocks dedicated to this size for better memory efficiency.
+     */
+    int (*add_special_size)(struct aws_s3_buffer_pool *pool, size_t buffer_size);
+
+    /**
+     * Release all special-sized blocks from the buffer pool.
+     * This frees all memory allocated for the special size optimization.
+     */
+    void (*release_special_size)(struct aws_s3_buffer_pool *pool, size_t buffer_size);
+
+    /**
+     * Align a range size to the buffer pool's allocation strategy.
+     * Returns the optimal aligned size based on the buffer pool's configuration.
+     */
+    uint64_t (*derive_aligned_buffer_size)(struct aws_s3_buffer_pool *pool, uint64_t size);
+
     /* Implement below for custom ref count behavior. Alternatively set those to null and init the ref count. */
     struct aws_s3_buffer_pool *(*acquire)(struct aws_s3_buffer_pool *pool);
     struct aws_s3_buffer_pool *(*release)(struct aws_s3_buffer_pool *pool);
@@ -143,6 +161,41 @@ struct aws_s3_buffer_pool_config {
 typedef struct aws_s3_buffer_pool *(aws_s3_buffer_pool_factory_fn)(struct aws_allocator *allocator,
                                                                    struct aws_s3_buffer_pool_config config,
                                                                    void *user_data);
+
+/**
+ * Optimize the buffer pool for allocations of a specific size.
+ * Creates a separate list of blocks dedicated to this size for better memory efficiency.
+ * Allocations of exactly this size will use these special blocks instead of the regular primary/secondary storage.
+ *
+ * @param buffer_pool The buffer pool to optimize
+ * @param buffer_size The size to optimize for (must be > 0)
+ * @return AWS_OP_SUCCESS on success, AWS_OP_ERR on failure
+ */
+AWS_S3_API
+int aws_s3_buffer_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool, size_t buffer_size);
+
+/**
+ * Release the special-sized blocks from the buffer pool.
+ * Should be called when done with the special-sized allocations.
+ *
+ * @param buffer_pool The buffer pool
+ * @param buffer_size The special size to release blocks for
+ */
+AWS_S3_API
+void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_pool, size_t buffer_size);
+
+/**
+ * Align a range size to the buffer pool's allocation strategy.
+ * This function determines the optimal aligned size based on the buffer pool's configuration.
+ * For sizes within the primary allocation range, it aligns to chunk boundaries.
+ * For larger sizes that go to secondary storage, it returns the size as-is.
+ *
+ * @param buffer_pool The buffer pool to use for alignment (can be NULL, in which case size is returned unchanged)
+ * @param size The size to align
+ * @return The aligned size that's optimal for the buffer pool's allocation strategy
+ */
+AWS_S3_API
+uint64_t aws_s3_buffer_pool_derive_aligned_buffer_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t size);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
