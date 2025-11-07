@@ -1192,7 +1192,6 @@ on_done:
 static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_job *part_prep, int error_code) {
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    struct aws_s3_client *client = meta_request->client;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -1260,6 +1259,7 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
     }
 
 #ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    struct aws_s3_client *client = meta_request->client;
     if (client->vtable->after_prepare_upload_part_finish_stub) {
         /* TEST ONLY, allow test to stub here. */
         client->vtable->after_prepare_upload_part_finish_stub(request, message);
