@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILDER_VERSION: v0.9.74
-  BUILDER_SOURCE: releases
+  BUILDER_VERSION: code-cov-fail
+  BUILDER_SOURCE: channels
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
   LINUX_BASE_IMAGE: ubuntu-18-x64
