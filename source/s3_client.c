@@ -433,7 +433,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
     /* Apply a buffer pool alignment to the calculated optimal range size */
     calculated_optimal_range_size =
-        aws_s3_buffer_pool_align_range_size(client->buffer_pool, calculated_optimal_range_size);
+        aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, calculated_optimal_range_size);
     /* Note: cap the calculated optimal range size based on the initial window size to avoid blocking. */
     if (client->enable_read_backpressure && client->initial_read_window) {
         /* Make sure we can have at least 10 parts to be delivered. */
@@ -1384,12 +1384,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     }
                     part_size = out_part_size;
                     if (part_size != options->part_size && part_size != client->part_size) {
-                        /* If we already adjusted the part size, let's algin the part size with expected alignment from
+                        /* If we already adjusted the part size, let's align the part size with expected alignment from
                          * buffer pool. */
                         if (num_parts > 2) {
-                            /* If we have less than 2 parts, there is no need to align. */
                             uint64_t aligned_part_size =
-                                aws_s3_buffer_pool_align_range_size(client->buffer_pool, part_size);
+                                aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, part_size);
                             /* Incase of overflow, fallback to no alignment. */
                             aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
                             part_size = (size_t)aligned_part_size;

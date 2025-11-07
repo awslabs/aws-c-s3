@@ -5071,7 +5071,8 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
 
         /*** GET FILE WITH CHECKSUM -- Head object first ***/
         /* Get object will use the aligned part size based on the estimated part size stored in S3 */
-        uint64_t aligned_part_size_u64 = aws_s3_buffer_pool_align_range_size(client->buffer_pool, stored_part_size);
+        uint64_t aligned_part_size_u64 =
+            aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, stored_part_size);
         size_t aligned_part_size = (size_t)aligned_part_size_u64;
         aws_s3_meta_request_test_results_init(&test_results, allocator);
 
