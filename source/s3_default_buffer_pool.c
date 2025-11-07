@@ -211,14 +211,16 @@ void s_default_pool_trim(struct aws_s3_buffer_pool *pool) {
 
 static int s_default_pool_add_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size);
 static void s_default_pool_release_special_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, size_t buffer_size);
-static uint64_t s_default_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, uint64_t size);
+static uint64_t s_default_pool_derive_aligned_buffer_size(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    uint64_t size);
 
 static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
     .reserve = s_default_pool_reserve,
     .trim = s_default_pool_trim,
     .add_special_size = s_default_pool_add_special_size,
     .release_special_size = s_default_pool_release_special_size,
-    .align_range_size = s_default_pool_align_range_size,
+    .derive_aligned_buffer_size = s_default_pool_derive_aligned_buffer_size,
 };
 
 static void s_destroy_special_block_list(void *val) {
@@ -372,22 +374,7 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
     aws_explicit_aligned_allocator_destroy(base);
 }
 
-void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
-    /* Trim primary blocks */
-    for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks);) {
-        struct s3_buffer_pool_block *block;
-        aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
-
-        if (block->alloc_bit_mask == 0) {
-            buffer_pool->primary_allocated -= block->block_size;
-            aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
-            aws_array_list_erase(&buffer_pool->blocks, i);
-            /* do not increment since we just released element */
-        } else {
-            ++i;
-        }
-    }
-
+static void s_buffer_pool_trim_special_blocks_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
     /* Trim special blocks */
     for (struct aws_hash_iter iter = aws_hash_iter_begin(&buffer_pool->special_blocks); !aws_hash_iter_done(&iter);
          aws_hash_iter_next(&iter)) {
@@ -398,6 +385,7 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
             aws_array_list_get_at_ptr(&special_list->blocks, (void **)&block, i);
 
             if (block->alloc_bit_mask == 0) {
+                /* If the block is marked as not being used, free it. */
                 buffer_pool->special_blocks_allocated -= block->block_size;
                 aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
                 aws_array_list_erase(&special_list->blocks, i);
@@ -411,6 +399,25 @@ void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
             aws_hash_iter_delete(&iter, true);
         }
     }
+}
+
+static void s_buffer_pool_trim_synced(struct aws_s3_default_buffer_pool *buffer_pool) {
+    /* Trim primary blocks */
+    for (size_t i = 0; i < aws_array_list_length(&buffer_pool->blocks);) {
+        struct s3_buffer_pool_block *block;
+        aws_array_list_get_at_ptr(&buffer_pool->blocks, (void **)&block, i);
+
+        if (block->alloc_bit_mask == 0) {
+            /* If the block is marked as not being used, free it. */
+            buffer_pool->primary_allocated -= block->block_size;
+            aws_mem_release(buffer_pool->base_allocator, block->block_ptr);
+            aws_array_list_erase(&buffer_pool->blocks, i);
+            /* do not increment since we just released element */
+        } else {
+            ++i;
+        }
+    }
+    s_buffer_pool_trim_special_blocks_synced(buffer_pool);
 }
 
 void aws_s3_default_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
@@ -940,10 +947,16 @@ static void s_default_pool_release_special_size(struct aws_s3_buffer_pool *buffe
     AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Released special block size: %zu bytes. Trigger trim.", buffer_size);
     /* Rely on trim to clean up instead of force it. */
     /* TODO: maybe a better lifetime management. */
-    aws_s3_buffer_pool_trim(buffer_pool_wrapper);
+    struct aws_s3_default_buffer_pool *pool = buffer_pool_wrapper->impl;
+    aws_mutex_lock(&pool->mutex);
+    /* Instead of trim the whole pool, just trim for the special blocks. */
+    s_buffer_pool_trim_special_blocks_synced(pool);
+    aws_mutex_unlock(&pool->mutex);
 }
 
-static uint64_t s_default_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool_wrapper, uint64_t size) {
+static uint64_t s_default_pool_derive_aligned_buffer_size(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    uint64_t size) {
     AWS_PRECONDITION(buffer_pool_wrapper);
 
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;

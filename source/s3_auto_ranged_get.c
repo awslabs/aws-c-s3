@@ -832,7 +832,7 @@ static void s_s3_auto_ranged_get_request_finished(
                 /* Override the part size to be optimal */
                 *((size_t *)&meta_request->part_size) = (size_t)out_request_optimal_range_size;
                 /* Apply a buffer pool alignment to the calculated result. */
-                out_request_optimal_range_size = aws_s3_buffer_pool_align_range_size(
+                out_request_optimal_range_size = aws_s3_buffer_pool_derive_aligned_buffer_size(
                     meta_request->client->buffer_pool, out_request_optimal_range_size);
                 uint32_t max_connections = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
                 uint64_t parts_threshold = aws_mul_u64_saturating(max_connections, 2);

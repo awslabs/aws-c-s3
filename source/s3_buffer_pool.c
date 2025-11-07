@@ -95,15 +95,9 @@ void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_p
     }
 }
 
-uint64_t aws_s3_buffer_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t size) {
-    if (buffer_pool == NULL) {
-        return size;
+uint64_t aws_s3_buffer_pool_derive_aligned_buffer_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t size) {
+    if (buffer_pool && buffer_pool->vtable->derive_aligned_buffer_size) {
+        return buffer_pool->vtable->derive_aligned_buffer_size(buffer_pool, size);
     }
-
-    if (buffer_pool->vtable->align_range_size) {
-        return buffer_pool->vtable->align_range_size(buffer_pool, size);
-    }
-
-    /* If vtable function not implemented, return size unchanged */
     return size;
 }

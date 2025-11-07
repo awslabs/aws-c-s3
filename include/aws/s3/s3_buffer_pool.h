@@ -118,7 +118,7 @@ struct aws_s3_buffer_pool_vtable {
      * Align a range size to the buffer pool's allocation strategy.
      * Returns the optimal aligned size based on the buffer pool's configuration.
      */
-    uint64_t (*align_range_size)(struct aws_s3_buffer_pool *pool, uint64_t size);
+    uint64_t (*derive_aligned_buffer_size)(struct aws_s3_buffer_pool *pool, uint64_t size);
 
     /* Implement below for custom ref count behavior. Alternatively set those to null and init the ref count. */
     struct aws_s3_buffer_pool *(*acquire)(struct aws_s3_buffer_pool *pool);
@@ -195,7 +195,7 @@ void aws_s3_buffer_pool_release_special_size(struct aws_s3_buffer_pool *buffer_p
  * @return The aligned size that's optimal for the buffer pool's allocation strategy
  */
 AWS_S3_API
-uint64_t aws_s3_buffer_pool_align_range_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t size);
+uint64_t aws_s3_buffer_pool_derive_aligned_buffer_size(struct aws_s3_buffer_pool *buffer_pool, uint64_t size);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
