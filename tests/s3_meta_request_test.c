@@ -43,7 +43,7 @@ TEST_CASE(meta_request_auto_ranged_get_new_error_handling) {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
     };
     struct aws_s3_meta_request *meta_request =
-        aws_s3_meta_request_auto_ranged_get_new(allocator, client, SIZE_MAX, &options);
+        aws_s3_meta_request_auto_ranged_get_new(allocator, client, SIZE_MAX, false, &options);
 
     ASSERT_NULL(meta_request);
     aws_http_message_release(message);

@@ -425,7 +425,8 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         start_range = 0
         end_range = 65535
 
-    data_length = end_range - start_range
+    # Range is inclusive, the length is end - start + 1
+    data_length = end_range - start_range + 1
 
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)

@@ -143,6 +143,7 @@ struct aws_s3_tester_client_options {
     aws_s3express_provider_factory_fn *s3express_provider_override_factory;
     uint32_t max_active_connections_override;
     void *factory_user_data;
+    uint64_t memory_limit_in_bytes;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -161,6 +162,7 @@ struct aws_s3_tester_meta_request_options {
 
     /* Optional. Bucket for this request. If NULL, g_test_bucket_name will be used. */
     const struct aws_byte_cursor *bucket_name;
+    size_t part_size;
 
     /* Optional. Used to create a client when the specified client is NULL. If NULL, default options will be used. */
     struct aws_s3_tester_client_options *client_options;
@@ -205,6 +207,7 @@ struct aws_s3_tester_meta_request_options {
         bool recv_file_delete_on_failure;
         /* If larger than 0, create a pre-exist file with the length */
         uint64_t pre_exist_file_length;
+        bool force_dynamic_part_size;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -270,6 +273,10 @@ struct aws_s3_meta_request_test_results {
     int finished_error_code;
     enum aws_s3_checksum_algorithm algorithm;
 
+    /* Record the status of checksum validation. */
+    bool did_validate;
+    enum aws_s3_checksum_algorithm validation_algorithm;
+
     /* Record data from progress_callback() */
     struct {
         uint64_t content_length;          /* Remember progress->content_length */
@@ -280,6 +287,8 @@ struct aws_s3_meta_request_test_results {
     struct {
         /* The array_list of `struct aws_s3_request_metrics *` */
         struct aws_array_list metrics;
+        /* The array_list of `struct aws_s3_request_metrics *` that the request succeed, to avoid retries counts. */
+        struct aws_array_list succeed_metrics;
     } synced_data;
 
     /* record data from the upload_review_callback */

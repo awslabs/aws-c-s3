@@ -34,6 +34,8 @@ add_net_test_case(test_s3_client_proxy_ev_settings_override)
 add_net_test_case(test_s3_client_tcp_keep_alive_options_override)
 add_net_test_case(test_s3_client_max_active_connections_override)
 add_test_case(test_s3_client_get_max_active_connections)
+add_net_test_case(s3_meta_request_max_active_connections_override)
+add_net_test_case(s3_max_active_connections_override_enforced)
 add_test_case(test_s3_request_create_destroy)
 add_test_case(test_s3_client_queue_requests)
 add_test_case(test_s3_meta_request_body_streaming)
@@ -197,6 +199,9 @@ add_net_test_case(test_s3_round_trip_default_get_full_object_checksum_fc)
 add_net_test_case(test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc)
 add_net_test_case(test_s3_round_trip_mpu_multipart_get_full_object_checksum_fc_header)
 add_net_test_case(test_s3_round_trip_mpu_multipart_get_full_object_checksum_via_callback)
+add_net_test_case(test_s3_round_trip_dynamic_range_size_download_multipart)
+add_net_test_case(test_s3_round_trip_dynamic_range_size_download_multipart_with_buffer_pool_optimize)
+add_net_test_case(test_s3_round_trip_dynamic_range_size_download_single_part)
 add_net_test_case(test_s3_chunked_then_unchunked)
 
 add_net_test_case(test_s3_cancel_mpu_one_part_completed_fc)
@@ -231,7 +236,7 @@ add_net_test_case(test_s3_default_sending_meta_request_user_agent)
 add_net_test_case(test_s3_range_requests)
 add_net_test_case(test_s3_not_satisfiable_range)
 add_net_test_case(test_s3_invalid_start_range_greator_than_end_range)
-add_net_test_case(test_s3_invalid_empty_file_with_range)
+add_net_test_case(test_s3_empty_file_edge_case)
 
 add_net_test_case(test_s3_bad_endpoint)
 add_net_test_case(test_s3_different_endpoints)
@@ -246,6 +251,9 @@ add_test_case(test_s3_parse_content_length_response_header)
 add_test_case(test_s3_get_num_parts_and_get_part_range)
 add_test_case(test_s3_mpu_get_part_size_and_num_parts)
 add_test_case(test_s3_aws_xml_get_body_at_path)
+add_test_case(test_s3_calculate_client_optimal_range_size)
+add_test_case(test_s3_calculate_request_optimal_range_size)
+add_test_case(test_s3_extract_parts_from_etag)
 add_test_case(test_add_user_agent_header)
 
 add_test_case(test_get_existing_platform_info)
@@ -427,6 +435,15 @@ add_test_case(test_s3_buffer_pool_reserve_over_limit_instant_release)
 add_test_case(test_s3_buffer_pool_reserve_over_limit_cancel)
 add_test_case(test_s3_buffer_pool_reserve_over_limit_multi)
 
+add_test_case(test_s3_buffer_pool_add_special_size_basic)
+add_test_case(test_s3_buffer_pool_add_special_size_duplicate)
+add_test_case(test_s3_buffer_pool_add_special_size_multiple)
+add_test_case(test_s3_buffer_pool_add_special_size_below_cutoff)
+add_test_case(test_s3_buffer_pool_special_size_reuse)
+add_test_case(test_s3_buffer_pool_special_size_with_limits)
+add_test_case(test_s3_buffer_pool_special_size_mixed)
+add_test_case(test_s3_buffer_pool_special_size_trim)
+
 add_net_test_case(client_update_upload_part_timeout)
 add_net_test_case(client_meta_request_override_part_size)
 add_net_test_case(client_meta_request_override_multipart_upload_threshold)
@@ -438,4 +455,32 @@ generate_test_driver(${TEST_BINARY_NAME})
 
 if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     target_compile_definitions(${PROJECT_NAME}-tests PRIVATE "-DAWS_ENABLE_S3_ENDPOINT_RESOLVER")
+endif()
+
+# Fuzz tests
+include(AwsLibFuzzer)
+file(GLOB FUZZ_TESTS "fuzz/*.c")
+
+# Separate out the keep_pending test which needs a longer timeout
+list(REMOVE_ITEM FUZZ_TESTS "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_buffer_pool_special_size_keep_pending.c")
+
+# Add all other fuzz tests with standard timeout
+aws_add_fuzz_tests("${FUZZ_TESTS}" "" "")
+
+# Add the keep_pending test separately with a longer timeout (30 seconds per input)
+# This test can take longer because it stress-tests with up to 10,000 pending reservations
+if(ENABLE_FUZZ_TESTS)
+    set(KEEP_PENDING_TEST "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_buffer_pool_special_size_keep_pending.c")
+    set(KEEP_PENDING_BINARY_NAME ${PROJECT_NAME}-fuzz-fuzz_buffer_pool_special_size_keep_pending)
+
+    add_executable(${KEEP_PENDING_BINARY_NAME} ${KEEP_PENDING_TEST})
+    target_link_libraries(${KEEP_PENDING_BINARY_NAME} PRIVATE ${PROJECT_NAME})
+    aws_set_common_properties(${KEEP_PENDING_BINARY_NAME})
+    aws_add_sanitizers(${KEEP_PENDING_BINARY_NAME} SANITIZERS "fuzzer")
+    target_compile_definitions(${KEEP_PENDING_BINARY_NAME} PRIVATE AWS_UNSTABLE_TESTING_API=1)
+    target_include_directories(${KEEP_PENDING_BINARY_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+
+    # Use 30-second timeout per input instead of the default 1 second
+    add_test(NAME fuzz_fuzz_buffer_pool_special_size_keep_pending
+             COMMAND ${KEEP_PENDING_BINARY_NAME} -timeout=30 -max_total_time=${FUZZ_TESTS_MAX_TIME})
 endif()

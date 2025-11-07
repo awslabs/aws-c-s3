@@ -192,6 +192,8 @@ static void s_s3_test_meta_request_finish(
 
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
+    meta_request_test_results->did_validate = result->did_validate;
+    meta_request_test_results->validation_algorithm = result->validation_algorithm;
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -245,12 +247,7 @@ static void s_s3_test_meta_request_telemetry(
         AWS_FATAL_ASSERT(during_time == (end_time - start_time));
     }
 
-    enum aws_s3_request_type request_type;
-    aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    uint32_t retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
-
-    if (aws_s3_request_metrics_get_error_code(metrics) == 200 && retry_attempt == 0 &&
-        (request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT || request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART)) {
+    if (aws_s3_request_metrics_get_memory_allocated_from_pool(metrics)) {
         uint64_t start_time = 0;
         uint64_t end_time = 0;
         uint64_t duration_time = 0;
@@ -264,6 +261,9 @@ static void s_s3_test_meta_request_telemetry(
 
     aws_s3_tester_lock_synced_data(tester);
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
+    if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS) {
+        aws_array_list_push_back(&meta_request_test_results->synced_data.succeed_metrics, &metrics);
+    }
     aws_s3_request_metrics_acquire(metrics);
     aws_s3_tester_unlock_synced_data(tester);
 }
@@ -558,6 +558,8 @@ void aws_s3_meta_request_test_results_init(
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
+    aws_array_list_init_dynamic(
+        &test_meta_request->synced_data.succeed_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -575,6 +577,8 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
+    /* We don't need to release the metrics from the succeed list, since it's already released from the main list. */
+    aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
 
     for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {
         aws_string_destroy(test_meta_request->upload_review.part_checksums_array[i]);
@@ -1413,6 +1417,7 @@ int aws_s3_tester_client_new(
         .factory_user_data = options->factory_user_data,
         .max_active_connections_override = options->max_active_connections_override,
         .enable_s3express = options->s3express_provider_override_factory != NULL,
+        .memory_limit_in_bytes = options->memory_limit_in_bytes,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,
@@ -1541,6 +1546,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .resume_token = options->put_options.resume_token,
         .object_size_hint = options->object_size_hint,
         .fio_opts = options->fio_opts,
+        .part_size = options->part_size,
     };
 
     if (options->mock_server) {
@@ -1621,7 +1627,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
             }
             meta_request_options.message = message;
-
+            meta_request_options.force_dynamic_part_size = options->get_options.force_dynamic_part_size;
         } else if (
             meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&

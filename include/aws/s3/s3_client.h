@@ -510,7 +510,9 @@ struct aws_s3_client_config {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If not set, this defaults to 8 MiB.
+     *
+     * If not set, a dynamic default part size will be used based on the throughput target, memory_limit_in_bytes.
+     *
      * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
      * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      *
@@ -875,12 +877,21 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to 8MiB.
+     *
+     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to a dynamic value based on
+     * the throughput target, memory_limit_in_bytes and the requested object size.
      *
      * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
      * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      */
     uint64_t part_size;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * Set this to prefer for the dynamic default part_size over the part size set for both client and meta request for
+     * the best performance under the memory constrain, especially for getting large objects.
+     */
+    bool force_dynamic_part_size;
 
     /**
      * Optional.
@@ -994,6 +1005,10 @@ struct aws_s3_meta_request_options {
      * This will be ignored for other operations.
      */
     struct aws_byte_cursor copy_source_uri;
+
+    /* When set, this will cap the number of active connections for the meta request. When 0, the client will determine
+     * it based on client side settings. (Recommended) */
+    uint32_t max_active_connections_override;
 };
 
 /* Result details of a meta request.
@@ -1619,6 +1634,25 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 AWS_S3_API
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
 
+/* Get whether the memory for the request was allocated from the pool. Cannot fail */
+AWS_S3_API
+bool aws_s3_request_metrics_get_memory_allocated_from_pool(const struct aws_s3_request_metrics *metrics);
+
+/* Get the beginning range of this part from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_range_start(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_start);
+
+/* Get the last byte of this part from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_range_end(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_end);
+
+/* Get the part number from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number);
 /* Get the request start timestamp from aws_s3_request_metrics. Always available. */
 AWS_S3_API
 void aws_s3_request_metrics_get_s3_request_first_attempt_start_timestamp_ns(

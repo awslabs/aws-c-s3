@@ -168,7 +168,19 @@ struct aws_s3_request_metrics {
         int error_code;
         /* Retry attempt. */
         uint32_t retry_attempt;
+        /* Is the memory for the request allocated from the buffer pool or not. */
+        bool memory_allocated_from_pool;
     } crt_info_metrics;
+
+    /* TODO: align the part info metrics with the others, eg: `aws_s3_mpu_part_info`. */
+    struct {
+        /* Beginning range of this part. */
+        uint64_t part_range_start;
+        /* Last byte of this part. */
+        uint64_t part_range_end;
+        /* Part number that this request refers to. */
+        uint32_t part_number;
+    } part_info_metrics;
 
     struct aws_ref_count ref_count;
 };
@@ -229,11 +241,9 @@ struct aws_s3_request {
     struct aws_s3_buffer_ticket *ticket;
 
     /* Beginning range of this part. */
-    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
     uint64_t part_range_start;
 
     /* Last byte of this part.*/
-    /* TODO currently only used by auto_range_get, could be hooked up to auto_range_put as well. */
     uint64_t part_range_end;
 
     /* Part number that this request refers to.  If this is not a part, this can be 0.  (S3 Part Numbers start at 1.)

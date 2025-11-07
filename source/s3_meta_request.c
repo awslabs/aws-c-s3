@@ -199,6 +199,7 @@ int aws_s3_meta_request_init_base(
 
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
+    aws_atomic_init_int(&meta_request->num_requests_network, 0);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
@@ -257,6 +258,7 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_meta_request_event));
 
     *((size_t *)&meta_request->part_size) = part_size;
+    *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     if (aws_s3_meta_request_checksum_config_storage_init(
             meta_request->allocator,
@@ -569,6 +571,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
+        if (meta_request->buffer_pool_optimized) {
+            aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
+        }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
@@ -1284,7 +1289,8 @@ static bool s_header_value_from_list(
     return false;
 }
 
-static void s_get_part_response_headers_checksum_helper(
+/* Return if we found the checksum from headers or not. */
+static bool s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
@@ -1308,9 +1314,10 @@ static void s_get_part_response_headers_checksum_helper(
                     aws_checksum_new(meta_request->allocator, algorithm);
                 AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 static int s_s3_meta_request_incoming_headers(
@@ -1355,7 +1362,7 @@ static int s_s3_meta_request_incoming_headers(
 
     if (successful_response && meta_request->checksum_config.validate_response_checksum &&
         request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
-        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` :) */
+        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` */
         s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
 
@@ -1385,6 +1392,31 @@ static int s_s3_meta_request_incoming_headers(
                     aws_string_new_from_cursor(connection->request->allocator, value);
             }
         }
+        if (aws_byte_cursor_eq(name, &g_content_range_header_name) && successful_response &&
+            request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
+            uint64_t object_range_start = 0;
+            uint64_t object_range_end = 0;
+            uint64_t object_size = 0;
+            if (aws_s3_parse_content_range_cursor(*value, &object_range_start, &object_range_end, &object_size)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Could not parse content range header (%s)",
+                    (void *)meta_request,
+                    aws_error_str(aws_last_error()));
+                return AWS_OP_ERR;
+            } else {
+                if (request->part_range_end != 0) {
+                    AWS_FATAL_ASSERT(request->part_range_start == object_range_start);
+                    if (request->part_range_end != object_range_end) {
+                        /* In the case where the object size is less than the range requested, it will return the bytes
+                         * to the object size. Range is inclusive */
+                        AWS_FATAL_ASSERT(object_range_start + object_size - 1 == object_range_end);
+                        AWS_FATAL_ASSERT(request->part_range_end > object_range_end);
+                    }
+                }
+            }
+        }
+
         if (collect_metrics) {
             aws_http_headers_add(request->send_data.metrics->req_resp_info_metrics.response_headers, *name, *value);
         }
@@ -1974,6 +2006,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
 
                 AWS_ASSERT(request->part_number >= 1);
+                if (request->part_number == 1) {
+                    meta_request->io_threaded_data.next_deliver_range_start = request->part_range_start;
+                }
+                /* Make sure the response body is delivered in the sequential order */
+                AWS_FATAL_ASSERT(request->part_range_start == meta_request->io_threaded_data.next_deliver_range_start);
+                meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
                     if (meta_request->meta_request_level_running_response_sum) {

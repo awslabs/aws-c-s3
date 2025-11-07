@@ -122,6 +122,12 @@ struct aws_s3_meta_request_vtable {
 
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    /********************* TEST ONLY STUB **************************/
+    /* A stub to the update implementation from meta request with the lock held. Only for tests. */
+    bool (*synced_update_stub)(struct aws_s3_meta_request *meta_request);
+#endif
 };
 
 /**
@@ -151,6 +157,8 @@ struct aws_s3_meta_request {
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
+    /* Hard limit on max connections set through the meta request option. */
+    const uint32_t max_active_connections_override;
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 
@@ -159,6 +167,9 @@ struct aws_s3_meta_request {
     struct aws_s3_client *client;
 
     struct aws_s3_endpoint *endpoint;
+
+    /* Number of requests being sent/received over network for the meta request. */
+    struct aws_atomic_var num_requests_network;
 
     /* Event loop to schedule IO work related on, ie, reading from streams, streaming parts back to the caller, etc...
      * After the meta request is finished, this will be reset along with the client reference.*/
@@ -179,6 +190,10 @@ struct aws_s3_meta_request {
 
     enum aws_s3_meta_request_type type;
     struct aws_string *s3express_session_host;
+    /* Is the meta request made to s3express bucket or not. */
+    bool is_express;
+    /* If the buffer pool optimized for the specific size or not. */
+    bool buffer_pool_optimized;
 
     struct {
         struct aws_mutex lock;
@@ -263,6 +278,9 @@ struct aws_s3_meta_request {
         /* True if this meta request is currently in the client's list. */
         bool scheduled;
 
+        /* Track the number of requests being prepared for this meta request. */
+        size_t num_request_being_prepared;
+
     } client_process_work_threaded_data;
 
     /* Anything in this structure should only ever be accessed by the meta-request from its io_event_loop thread. */
@@ -271,6 +289,9 @@ struct aws_s3_meta_request {
          * This is an optimization, we could have just copied the array when the task runs,
          * but swapping two array-lists back and forth avoids an allocation. */
         struct aws_array_list event_delivery_array;
+
+        /* The range start for the next response body delivery */
+        uint64_t next_deliver_range_start;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
@@ -407,9 +428,11 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
 bool aws_s3_meta_request_are_events_out_for_delivery_synced(struct aws_s3_meta_request *meta_request);
 
 /* Cancel the requests with cancellable HTTP stream for the meta request */
+AWS_S3_API
 void aws_s3_meta_request_cancel_cancellable_requests_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Cancel the pending buffer futures for the meta request */
+AWS_S3_API
 void aws_s3_meta_request_cancel_pending_buffer_futures_synced(struct aws_s3_meta_request *meta_request, int error_code);
 
 /* Asynchronously read from the meta request's input stream. Should always be done outside of any mutex,
