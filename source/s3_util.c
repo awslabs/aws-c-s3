@@ -905,11 +905,10 @@ int aws_s3_calculate_request_optimal_range_size(
     uint64_t optimal_size = client_optimal_range_size;
     if (estimated_object_stored_part_size > 0 && estimated_object_stored_part_size < client_optimal_range_size) {
         optimal_size = estimated_object_stored_part_size;
-
-        /* Apply minimum constraint first to avoid excessive alignment */
-        if (optimal_size < g_default_part_size_fallback) {
-            optimal_size = g_default_part_size_fallback;
-        }
+    }
+    /* Apply minimum constraint first to avoid excessive alignment */
+    if (optimal_size < g_default_part_size_fallback) {
+        optimal_size = g_default_part_size_fallback;
     }
     /* Apply a reasonable upper bound to this. The goal to increase the part size is to have less connection to hit one
      * single part from server so that we are not bottleneck by the server throughput on one part */
