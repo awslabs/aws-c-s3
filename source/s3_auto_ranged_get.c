@@ -831,7 +831,7 @@ static void s_s3_auto_ranged_get_request_finished(
                     meta_request->is_express,
                     &out_request_optimal_range_size) == AWS_OP_SUCCESS) {
                 /* Apply a buffer pool alignment to the calculated result. */
-                out_request_optimal_range_size = aws_s3_buffer_pool_align_range_size(
+                out_request_optimal_range_size = aws_s3_buffer_pool_derive_aligned_buffer_size(
                     meta_request->client->buffer_pool, out_request_optimal_range_size);
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,
