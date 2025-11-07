@@ -460,4 +460,27 @@ endif()
 # Fuzz tests
 include(AwsLibFuzzer)
 file(GLOB FUZZ_TESTS "fuzz/*.c")
+
+# Separate out the keep_pending test which needs a longer timeout
+list(REMOVE_ITEM FUZZ_TESTS "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_buffer_pool_special_size_keep_pending.c")
+
+# Add all other fuzz tests with standard timeout
 aws_add_fuzz_tests("${FUZZ_TESTS}" "" "")
+
+# Add the keep_pending test separately with a longer timeout (30 seconds per input)
+# This test can take longer because it stress-tests with up to 10,000 pending reservations
+if(ENABLE_FUZZ_TESTS)
+    set(KEEP_PENDING_TEST "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_buffer_pool_special_size_keep_pending.c")
+    set(KEEP_PENDING_BINARY_NAME ${PROJECT_NAME}-fuzz-fuzz_buffer_pool_special_size_keep_pending)
+
+    add_executable(${KEEP_PENDING_BINARY_NAME} ${KEEP_PENDING_TEST})
+    target_link_libraries(${KEEP_PENDING_BINARY_NAME} PRIVATE ${PROJECT_NAME})
+    aws_set_common_properties(${KEEP_PENDING_BINARY_NAME})
+    aws_add_sanitizers(${KEEP_PENDING_BINARY_NAME} SANITIZERS "fuzzer")
+    target_compile_definitions(${KEEP_PENDING_BINARY_NAME} PRIVATE AWS_UNSTABLE_TESTING_API=1)
+    target_include_directories(${KEEP_PENDING_BINARY_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+
+    # Use 30-second timeout per input instead of the default 1 second
+    add_test(NAME fuzz_fuzz_buffer_pool_special_size_keep_pending
+             COMMAND ${KEEP_PENDING_BINARY_NAME} -timeout=30 -max_total_time=${FUZZ_TESTS_MAX_TIME})
+endif()
