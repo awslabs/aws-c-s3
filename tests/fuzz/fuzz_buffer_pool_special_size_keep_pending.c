@@ -14,13 +14,14 @@
 #include <stdint.h>
 
 /**
- * Fuzz test for buffer pool with special sizes.
- * Tests the complete flow of:
- * 1. Adding special sizes to the buffer pool
- * 2. Reserving buffers with a mix of special sizes and random sizes
- * 3. Verifying usage statistics match expectations
- * 4. Acquiring buffers from tickets
- * 5. Releasing buffers and verifying cleanup
+ * Fuzz test for buffer pool with special sizes - variant that keeps pending futures.
+ * Similar to fuzz_buffer_pool_special_size.c but with key differences:
+ * 1. When hitting memory limit, keeps the pending futures instead of releasing them
+ * 2. Skips stats verification after reserve operations
+ * 3. Ensures all futures and tickets are properly released at the end
+ *
+ * This variant tests the pool's ability to handle many pending reservations that
+ * cannot complete due to memory limits.
  */
 
 #define MAX_SPECIAL_SIZES 5
@@ -78,9 +79,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         allocator, (struct aws_s3_buffer_pool_config){.part_size = part_size, .memory_limit = memory_limit});
 
     AWS_FATAL_ASSERT(buffer_pool);
-    struct aws_s3_default_buffer_pool *pool = buffer_pool->impl;
-    /* Hack to keep the special blocks alive from the trim, so that we can be sure tracking the stats correctly. */
-    pool->force_keeping_special_blocks = true;
     /* Get initial stats */
     struct aws_s3_default_buffer_pool_usage_stats initial_stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
     size_t primary_cutoff = initial_stats.primary_cutoff;
@@ -128,23 +126,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     struct aws_s3_default_buffer_pool_usage_stats after_add_stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
     AWS_FATAL_ASSERT(after_add_stats.special_blocks_num == unique_special_sizes_added);
 
-    /* Track reservations - some will be kept, some released immediately within the loop */
+    /* Track reservations - keeping all futures (including pending ones) for cleanup */
     struct aws_future_s3_buffer_ticket *futures[MAX_RESERVATIONS] = {0};
     struct aws_s3_buffer_ticket *tickets[MAX_RESERVATIONS] = {0};
-    size_t num_kept = 0; /* Track how many we're keeping for later release */
-
-    /* Track expected usage for validation */
-    size_t expected_primary_reserved = 0;
-    size_t expected_primary_used = 0;
-    size_t expected_secondary_reserved = 0;
-    size_t expected_secondary_used = 0;
-    size_t expected_special_reserved = 0;
-    size_t expected_special_used = 0;
+    size_t num_futures = 0;
+    size_t num_tickets = 0;
 
     /*
-     * Stress test: reserve/acquire/release cycle within loop
-     * Pattern: reserve → acquire → maybe release immediately (50% chance)
-     * This creates heavy churn and tests state management
+     * Stress test: reserve/acquire/release cycle
+     * KEY DIFFERENCE: Keep pending futures instead of releasing them immediately
+     * This tests the pool's handling of many pending reservations
      */
     for (size_t i = 0; i < num_reservations && input.len >= 6; ++i) {
         /* Read 6 bytes: 1 for type, 4 for size, 1 for release decision */
@@ -165,48 +156,23 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
         /* Determine reservation size and type BEFORE reserving */
         size_t reservation_size = 0;
-        bool is_special = false;
-        bool is_primary = false;
-        bool is_secondary = false;
-
         uint8_t size_type = reservation_type % 3;
 
         if (size_type == 0) {
             /* Special size allocation - explicitly choose a special size */
             size_t special_idx = size_value % valid_special_sizes;
             reservation_size = special_sizes[special_idx];
-            is_special = true;
         } else if (size_type == 1) {
             /* Primary storage allocation (below primary_cutoff) */
             reservation_size = 1024 + (size_value % (primary_cutoff - 1024));
-            is_primary = true;
         } else {
             /* Secondary storage allocation (above primary_cutoff, below smallest special size) */
             size_t secondary_range = special_sizes[0] - primary_cutoff - 1;
             if (secondary_range > 0) {
                 reservation_size = primary_cutoff + 1 + (size_value % secondary_range);
-                is_secondary = true;
             } else {
                 /* Not enough space for secondary, use primary instead */
                 reservation_size = 1024 + (size_value % (primary_cutoff - 1024));
-                is_primary = true;
-            }
-        }
-
-        /*
-         * CRITICAL: Check if randomly generated size accidentally matches a special size!
-         * If so, the buffer pool will treat it as special, not secondary/primary.
-         * We must update our flags to match what the pool will actually do.
-         */
-        if (!is_special) {
-            for (size_t j = 0; j < valid_special_sizes; ++j) {
-                if (reservation_size == special_sizes[j]) {
-                    /* Randomly hit a special size - update flags to match buffer pool behavior */
-                    is_special = true;
-                    is_primary = false;
-                    is_secondary = false;
-                    break;
-                }
             }
         }
 
@@ -218,35 +184,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
         /* Check if reservation completed */
         if (!aws_future_s3_buffer_ticket_is_done(future)) {
-            /* Hit memory limit - release the pending future to keep exact tracking */
-            aws_future_s3_buffer_ticket_release(future);
-            break;
+            /*
+             * KEY DIFFERENCE: Keep the pending future instead of releasing it
+             * This allows us to test handling of many pending reservations
+             */
+            futures[num_futures++] = future;
+            break; /* Stop trying to reserve more since we hit the limit */
         }
 
         /* Check for errors */
         int error = aws_future_s3_buffer_ticket_get_error(future);
         AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
 
-        /* Update expected reserved based on type we determined earlier (including accidental special size check) */
-        if (is_special) {
-            expected_special_reserved += reservation_size;
-        } else if (is_primary) {
-            expected_primary_reserved += reservation_size;
-        } else if (is_secondary) {
-            expected_secondary_reserved += reservation_size;
-        }
-
-        /* Check #1: Verify stats after reserve match expectations */
-        struct aws_s3_default_buffer_pool_usage_stats after_reserve_stats =
-            aws_s3_default_buffer_pool_get_usage(buffer_pool);
-
-        if (is_special) {
-            AWS_FATAL_ASSERT(after_reserve_stats.special_blocks_reserved == expected_special_reserved);
-        } else if (is_primary) {
-            AWS_FATAL_ASSERT(after_reserve_stats.primary_reserved == expected_primary_reserved);
-        } else if (is_secondary) {
-            AWS_FATAL_ASSERT(after_reserve_stats.secondary_reserved == expected_secondary_reserved);
-        }
+        /*
+         * KEY DIFFERENCE: Skip stats verification after reserve
+         * We're not tracking expected values in this variant
+         */
 
         /* Acquire the ticket */
         struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
@@ -256,33 +209,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
         AWS_FATAL_ASSERT(buf.buffer != NULL);
         AWS_FATAL_ASSERT(buf.capacity >= reservation_size);
-        aws_future_s3_buffer_ticket_release(future);
-        /* Update expected used and reserved after acquire */
-        if (is_special) {
-            expected_special_used += reservation_size;
-            expected_special_reserved -= reservation_size;
-        } else if (is_primary) {
-            expected_primary_used += reservation_size;
-            expected_primary_reserved -= reservation_size;
-        } else if (is_secondary) {
-            expected_secondary_used += reservation_size;
-            expected_secondary_reserved -= reservation_size;
-        }
 
-        /* Check #2: Verify stats after acquire match expectations */
-        struct aws_s3_default_buffer_pool_usage_stats after_acquire_stats =
-            aws_s3_default_buffer_pool_get_usage(buffer_pool);
-
-        if (is_special) {
-            AWS_FATAL_ASSERT(after_acquire_stats.special_blocks_used >= expected_special_used);
-            AWS_FATAL_ASSERT(after_acquire_stats.special_blocks_reserved >= expected_special_reserved);
-        } else if (is_primary) {
-            AWS_FATAL_ASSERT(after_acquire_stats.primary_used >= expected_primary_used);
-            AWS_FATAL_ASSERT(after_acquire_stats.primary_reserved >= expected_primary_reserved);
-        } else if (is_secondary) {
-            AWS_FATAL_ASSERT(after_acquire_stats.secondary_used >= expected_secondary_used);
-            AWS_FATAL_ASSERT(after_acquire_stats.secondary_reserved >= expected_secondary_reserved);
-        }
+        /* Store future for cleanup */
+        futures[num_futures++] = future;
 
         /* Write to buffer to ensure it's valid */
         if (buf.capacity > 0) {
@@ -296,48 +225,33 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         if ((release_immediately % 2) == 0) {
             /* Release immediately - creates churn */
             aws_s3_buffer_ticket_release(ticket);
-
-            /* Update expected used after release */
-            if (is_special) {
-                expected_special_used -= reservation_size;
-            } else if (is_primary) {
-                expected_primary_used -= reservation_size;
-            } else if (is_secondary) {
-                expected_secondary_used -= reservation_size;
-            }
-
-            /* Check #3: Verify stats after release match expectations */
-            struct aws_s3_default_buffer_pool_usage_stats after_release_stats =
-                aws_s3_default_buffer_pool_get_usage(buffer_pool);
-
-            if (is_special) {
-                AWS_FATAL_ASSERT(after_release_stats.special_blocks_used >= expected_special_used);
-            } else if (is_primary) {
-                AWS_FATAL_ASSERT(after_release_stats.primary_used >= expected_primary_used);
-            } else if (is_secondary) {
-                AWS_FATAL_ASSERT(after_release_stats.secondary_used >= expected_secondary_used);
-            }
         } else {
             /* Keep for later release */
-            tickets[num_kept++] = ticket;
+            tickets[num_tickets++] = ticket;
         }
     }
 
-    /* Release all tickets and futures */
-    for (size_t i = 0; i < MAX_RESERVATIONS; ++i) {
+    /* Release all tickets first */
+    for (size_t i = 0; i < num_tickets; ++i) {
         if (tickets[i] != NULL) {
             aws_s3_buffer_ticket_release(tickets[i]);
             tickets[i] = NULL;
         }
+    }
+
+    /* Release all futures (including pending ones) */
+    for (size_t i = 0; i < num_futures; ++i) {
         if (futures[i] != NULL) {
             aws_future_s3_buffer_ticket_release(futures[i]);
             futures[i] = NULL;
         }
     }
 
+    /* Release special sizes */
     for (size_t j = 0; j < valid_special_sizes; ++j) {
         aws_s3_buffer_pool_release_special_size(buffer_pool, special_sizes[j]);
     }
+
     /* Force trim */
     aws_s3_buffer_pool_trim(buffer_pool);
 
@@ -354,11 +268,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     AWS_FATAL_ASSERT(final_stats.special_blocks_used == 0);
     AWS_FATAL_ASSERT(final_stats.special_blocks_reserved == 0);
     AWS_FATAL_ASSERT(final_stats.forced_used == 0);
-
-    /*
-     * Note: We don't assert special_blocks_allocated > 0 because the loop might not have
-     * allocated any special sizes depending on the fuzzer input pattern
-     */
 
     /* Clean up buffer pool */
     aws_s3_default_buffer_pool_destroy(buffer_pool);
