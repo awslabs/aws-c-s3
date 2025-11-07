@@ -256,7 +256,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
         AWS_FATAL_ASSERT(buf.buffer != NULL);
         AWS_FATAL_ASSERT(buf.capacity >= reservation_size);
-
+        aws_future_s3_buffer_ticket_release(future);
         /* Update expected used and reserved after acquire */
         if (is_special) {
             expected_special_used += reservation_size;
