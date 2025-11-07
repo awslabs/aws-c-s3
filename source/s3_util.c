@@ -855,7 +855,7 @@ int aws_s3_calculate_client_optimal_range_size(
     uint32_t max_connections,
     uint64_t *out_client_optimal_range_size) {
 
-    AWS_PRECONDITION(out_client_optimal_range_size);
+    AWS_ERROR_PRECONDITION(out_client_optimal_range_size);
 
     /* Validate input parameters */
     if (memory_limit_in_bytes == 0 || max_connections == 0) {
@@ -907,7 +907,7 @@ int aws_s3_calculate_request_optimal_range_size(
     bool is_express,
     uint64_t *out_request_optimal_range_size) {
 
-    AWS_PRECONDITION(out_request_optimal_range_size);
+    AWS_ERROR_PRECONDITION(out_request_optimal_range_size);
 
     /* Validate input parameters */
     if (client_optimal_range_size == 0) {
@@ -925,11 +925,10 @@ int aws_s3_calculate_request_optimal_range_size(
     uint64_t optimal_size = client_optimal_range_size;
     if (estimated_object_stored_part_size > 0 && estimated_object_stored_part_size < client_optimal_range_size) {
         optimal_size = estimated_object_stored_part_size;
-
-        /* Apply minimum constraint first to avoid excessive alignment */
-        if (optimal_size < g_default_part_size_fallback) {
-            optimal_size = g_default_part_size_fallback;
-        }
+    }
+    /* Apply minimum constraint first to avoid excessive alignment */
+    if (optimal_size < g_default_part_size_fallback) {
+        optimal_size = g_default_part_size_fallback;
     }
     /* Apply a reasonable upper bound to this. The goal to increase the part size is to have less connection to hit one
      * single part from server so that we are not bottleneck by the server throughput on one part */
@@ -966,7 +965,7 @@ static bool s_is_quote_or_space_char(uint8_t c) {
 
 int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uint32_t *out_num_parts) {
 
-    AWS_PRECONDITION(out_num_parts);
+    AWS_ERROR_PRECONDITION(out_num_parts);
     /* Strip quotes if present (ETags often come wrapped in quotes) */
     struct aws_byte_cursor etag_cursor = aws_byte_cursor_trim_pred(&etag_header_value, s_is_quote_or_space_char);
 
@@ -986,7 +985,10 @@ int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uin
     while (aws_byte_cursor_next_split(&remaining_cursor, '-', &substr)) {
         split_count++;
         if (split_count == 2) {
-            /* The ETag should follow the pattern <hash>-<parts_count>, so the second part is the parts count. */
+            /**
+             * The ETag should follow the pattern <hash>-<parts_count>, so the second part is the parts count.
+             * The S3 ETag will not have `-` in the hash value, as it's a HEX string.
+             **/
             parts_count = substr;
         }
         if (split_count > 2) {

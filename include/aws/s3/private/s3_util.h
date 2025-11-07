@@ -263,8 +263,7 @@ int aws_s3_parse_content_range_response_header(
     uint64_t *out_object_size);
 
 /* Given a Content-Range header value as a byte cursor, parses the range-start, range-end and
- * object-size. All output arguments are optional. This is an optimized version that doesn't
- * require string allocation. */
+ * object-size. All output arguments are optional. */
 AWS_S3_API
 int aws_s3_parse_content_range_cursor(
     struct aws_byte_cursor content_range_cursor,
