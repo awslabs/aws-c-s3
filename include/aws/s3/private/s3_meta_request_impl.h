@@ -281,6 +281,9 @@ struct aws_s3_meta_request {
         /* Track the number of requests being prepared for this meta request. */
         size_t num_request_being_prepared;
 
+        /* Weight for connection allocation: num_parts / part_size */
+        double connection_weight;
+
     } client_process_work_threaded_data;
 
     /* Anything in this structure should only ever be accessed by the meta-request from its io_event_loop thread. */
