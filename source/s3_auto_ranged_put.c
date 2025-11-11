@@ -367,6 +367,15 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->upload_id = NULL;
     auto_ranged_put->resume_token = options->resume_token;
 
+    /* Calculate weight for upload: weight = object_size / (part_size * part_size) */
+    if (has_content_length && part_size > 0) {
+        auto_ranged_put->base.weight = (double)content_length / ((double)part_size * (double)part_size);
+        /* Add this meta request's weight to client's total weight */
+        aws_atomic_fetch_add(&client->stats.total_weight, (size_t)auto_ranged_put->base.weight);
+    } else {
+        auto_ranged_put->base.weight = 0.0;
+    }
+
     aws_s3_meta_request_resume_token_acquire(auto_ranged_put->resume_token);
 
     auto_ranged_put->threaded_update_data.next_part_number = 1;

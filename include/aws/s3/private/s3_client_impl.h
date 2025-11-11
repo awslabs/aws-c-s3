@@ -371,6 +371,9 @@ struct aws_s3_client {
 
         /* Number of overall requests currently streaming the request body instead of buffering. */
         struct aws_atomic_var num_requests_streaming_request_body;
+
+        /* Total weight of all active meta requests. Weight = object_size / (part_size * part_size) */
+        struct aws_atomic_var total_weight;
     } stats;
 
     struct {

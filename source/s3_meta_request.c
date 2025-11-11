@@ -571,6 +571,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
+        /* Subtract this meta request's weight from client's total weight */
+        if (meta_request->weight > 0.0) {
+            aws_atomic_fetch_sub(&meta_request->client->stats.total_weight, (size_t)meta_request->weight);
+        }
+        
         if (meta_request->buffer_pool_optimized) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
