@@ -65,7 +65,7 @@ static const uint32_t s_max_requests_multiplier = 4;
  * TODO: Improve this algorithm (expect higher throughput for S3 Express,
  * expect lower throughput for small objects, etc)
  */
-static const double s_throughput_per_connection_gbps = 100.0 / 250;
+static const double s_throughput_per_connection_gbps = 1.171875;
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
@@ -1743,14 +1743,16 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                 &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
 
             meta_request->client_process_work_threaded_data.scheduled = true;
-
-            /* Rebalance connection limits when a new meta request is added */
-            s_s3_client_rebalance_connection_limits_threaded(client);
         } else {
             meta_request = aws_s3_meta_request_release(meta_request);
         }
 
         aws_mem_release(client->allocator, meta_request_work);
+    }
+
+    /* Rebalance connection limits after processing all new meta requests */
+    if (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+        s_s3_client_rebalance_connection_limits_threaded(client);
     }
 
     /*******************/
@@ -2072,14 +2074,21 @@ void s_acquire_mem_and_prepare_request(
 /**
  * Rebalance connection limits across all active meta requests based on their weights.
  * Weight = num_parts / part_size (higher weight = more parallelizable work)
+ * 
+ * This is called only when meta-requests are added/removed or discover their size,
+ * not on every update cycle, to minimize overhead.
  */
 static void s_s3_client_rebalance_connection_limits_threaded(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
+    /* Maximum connections we'll distribute across all meta-requests.
+     * This can be higher than ideal_connection_count to allow full parallelism. */
+    const uint32_t max_total_connections = 500;
+
     double total_weight = 0.0;
     uint32_t num_meta_requests = 0;
 
-    /* Calculate total weight across all active meta requests */
+    /* Single pass: Calculate weights and total */
     for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
          node != aws_linked_list_end(&client->threaded_data.meta_requests);
          node = aws_linked_list_next(node)) {
@@ -2092,24 +2101,20 @@ static void s_s3_client_rebalance_connection_limits_threaded(struct aws_s3_clien
         double weight = 1.0;
         uint32_t num_parts = 0;
 
-        /* Try to get num_parts from the meta request implementation
-         * We need to lock synced_data to safely read these values */
+        /* Lock synced_data to safely read object size and calculate num_parts */
         aws_s3_meta_request_lock_synced_data(meta_request);
 
         if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
             struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
             if (auto_ranged_get && auto_ranged_get->synced_data.object_range_known) {
+                /* Use total_num_parts which is calculated from object_size / part_size */
                 num_parts = auto_ranged_get->synced_data.total_num_parts;
             }
         } else if (meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
             struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-            if (auto_ranged_put) {
-                /* For PUT, use num_parts_started if available, otherwise use total from content_length */
-                if (auto_ranged_put->synced_data.num_parts_started > 0) {
-                    num_parts = auto_ranged_put->synced_data.num_parts_started;
-                } else if (auto_ranged_put->has_content_length) {
-                    num_parts = auto_ranged_put->total_num_parts_from_content_length;
-                }
+            if (auto_ranged_put && auto_ranged_put->has_content_length) {
+                /* Use total_num_parts calculated from content_length / part_size */
+                num_parts = auto_ranged_put->total_num_parts_from_content_length;
             }
         }
 
@@ -2130,9 +2135,7 @@ static void s_s3_client_rebalance_connection_limits_threaded(struct aws_s3_clien
         return;
     }
 
-    /* Distribute ideal_connection_count proportionally based on weights */
-    uint32_t ideal_connection_count = client->ideal_connection_count;
-
+    /* Second pass: Distribute connections proportionally based on weights */
     for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->threaded_data.meta_requests);
          node != aws_linked_list_end(&client->threaded_data.meta_requests);
          node = aws_linked_list_next(node)) {
@@ -2141,7 +2144,7 @@ static void s_s3_client_rebalance_connection_limits_threaded(struct aws_s3_clien
             AWS_CONTAINER_OF(node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
         double proportion = meta_request->client_process_work_threaded_data.connection_weight / total_weight;
-        uint32_t allocated_connections = (uint32_t)(proportion * ideal_connection_count);
+        uint32_t allocated_connections = (uint32_t)(proportion * max_total_connections);
 
         /* Ensure at least 1 connection per meta request */
         if (allocated_connections == 0) {
@@ -2153,13 +2156,14 @@ static void s_s3_client_rebalance_connection_limits_threaded(struct aws_s3_clien
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_CLIENT,
-            "id=%p Meta request %p (type=%d): weight=%.2f, proportion=%.2f, allocated_connections=%u",
+            "id=%p Meta request %p (type=%d): weight=%.2f, proportion=%.2f, allocated_connections=%u/%u",
             (void *)client,
             (void *)meta_request,
             meta_request->type,
             meta_request->client_process_work_threaded_data.connection_weight,
             proportion,
-            allocated_connections);
+            allocated_connections,
+            max_total_connections);
     }
 }
 
@@ -2316,7 +2320,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
     struct aws_linked_list left_over_requests;
     aws_linked_list_init(&left_over_requests);
-    
+
     /* Client-level connection limit removed - connections are now managed per meta-request
      * through weighted allocation in s_s3_client_rebalance_connection_limits_threaded() */
     bool queue_is_empty = aws_linked_list_empty(&client->threaded_data.request_queue);
