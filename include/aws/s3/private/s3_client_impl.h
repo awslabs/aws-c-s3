@@ -338,6 +338,9 @@ struct aws_s3_client {
      * Ignored unless `enable_read_backpressure` is true. */
     const size_t initial_read_window;
 
+    /* Whether dynamic connection scaling is enabled. */
+    const bool enable_dynamic_connection_scaling;
+
     /**
      * Timeout in ms for upload request for request after sending to the response first byte received.
      */
@@ -374,6 +377,9 @@ struct aws_s3_client {
 
         /* Total weight of all active meta requests. Weight = object_size / (part_size * part_size) */
         struct aws_atomic_var total_weight;
+
+        /* Sum of connection requirements from all active meta requests */
+        struct aws_atomic_var total_required_connections;
     } stats;
 
     struct {
@@ -546,6 +552,15 @@ void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_min_num_connections;
+
+AWS_S3_API
+extern const uint32_t g_max_num_connections;
+
+AWS_S3_API
+extern const double g_s3_throughput_per_connection_gbps;
+
+AWS_S3_API
+extern const double g_s3express_throughput_per_connection_gbps;
 
 AWS_S3_API
 extern const size_t g_expect_timeout_offset_ms;

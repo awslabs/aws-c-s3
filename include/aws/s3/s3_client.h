@@ -617,6 +617,14 @@ struct aws_s3_client_config {
     size_t initial_read_window;
 
     /**
+     * Enable dynamic connection scaling based on active meta request requirements.
+     * If true (default), the client will dynamically adjust the connection pool size
+     * based on the sum of all active meta requests' connection requirements.
+     * If false, the client will use the original fixed connection limit behavior.
+     */
+    bool enable_dynamic_connection_scaling;
+
+    /**
      * To enable S3 Express support or not.
      */
     bool enable_s3express;

@@ -42,6 +42,10 @@
 #include <inttypes.h>
 #include <math.h>
 
+#ifndef _WIN32
+#    include <sys/resource.h>
+#endif
+
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif                              /* _MSC_VER */
@@ -57,15 +61,17 @@ static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 static const uint32_t s_max_requests_multiplier = 4;
 
 /* This is used to determine the ideal number of HTTP connections. Algorithm is roughly:
- * num-connections-max = throughput-target-gbps / s_throughput_per_connection_gbps
+ * num-connections-max = throughput-target-gbps / throughput_per_connection_gbps
  *
  * Magic value based on: match results of the previous algorithm,
  * where throughput-target-gpbs of 100 resulted in 250 connections.
- *
- * TODO: Improve this algorithm (expect higher throughput for S3 Express,
- * expect lower throughput for small objects, etc)
  */
-static const double s_throughput_per_connection_gbps = 100.0 / 250;
+const double g_s3_throughput_per_connection_gbps = 0.5;
+
+/* S3 Express has higher throughput per connection due to its performance characteristics.
+ * TODO: Tune this value based on actual S3 Express performance measurements.
+ */
+const double g_s3express_throughput_per_connection_gbps = 1; /* Assume 2x throughput */
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
@@ -153,11 +159,36 @@ void aws_s3_set_dns_ttl(size_t ttl) {
  * can use less connections to reach the target throughput..
  **/
 static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
-    double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
+    double ideal_connection_count_double = throughput_gps / g_s3_throughput_per_connection_gbps;
     /* round up and clamp */
     ideal_connection_count_double = ceil(ideal_connection_count_double);
     ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
     return (uint32_t)ideal_connection_count_double;
+}
+
+/**
+ * Get the system file descriptor limit.
+ * Returns 50% of the OS limit to reserve capacity for non-S3 operations.
+ * Falls back to 500 if getrlimit fails.
+ */
+static uint32_t s_get_system_fd_limit(void) {
+#ifdef _WIN32
+    /* Windows doesn't have getrlimit, return a reasonable default */
+    return 100;
+#else
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+        /* Reserve 50% for non-S3 operations */
+        uint64_t usable = (uint64_t)(rl.rlim_cur) / 2;
+        /* Cap at uint32_t max to avoid overflow */
+        if (usable > UINT32_MAX) {
+            usable = UINT32_MAX;
+        }
+        return (uint32_t)usable;
+    }
+    /* Fallback if getrlimit fails */
+    return 0;
+#endif
 }
 
 /* Returns the max number of connections allowed.
@@ -479,6 +510,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
     aws_atomic_init_int(&client->stats.total_weight, 0);
+    aws_atomic_init_int(&client->stats.total_required_connections, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -681,6 +713,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+    *((bool *)&client->enable_dynamic_connection_scaling) = client_config->enable_dynamic_connection_scaling;
 
     return client;
 

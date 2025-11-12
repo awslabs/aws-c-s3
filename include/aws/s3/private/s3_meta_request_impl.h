@@ -163,6 +163,9 @@ struct aws_s3_meta_request {
     /* Weight of this meta request for connection allocation. Weight = object_size / (part_size * part_size) */
     double weight;
 
+    /* Number of connections this meta request requires for optimal throughput */
+    uint32_t required_connections;
+
     struct aws_cached_signing_config_aws *cached_signing_config;
 
     /* Client that created this meta request which also processes this request. After the meta request is finished, this
