@@ -160,21 +160,18 @@ static void s_validate_meta_request_checksum_on_finish(
 /**
  * Calculate the number of connections required for a meta request to achieve target throughput.
  * This is used for dynamic connection scaling.
- * 
+ *
  * Currently calculates based on: target_throughput / throughput_per_connection
  * Uses different throughput constants for S3 vs S3 Express.
  * TODO: Consider payload size, number of parts, and part size for more accurate calculation.
  */
-uint32_t s_calculate_meta_request_connections(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request) {
+uint32_t s_calculate_meta_request_connections(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(meta_request);
 
     /* Select appropriate throughput per connection based on S3 Express vs regular S3 */
-    double throughput_per_connection = meta_request->is_express 
-        ? g_s3express_throughput_per_connection_gbps 
-        : g_s3_throughput_per_connection_gbps;
+    double throughput_per_connection =
+        meta_request->is_express ? g_s3express_throughput_per_connection_gbps : g_s3_throughput_per_connection_gbps;
 
     /* Calculate connections needed: target_throughput / throughput_per_connection */
     double ideal_connections = client->throughput_target_gbps / throughput_per_connection;
@@ -620,12 +617,13 @@ static void s_s3_meta_request_destroy(void *user_data) {
         if (meta_request->weight > 0.0) {
             aws_atomic_fetch_sub(&meta_request->client->stats.total_weight, (size_t)meta_request->weight);
         }
-        
+
         /* Subtract this meta request's connection requirements from client's total */
         if (meta_request->required_connections > 0) {
-            aws_atomic_fetch_sub(&meta_request->client->stats.total_required_connections, (size_t)meta_request->required_connections);
+            aws_atomic_fetch_sub(
+                &meta_request->client->stats.total_required_connections, (size_t)meta_request->required_connections);
         }
-        
+
         if (meta_request->buffer_pool_optimized) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
