@@ -967,10 +967,11 @@ update_synced_data:
                     object_range_start,
                     object_range_end);
             }
-            
+
             /* Calculate weight for download: weight = object_size / (part_size * part_size) */
             if (object_size > 0 && meta_request->part_size > 0) {
-                meta_request->weight = (double)object_size / ((double)meta_request->part_size * (double)meta_request->part_size);
+                meta_request->weight =
+                    (double)object_size / ((double)meta_request->part_size * (double)meta_request->part_size);
                 /* Add this meta request's weight to client's total weight */
                 aws_atomic_fetch_add(&meta_request->client->stats.total_weight, (size_t)meta_request->weight);
             }

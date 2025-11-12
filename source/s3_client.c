@@ -232,7 +232,7 @@ static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *clien
 
     /* Load sum of all meta request requirements */
     size_t total_size = aws_atomic_load_int(&client->stats.total_required_connections);
-    
+
     /* Overflow protection: Cap at uint32_t max if sum exceeds it */
     uint32_t total;
     if (total_size > UINT32_MAX) {
@@ -262,7 +262,7 @@ static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *clien
 
     /* Apply system FD limit (checked dynamically) */
     uint32_t system_fd_limit = s_get_system_fd_limit();
-    
+
     /* Additional overflow protection: if system limit is 0 (getrlimit failed) */
     if (system_fd_limit == 0) {
         AWS_LOGF_WARN(
@@ -271,7 +271,7 @@ static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *clien
             (void *)client,
             system_fd_limit);
     }
-    
+
     new_max = aws_min_u32(new_max, system_fd_limit);
 
     /* Apply hysteresis to prevent rapid changes */
@@ -331,7 +331,7 @@ uint32_t aws_s3_client_get_max_active_connections(
     if (meta_request) {
         if (meta_request->max_active_connections_override) {
             /* Apply the meta request level override the max active connections, but less than the client side settings.
-                */
+             */
             max_active_connections = aws_min_u32(meta_request->max_active_connections_override, max_active_connections);
         }
         if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps > 0) {
@@ -1939,10 +1939,10 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
                                          num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
-        
+
         /* Load required connections from atomic counter for logging */
         uint32_t required_connections = (uint32_t)aws_atomic_load_int(&client->stats.total_required_connections);
-        
+
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
@@ -2239,8 +2239,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
      */
     while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 
-        struct aws_linked_list_node *meta_request_node =
-            aws_linked_list_begin(&client->threaded_data.meta_requests);
+        struct aws_linked_list_node *meta_request_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
         struct aws_s3_meta_request *meta_request =
             AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
@@ -2278,8 +2277,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 ++client->threaded_data.num_requests_being_prepared;
                 ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
 
-                num_requests_in_flight =
-                    (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+                num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
 
                 /**
                  * When upload with streaming, the prepare stage will not read into buffer.
@@ -2293,8 +2291,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     aws_atomic_fetch_add(&client->stats.num_requests_streaming_request_body, 1);
                 }
 
-                s_acquire_mem_and_prepare_request(
-                    client, request, s_s3_client_prepare_callback_queue_request, client);
+                s_acquire_mem_and_prepare_request(client, request, s_s3_client_prepare_callback_queue_request, client);
             }
         } else {
             s_s3_client_remove_meta_request_threaded(client, meta_request);
@@ -2397,19 +2394,20 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
             /* Calculate allowed connections for this meta request based on weight ratio */
             bool should_allocate_connection = false;
             uint32_t current_connections = (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network);
-            
+
             if (meta_request->weight > 0.0) {
                 size_t total_weight = aws_atomic_load_int(&client->stats.total_weight);
                 if (total_weight > 0) {
                     /* Calculate: (meta_request->weight / client->total_weight) * 300 */
                     double weight_ratio = meta_request->weight / (double)total_weight;
                     uint32_t allowed_connections = (uint32_t)(weight_ratio * client_max_active_connections);
-                    
+
                     /* Apply max_active_connections_override if set */
                     if (meta_request->max_active_connections_override > 0) {
-                        allowed_connections = aws_min_u32(allowed_connections, meta_request->max_active_connections_override);
+                        allowed_connections =
+                            aws_min_u32(allowed_connections, meta_request->max_active_connections_override);
                     }
-                    
+
                     should_allocate_connection = (current_connections < allowed_connections);
                 } else {
                     /* No total weight yet, allow allocation */
@@ -2419,7 +2417,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
                 /* No weight calculated yet (e.g., download before discovery), allow allocation */
                 should_allocate_connection = true;
             }
-            
+
             if (should_allocate_connection) {
                 s_s3_client_create_connection_for_request(client, request);
             } else {
