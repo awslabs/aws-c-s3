@@ -201,7 +201,6 @@ static bool s_should_resize_connection_pool(
     uint32_t current_max,
     uint32_t new_max,
     uint64_t current_time_ns,
-    uint32_t previous_max_connections,
     uint64_t last_resize_timestamp_ns) {
 
     /* Calculate threshold: 10% or 10 connections, whichever is larger */
@@ -282,7 +281,7 @@ static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *clien
     aws_high_res_clock_get_ticks(&current_time_ns);
 
     /* If cached value exists and hysteresis check fails, return cached value */
-    if (cached_max > 0 && !s_should_resize_connection_pool(cached_max, new_max, current_time_ns, cached_max, last_update_ns)) {
+    if (cached_max > 0 && !s_should_resize_connection_pool(cached_max, new_max, current_time_ns, last_update_ns)) {
         return cached_max;
     }
 
@@ -2373,7 +2372,6 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
-        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
         /* As the request removed from the queue. Decrement the preparing track */
         --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         if (request->is_noop) {
