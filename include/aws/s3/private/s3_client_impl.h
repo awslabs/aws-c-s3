@@ -380,6 +380,12 @@ struct aws_s3_client {
 
         /* Sum of connection requirements from all active meta requests */
         struct aws_atomic_var total_required_connections;
+
+        /* Cached max connections value for hysteresis */
+        struct aws_atomic_var cached_max_connections;
+
+        /* Timestamp of last connection limit change for hysteresis */
+        struct aws_atomic_var last_max_connections_update_ns;
     } stats;
 
     struct {
