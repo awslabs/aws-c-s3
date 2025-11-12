@@ -28,6 +28,7 @@
 #include <aws/io/stream.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 
 #define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
 #define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
@@ -38,6 +39,10 @@ static const size_t s_default_event_delivery_array_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static void s_s3_meta_request_destroy(void *user_data);
+
+static uint32_t s_calculate_meta_request_connections(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request);
 
 static void s_s3_meta_request_init_signing_date_time(
     struct aws_s3_meta_request *meta_request,
@@ -150,6 +155,40 @@ static void s_validate_meta_request_checksum_on_finish(
     }
     aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
+}
+
+/**
+ * Calculate the number of connections required for a meta request to achieve target throughput.
+ * This is used for dynamic connection scaling.
+ * 
+ * Currently calculates based on: target_throughput / throughput_per_connection
+ * Uses different throughput constants for S3 vs S3 Express.
+ * TODO: Consider payload size, number of parts, and part size for more accurate calculation.
+ */
+uint32_t s_calculate_meta_request_connections(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(meta_request);
+
+    /* Select appropriate throughput per connection based on S3 Express vs regular S3 */
+    double throughput_per_connection = meta_request->is_express 
+        ? g_s3express_throughput_per_connection_gbps 
+        : g_s3_throughput_per_connection_gbps;
+
+    /* Calculate connections needed: target_throughput / throughput_per_connection */
+    double ideal_connections = client->throughput_target_gbps / throughput_per_connection;
+    uint32_t required_connections = (uint32_t)ceil(ideal_connections);
+
+    /* Clamp to reasonable range */
+    if (required_connections < g_min_num_connections) {
+        required_connections = g_min_num_connections;
+    }
+    if (required_connections > g_max_num_connections) {
+        required_connections = g_max_num_connections;
+    }
+
+    return required_connections;
 }
 
 int aws_s3_meta_request_init_base(
@@ -382,6 +421,12 @@ int aws_s3_meta_request_init_base(
     meta_request->impl = impl;
     meta_request->vtable = vtable;
 
+    /* Calculate and track connection requirements for dynamic connection scaling */
+    if (client != NULL) {
+        meta_request->required_connections = s_calculate_meta_request_connections(client, meta_request);
+        aws_atomic_fetch_add(&client->stats.total_required_connections, (size_t)meta_request->required_connections);
+    }
+
     return AWS_OP_SUCCESS;
 error:
     s_s3_meta_request_destroy((void *)meta_request);
@@ -574,6 +619,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
         /* Subtract this meta request's weight from client's total weight */
         if (meta_request->weight > 0.0) {
             aws_atomic_fetch_sub(&meta_request->client->stats.total_weight, (size_t)meta_request->weight);
+        }
+        
+        /* Subtract this meta request's connection requirements from client's total */
+        if (meta_request->required_connections > 0) {
+            aws_atomic_fetch_sub(&meta_request->client->stats.total_required_connections, (size_t)meta_request->required_connections);
         }
         
         if (meta_request->buffer_pool_optimized) {
