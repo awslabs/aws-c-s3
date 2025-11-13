@@ -615,7 +615,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
     if (meta_request->client != NULL) {
         /* Subtract this meta request's weight from client's total weight */
         if (meta_request->weight > 0.0) {
-            aws_atomic_fetch_sub(&meta_request->client->stats.total_weight, (size_t)meta_request->weight);
+            aws_mutex_lock(&meta_request->client->stats.total_weight_mutex);
+            meta_request->client->stats.total_weight -= meta_request->weight;
+            aws_mutex_unlock(&meta_request->client->stats.total_weight_mutex);
         }
 
         /* Subtract this meta request's connection requirements from client's total */

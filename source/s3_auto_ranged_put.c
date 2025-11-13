@@ -372,7 +372,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     if (has_content_length && part_size > 0) {
         auto_ranged_put->base.weight = (double)content_length / ((double)part_size * (double)part_size);
         /* Add this meta request's weight to client's total weight */
-        aws_atomic_fetch_add(&client->stats.total_weight, (size_t)auto_ranged_put->base.weight);
+        aws_mutex_lock(&client->stats.total_weight_mutex);
+        client->stats.total_weight += auto_ranged_put->base.weight;
+        aws_mutex_unlock(&client->stats.total_weight_mutex);
     } else {
         auto_ranged_put->base.weight = 0.0;
     }

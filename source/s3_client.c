@@ -628,7 +628,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
-    aws_atomic_init_int(&client->stats.total_weight, 0);
+    client->stats.total_weight = 0.0;
+    aws_mutex_init(&client->stats.total_weight_mutex);
     aws_atomic_init_int(&client->stats.total_required_connections, 0);
     aws_atomic_init_int(&client->stats.cached_max_connections, 0);
     aws_atomic_init_int(&client->stats.last_max_connections_update_ns, 0);
@@ -862,6 +863,7 @@ on_error:
     }
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
+    aws_mutex_clean_up(&client->stats.total_weight_mutex);
 
     aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
     for (size_t i = 0; i < aws_array_list_length(&client->network_interface_names); i++) {
@@ -966,6 +968,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
+    aws_mutex_clean_up(&client->stats.total_weight_mutex);
 
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
@@ -2369,6 +2372,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
+        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
         /* As the request removed from the queue. Decrement the preparing track */
         --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         if (request->is_noop) {
@@ -2395,18 +2399,16 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
             bool should_allocate_connection = false;
             uint32_t current_connections = (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network);
 
-            if (meta_request->weight > 0.0) {
-                size_t total_weight = aws_atomic_load_int(&client->stats.total_weight);
-                if (total_weight > 0) {
+            if (meta_request->weight > (double)0) {
+                aws_mutex_lock(&client->stats.total_weight_mutex);
+                double total_weight = client->stats.total_weight;
+                aws_mutex_unlock(&client->stats.total_weight_mutex);
+                if (total_weight > (double)0) {
                     /* Calculate: (meta_request->weight / client->total_weight) * 300 */
-                    double weight_ratio = meta_request->weight / (double)total_weight;
+                    double weight_ratio = meta_request->weight / total_weight;
                     uint32_t allowed_connections = (uint32_t)(weight_ratio * client_max_active_connections);
 
-                    /* Apply max_active_connections_override if set */
-                    if (meta_request->max_active_connections_override > 0) {
-                        allowed_connections =
-                            aws_min_u32(allowed_connections, meta_request->max_active_connections_override);
-                    }
+                    allowed_connections = aws_min_u32(allowed_connections, max_active_connections);
 
                     should_allocate_connection = (current_connections < allowed_connections);
                 } else {
