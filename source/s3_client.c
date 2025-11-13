@@ -66,12 +66,12 @@ static const uint32_t s_max_requests_multiplier = 4;
  * Magic value based on: match results of the previous algorithm,
  * where throughput-target-gpbs of 100 resulted in 250 connections.
  */
-const double g_s3_throughput_per_connection_gbps = 0.5;
+const double g_s3_throughput_per_connection_gbps = 100 / 250.0;
 
 /* S3 Express has higher throughput per connection due to its performance characteristics.
  * TODO: Tune this value based on actual S3 Express performance measurements.
  */
-const double g_s3express_throughput_per_connection_gbps = 1; /* Assume 2x throughput */
+const double g_s3express_throughput_per_connection_gbps = 100 / 250.0; /* Assume 2x throughput */
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
