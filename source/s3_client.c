@@ -192,42 +192,13 @@ static uint32_t s_get_system_fd_limit(void) {
 }
 
 /**
- * Determine if connection pool should be resized based on hysteresis mechanism.
- * Returns true only if both conditions are met:
- * 1. Absolute difference exceeds threshold (max(current_max / 10, 10))
- * 2. Time since last resize exceeds 1 second
- */
-static bool s_should_resize_connection_pool(
-    uint32_t current_max,
-    uint32_t new_max,
-    uint64_t current_time_ns,
-    uint64_t last_resize_timestamp_ns) {
-
-    /* Calculate threshold: 10% or 10 connections, whichever is larger */
-    uint32_t threshold = aws_max_u32(current_max / 10, 10);
-
-    /* Check if change is significant */
-    uint32_t diff = (new_max > current_max) ? (new_max - current_max) : (current_max - new_max);
-
-    if (diff < threshold) {
-        return false;
-    }
-
-    /* Check minimum time interval (0.01 second = 1e7 nanoseconds) */
-    uint64_t min_interval_ns = 10000000ULL;
-    if (last_resize_timestamp_ns > 0 && (current_time_ns - last_resize_timestamp_ns < min_interval_ns)) {
-        return false;
-    }
-
-    return true;
-}
-
-/**
  * Calculate dynamic connection limit based on sum of active meta request requirements.
  * Returns the minimum of: total required connections, client override, and system FD limit.
  * Applies hysteresis to prevent rapid changes.
  */
-static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *client) {
+static uint32_t s_get_dynamic_max_active_connections(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
 
     /* Load sum of all meta request requirements */
@@ -260,6 +231,11 @@ static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *clien
         new_max = aws_min_u32(new_max, client->max_active_connections_override);
     }
 
+    /* respect meta request level overrides */
+    if (meta_request && meta_request->max_active_connections_override > 0) {
+        new_max = aws_min_u32(new_max, meta_request->max_active_connections_override);
+    }
+
     /* Apply system FD limit (checked dynamically) */
     uint32_t system_fd_limit = s_get_system_fd_limit();
 
@@ -273,21 +249,6 @@ static uint32_t s_get_dynamic_max_active_connections(struct aws_s3_client *clien
     }
 
     new_max = aws_min_u32(new_max, system_fd_limit);
-
-    /* Apply hysteresis to prevent rapid changes */
-    uint32_t cached_max = (uint32_t)aws_atomic_load_int(&client->stats.cached_max_connections);
-    uint64_t last_update_ns = (uint64_t)aws_atomic_load_int(&client->stats.last_max_connections_update_ns);
-    uint64_t current_time_ns = 0;
-    aws_high_res_clock_get_ticks(&current_time_ns);
-
-    /* If cached value exists and hysteresis check fails, return cached value */
-    if (cached_max > 0 && !s_should_resize_connection_pool(cached_max, new_max, current_time_ns, last_update_ns)) {
-        return cached_max;
-    }
-
-    /* Update cached value and timestamp */
-    aws_atomic_store_int(&client->stats.cached_max_connections, (size_t)new_max);
-    aws_atomic_store_int(&client->stats.last_max_connections_update_ns, (size_t)current_time_ns);
 
     /* Log warning if system limit is the bottleneck */
     if (new_max == system_fd_limit &&
@@ -321,7 +282,7 @@ uint32_t aws_s3_client_get_max_active_connections(
 
     /* Check feature flag - use dynamic scaling if enabled */
     if (client->enable_dynamic_connection_scaling) {
-        return s_get_dynamic_max_active_connections(client);
+        return s_get_dynamic_max_active_connections(client, meta_request);
     }
     uint32_t max_active_connections = client->ideal_connection_count;
     if (client->max_active_connections_override > 0 &&
@@ -631,8 +592,6 @@ struct aws_s3_client *aws_s3_client_new(
     client->stats.total_weight = 0.0;
     aws_mutex_init(&client->stats.total_weight_mutex);
     aws_atomic_init_int(&client->stats.total_required_connections, 0);
-    aws_atomic_init_int(&client->stats.cached_max_connections, 0);
-    aws_atomic_init_int(&client->stats.last_max_connections_update_ns, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
