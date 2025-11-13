@@ -376,7 +376,8 @@ struct aws_s3_client {
         struct aws_atomic_var num_requests_streaming_request_body;
 
         /* Total weight of all active meta requests. Weight = object_size / (part_size * part_size) */
-        struct aws_atomic_var total_weight;
+        double total_weight;
+        struct aws_mutex total_weight_mutex;
 
         /* Sum of connection requirements from all active meta requests */
         struct aws_atomic_var total_required_connections;

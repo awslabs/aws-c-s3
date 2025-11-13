@@ -118,6 +118,16 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
+
+        /* Calculate weight early if object size hint is available: weight = object_size / (part_size * part_size) */
+        if (auto_ranged_get->object_size_hint > 0 && auto_ranged_get->base.part_size > 0) {
+            auto_ranged_get->base.weight =
+                (double)auto_ranged_get->object_size_hint /
+                ((double)auto_ranged_get->base.part_size * (double)auto_ranged_get->base.part_size);
+            aws_mutex_lock(&client->stats.total_weight_mutex);
+            client->stats.total_weight += auto_ranged_get->base.weight;
+            aws_mutex_unlock(&client->stats.total_weight_mutex);
+        }
     }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
@@ -969,11 +979,14 @@ update_synced_data:
             }
 
             /* Calculate weight for download: weight = object_size / (part_size * part_size) */
-            if (object_size > 0 && meta_request->part_size > 0) {
+            /* Only calculate if weight wasn't already set from object_size_hint */
+            if (object_size > 0 && meta_request->part_size > 0 && meta_request->weight == 0.0) {
                 meta_request->weight =
                     (double)object_size / ((double)meta_request->part_size * (double)meta_request->part_size);
                 /* Add this meta request's weight to client's total weight */
-                aws_atomic_fetch_add(&meta_request->client->stats.total_weight, (size_t)meta_request->weight);
+                aws_mutex_lock(&meta_request->client->stats.total_weight_mutex);
+                meta_request->client->stats.total_weight += meta_request->weight;
+                aws_mutex_unlock(&meta_request->client->stats.total_weight_mutex);
             }
         }
 
