@@ -835,7 +835,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
-    *((bool *)&client->enable_dynamic_connection_scaling) = client_config->enable_dynamic_connection_scaling;
+    *((bool *)&client->enable_dynamic_connection_scaling) = true;
 
     return client;
 
