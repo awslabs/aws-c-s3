@@ -164,6 +164,11 @@ static void s_validate_meta_request_checksum_on_finish(
  * Currently calculates based on: target_throughput / throughput_per_connection
  * Uses different throughput constants for S3 vs S3 Express.
  * TODO: Consider payload size, number of parts, and part size for more accurate calculation.
+ * As part of this, this is the preliminary iteration where we take into account, the number of parts and part size.
+ * The distribution of connections uses something called a weight, a ratio of part_number / part_size.
+ * we can use the same weight while providing the connections to provide more connections to the same sized object if
+ * the number of parts is higher.
+ * As part of experiments, we have identified that
  */
 uint32_t s_calculate_meta_request_connections(struct aws_s3_client *client, struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
@@ -173,8 +178,10 @@ uint32_t s_calculate_meta_request_connections(struct aws_s3_client *client, stru
     double throughput_per_connection =
         meta_request->is_express ? g_s3express_throughput_per_connection_gbps : g_s3_throughput_per_connection_gbps;
 
+    double achieved_weight = 145.50 / (30 * 1024 * 1024 * 1024);
     /* Calculate connections needed: target_throughput / throughput_per_connection */
-    double ideal_connections = client->throughput_target_gbps / throughput_per_connection;
+    double ideal_connections =
+        (client->throughput_target_gbps * meta_request->weight) / (achieved_weight * throughput_per_connection);
     uint32_t required_connections = (uint32_t)ceil(ideal_connections);
 
     /* Clamp to reasonable range */
