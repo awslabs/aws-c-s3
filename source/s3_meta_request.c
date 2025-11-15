@@ -178,7 +178,7 @@ uint32_t s_calculate_meta_request_connections(struct aws_s3_client *client, stru
     double throughput_per_connection =
         meta_request->is_express ? g_s3express_throughput_per_connection_gbps : g_s3_throughput_per_connection_gbps;
 
-    double achieved_weight = 145.50 / (30 * 1024 * 1024 * 1024);
+    double achieved_weight = 10000 * 106.6 / (30 * 1024 * 1024 * 1024);
     /* Calculate connections needed: target_throughput / throughput_per_connection */
     double ideal_connections =
         (client->throughput_target_gbps * meta_request->weight) / (achieved_weight * throughput_per_connection);
