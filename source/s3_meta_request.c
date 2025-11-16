@@ -180,7 +180,7 @@ uint32_t s_calculate_meta_request_connections(struct aws_s3_client *client, stru
     /* Assuming 128MB part size provides the ideal throughput we expect after amortization, we find a ratio with the
      * current part size to find what the scaled throughput per connections would be. Logically, small for smaller part
      * sizes, larger for larger part sizes. */
-    double scaling_factor = (meta_request->part_size > 0 ? ((MB_TO_BYTES(128) * 1.0) / meta_request->part_size) : 1);
+    double scaling_factor = (meta_request->part_size > 0 ? ((MB_TO_BYTES(512) * 1.0) / meta_request->part_size) : 1);
 
     /* Calculate connections needed: target_throughput / throughput_per_connection */
     double ideal_connections = client->throughput_target_gbps / throughput_per_connection;
