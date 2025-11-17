@@ -191,82 +191,6 @@ static uint32_t s_get_system_fd_limit(void) {
 #endif
 }
 
-/**
- * Calculate dynamic connection limit based on sum of active meta request requirements.
- * Returns the minimum of: total required connections, client override, and system FD limit.
- * Applies hysteresis to prevent rapid changes.
- */
-static uint32_t s_get_dynamic_max_active_connections(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request) {
-    AWS_PRECONDITION(client);
-
-    /* Load sum of all meta request requirements */
-    size_t total_size = aws_atomic_load_int(&client->stats.total_required_connections);
-
-    /* Overflow protection: Cap at uint32_t max if sum exceeds it */
-    uint32_t total;
-    if (total_size > UINT32_MAX) {
-        total = UINT32_MAX;
-        AWS_LOGF_WARN(
-            AWS_LS_S3_CLIENT,
-            "id=%p Total required connections (%zu) exceeds uint32_t max, capping at %u",
-            (void *)client,
-            total_size,
-            UINT32_MAX);
-    } else {
-        total = (uint32_t)total_size;
-    }
-
-    /* Handle zero case - keep minimum connections alive */
-    if (total == 0) {
-        return g_min_num_connections;
-    }
-
-    /* Calculate new max connections value */
-    uint32_t new_max = total;
-
-    /* Apply user's throughput-based override if set */
-    if (client->max_active_connections_override > 0) {
-        new_max = aws_min_u32(new_max, client->max_active_connections_override);
-    }
-
-    /* respect meta request level overrides */
-    if (meta_request && meta_request->max_active_connections_override > 0) {
-        new_max = aws_min_u32(new_max, meta_request->max_active_connections_override);
-    }
-
-    /* Apply system FD limit (checked dynamically) */
-    uint32_t system_fd_limit = s_get_system_fd_limit();
-
-    /* Additional overflow protection: if system limit is 0 (getrlimit failed) */
-    if (system_fd_limit == 0) {
-        AWS_LOGF_WARN(
-            AWS_LS_S3_CLIENT,
-            "id=%p System FD limit query failed, using fallback value of %u",
-            (void *)client,
-            system_fd_limit);
-    }
-
-    new_max = aws_min_u32(new_max, system_fd_limit);
-
-    /* Log warning if system limit is the bottleneck */
-    if (new_max == system_fd_limit &&
-        (total > system_fd_limit ||
-         (client->max_active_connections_override > 0 && client->max_active_connections_override > system_fd_limit))) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT,
-            "id=%p Connection limit capped by system FD limit. "
-            "Workload requires %u connections, config allows %u, but system limits to %u",
-            (void *)client,
-            total,
-            client->max_active_connections_override > 0 ? client->max_active_connections_override : total,
-            system_fd_limit);
-    }
-
-    return new_max;
-}
-
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
@@ -280,16 +204,26 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
 
-    /* Check feature flag - use dynamic scaling if enabled */
-    if (client->enable_dynamic_connection_scaling) {
-        return s_get_dynamic_max_active_connections(client, meta_request);
-    }
     uint32_t max_active_connections = client->ideal_connection_count;
+
+    /* Respect total_required_connections calculated */
+    size_t total_required = aws_atomic_load_int(&client->stats.total_required_connections);
+    if (total_required > 0) {
+        max_active_connections = aws_min_u32((uint32_t)total_required, max_active_connections);
+    }
+
+    /* Respect user override */
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
     }
+
     if (meta_request) {
+        /* Total number of connections for a meta request should not exceed number of parts */
+        if (meta_request->object_size && meta_request->part_size) {
+            max_active_connections =
+                aws_min_u32(meta_request->object_size / meta_request->part_size, max_active_connections);
+        }
         if (meta_request->max_active_connections_override) {
             /* Apply the meta request level override the max active connections, but less than the client side settings.
              */
@@ -2331,7 +2265,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
-        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
+
         /* As the request removed from the queue. Decrement the preparing track */
         --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         if (request->is_noop) {
@@ -2366,7 +2300,8 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
                     /* Calculate: (meta_request->weight / client->total_weight) * 300 */
                     double weight_ratio = meta_request->weight / total_weight;
                     uint32_t allowed_connections = (uint32_t)(weight_ratio * client_max_active_connections);
-
+                    const uint32_t max_active_connections =
+                        aws_s3_client_get_max_active_connections(client, meta_request);
                     allowed_connections = aws_min_u32(allowed_connections, max_active_connections);
 
                     should_allocate_connection = (current_connections < allowed_connections);

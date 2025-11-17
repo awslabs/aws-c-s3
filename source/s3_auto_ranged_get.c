@@ -619,6 +619,8 @@ static int s_discover_object_range_and_size(
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_size = content_length;
+                /* copy it to meta request */
+                meta_request->object_size = object_size;
                 if (content_length > 0) {
                     object_range_end = content_length - 1; /* range-end is inclusive */
                 }

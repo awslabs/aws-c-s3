@@ -164,7 +164,7 @@ static void s_validate_meta_request_checksum_on_finish(
  * Currently calculates based on: target_throughput / throughput_per_connection
  * Uses different throughput constants for S3 vs S3 Express.
  * TODO: Consider payload size, number of parts, and part size for more accurate calculation.
- * As part of this, this is the preliminary iteration where we take into account, the number of parts and part size.
+ * This preliminary iteration is where we take into account, the number of parts and part size.
  * The distribution of connections uses something called a weight, a ratio of part_number / part_size.
  * we can use the same weight while providing the connections to provide more connections to the same sized object if
  * the number of parts is higher.
@@ -180,11 +180,11 @@ uint32_t s_calculate_meta_request_connections(struct aws_s3_client *client, stru
     /* Assuming 128MB part size provides the ideal throughput we expect after amortization, we find a ratio with the
      * current part size to find what the scaled throughput per connections would be. Logically, small for smaller part
      * sizes, larger for larger part sizes. */
-    double scaling_factor = (meta_request->part_size > 0 ? ((GB_TO_BYTES(2) * 1.0) / meta_request->part_size) : 1);
+    double scaling_factor = (meta_request->part_size > 0 ? ((MB_TO_BYTES(64) * 1.0) / meta_request->part_size) : 1);
 
     /* Calculate connections needed: target_throughput / throughput_per_connection */
     double ideal_connections = client->throughput_target_gbps / throughput_per_connection;
-    uint32_t required_connections = (uint32_t)ceil(ideal_connections) * scaling_factor;
+    uint32_t required_connections = (uint32_t)ceil(ideal_connections * scaling_factor);
 
     /* Clamp to reasonable range */
     if (required_connections < g_min_num_connections) {
