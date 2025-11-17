@@ -677,6 +677,13 @@ static bool s_s3_auto_ranged_put_update(
             /* If the number of parts completed is less than the number of parts sent, then we need to wait until all of
              * those parts are done sending before aborting. */
             if (auto_ranged_put->synced_data.num_parts_completed < auto_ranged_put->synced_data.num_parts_started) {
+
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Waiting for incomplete %d out of %d parts!!!!",
+                    (void *)meta_request,
+                    auto_ranged_put->synced_data.num_parts_completed,
+                    auto_ranged_put->synced_data.num_parts_started);
                 goto has_work_remaining;
             }
 
