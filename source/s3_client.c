@@ -275,6 +275,8 @@ struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
 
+    AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: NEW LOGS START.", (void *)allocator);
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client_config);
 

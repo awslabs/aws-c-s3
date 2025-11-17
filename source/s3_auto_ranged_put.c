@@ -664,6 +664,7 @@ static bool s_s3_auto_ranged_put_update(
             goto no_work_remaining;
         } else {
 
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p: has finished result updating.", (void *)meta_request);
             /* If the create multipart upload hasn't been sent, then there is nothing left to do when canceling. */
             if (!auto_ranged_put->synced_data.create_multipart_upload_sent) {
                 goto no_work_remaining;
