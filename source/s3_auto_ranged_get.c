@@ -383,13 +383,19 @@ static bool s_s3_auto_ranged_get_update(
         } else {
             /* Else, if there is a finish result set, make sure that all work-in-progress winds down before the meta
              * request completely exits. */
-
+            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p: has finished result updating.", (void *)meta_request);
             if (auto_ranged_get->synced_data.head_object_sent && !auto_ranged_get->synced_data.head_object_completed) {
                 goto has_work_remaining;
             }
 
             /* Wait for all requests to complete (successfully or unsuccessfully) before finishing.*/
             if (auto_ranged_get->synced_data.num_parts_completed < auto_ranged_get->synced_data.num_parts_requested) {
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: GET Waiting for incomplete %d out of %d parts!!!!",
+                    (void *)meta_request,
+                    auto_ranged_get->synced_data.num_parts_completed,
+                    auto_ranged_get->synced_data.num_parts_requested);
                 goto has_work_remaining;
             }
 

@@ -681,7 +681,7 @@ static bool s_s3_auto_ranged_put_update(
 
                 AWS_LOGF_DEBUG(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p: Waiting for incomplete %d out of %d parts!!!!",
+                    "id=%p: PUT Waiting for incomplete %d out of %d parts!!!!",
                     (void *)meta_request,
                     auto_ranged_put->synced_data.num_parts_completed,
                     auto_ranged_put->synced_data.num_parts_started);
