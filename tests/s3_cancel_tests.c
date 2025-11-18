@@ -31,6 +31,7 @@ enum s3_update_cancel_type {
     S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPD_TWO_PARTS_COMPLETED,
     S3_UPDATE_CANCEL_TYPE_MPD_PENDING_STREAMING,
+    S3_UPDATE_CANCEL_TYPE_MPD_MORE_PARTS_UPDATING,
 };
 
 struct s3_cancel_test_user_data {
@@ -162,6 +163,12 @@ static bool s_s3_meta_request_cancel_test_synced_update_stub(struct aws_s3_meta_
         case S3_UPDATE_CANCEL_TYPE_MPD_PENDING_STREAMING:
             call_cancel_or_pause =
                 aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0;
+            break;
+        case S3_UPDATE_CANCEL_TYPE_MPD_MORE_PARTS_UPDATING:
+            call_cancel_or_pause = auto_ranged_get->synced_data.num_parts_completed == 1;
+
+            /* Don't block the others to update. */
+            block_update = false;
             break;
     }
 
