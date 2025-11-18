@@ -13,6 +13,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
+#include <aws/io/event_loop.h>
 #include <aws/io/stream.h>
 
 /* TODO: better logging of steps */
@@ -1126,10 +1127,12 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             request->request_body.capacity = (size_t)request->content_length;
         }
 
-        part_prep->asyncstep_read_part =
-            aws_s3_meta_request_read_body(meta_request, request->part_range_start, &request->request_body);
-        aws_future_bool_register_callback(
-            part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
+        struct aws_event_loop *loop =
+            aws_event_loop_group_get_next_loop(request->meta_request->client->body_streaming_elg);
+
+        part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, 0, &request->request_body);
+        aws_future_bool_register_event_loop_callback(
+            part_prep->asyncstep_read_part, loop, s_s3_prepare_upload_part_on_read_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */
