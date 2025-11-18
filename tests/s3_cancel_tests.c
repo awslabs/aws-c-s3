@@ -522,9 +522,10 @@ static int s_test_s3_cancel_mpu_one_part_completed_fc(struct aws_allocator *allo
 AWS_TEST_CASE(test_s3_cancel_mpd_one_part_completed_fc, s_test_s3_cancel_mpd_one_part_completed_fc)
 static int s_test_s3_cancel_mpd_one_part_completed_fc(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    struct aws_byte_cursor source_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-2GB");
 
-    ASSERT_SUCCESS(s3_cancel_test_helper_fc(
-        allocator, S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED, g_pre_existing_object_10MB, AWS_SCA_CRC32));
+    ASSERT_SUCCESS(
+        s3_cancel_test_helper_fc(allocator, S3_UPDATE_CANCEL_TYPE_MPD_ONE_PART_COMPLETED, source_key, AWS_SCA_CRC32));
 
     return 0;
 }
@@ -840,6 +841,107 @@ static int s_test_s3_cancel_prepare(struct aws_allocator *allocator, void *ctx) 
     ASSERT_TRUE(
         test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD] == 1);
     ASSERT_TRUE(test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD] == 1);
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD] == 0);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+static void s_test_s3_cancel_schedule_prepare_meta_request_prepare_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    aws_s3_meta_request_prepare_request_callback_fn *callback,
+    void *user_data) {
+
+    struct aws_s3_meta_request_test_results *results = meta_request->user_data;
+    AWS_ASSERT(results != NULL);
+
+    struct aws_s3_tester *tester = results->tester;
+    AWS_ASSERT(tester != NULL);
+
+    /* Cancel the request during schedule preparing. */
+    struct test_s3_cancel_prepare_user_data *test_user_data = tester->user_data;
+
+    ++test_user_data->request_prepare_counters[request->request_tag];
+
+    /* Cancel after the second part before it prepared, so that the prepare should fail with cancelled error. */
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART &&
+        test_user_data->request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 2) {
+        aws_s3_meta_request_cancel(meta_request);
+    }
+
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+    original_meta_request_vtable->schedule_prepare_request(meta_request, request, callback, user_data);
+}
+
+static struct aws_s3_meta_request *s_test_s3_cancel_schedule_prepare_meta_request_factory(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->schedule_prepare_request =
+        s_test_s3_cancel_schedule_prepare_meta_request_prepare_request;
+
+    return meta_request;
+}
+
+/* Cancel during preparing the data. */
+AWS_TEST_CASE(test_s3_cancel_schedule_prepare, s_test_s3_cancel_schedule_prepare)
+static int s_test_s3_cancel_schedule_prepare(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct test_s3_cancel_prepare_user_data test_user_data;
+    AWS_ZERO_STRUCT(test_user_data);
+    tester.user_data = &test_user_data;
+
+    struct aws_s3_client *client = NULL;
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_test_s3_cancel_schedule_prepare_meta_request_factory;
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+            .put_options =
+                {
+                    .ensure_multipart = true,
+                    .file_on_disk = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    ASSERT_TRUE(
+        test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_CREATE_MULTIPART_UPLOAD] == 1);
+    ASSERT_TRUE(test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART] == 2);
     ASSERT_TRUE(
         test_user_data.request_prepare_counters[AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_ABORT_MULTIPART_UPLOAD] == 1);
     ASSERT_TRUE(
