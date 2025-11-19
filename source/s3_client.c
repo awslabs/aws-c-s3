@@ -21,6 +21,7 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
+#include <aws/common/environment.h>
 #include <aws/common/file.h>
 #include <aws/common/json.h>
 #include <aws/common/math.h>
@@ -334,7 +335,7 @@ struct aws_s3_client *aws_s3_client_new(
         if (memory_limit_from_env_var) {
             uint64_t mem_limit_in_gib = 0;
             if (aws_byte_cursor_utf8_parse_u64(
-                    aws_byte_cursor_from_string(memory_limit_from_env_var), mem_limit_in_gib)) {
+                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
                 aws_string_destroy(memory_limit_from_env_var);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
@@ -344,11 +345,12 @@ struct aws_s3_client *aws_s3_client_new(
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
+            aws_string_destroy(memory_limit_from_env_var);
             uint64_t mem_limit_in_bytes = 0;
             /* Covert mem_limit_in_gib to bytes */
-            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, mem_limit_in_bytes)) {
+            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
                     "Cannot create client from client_config; envrionment variable: %s, overflow detected.",
@@ -356,6 +358,7 @@ struct aws_s3_client *aws_s3_client_new(
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
+
             mem_limit_configured = mem_limit_in_bytes;
         }
     } else {
