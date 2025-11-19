@@ -166,31 +166,6 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
     return (uint32_t)ideal_connection_count_double;
 }
 
-/**
- * Get the system file descriptor limit.
- * Returns 50% of the OS limit to reserve capacity for non-S3 operations.
- * Falls back to 500 if getrlimit fails.
- */
-static uint32_t s_get_system_fd_limit(void) {
-#ifdef _WIN32
-    /* Windows doesn't have getrlimit, return a reasonable default */
-    return 100;
-#else
-    struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-        /* Reserve 50% for non-S3 operations */
-        uint64_t usable = (uint64_t)(rl.rlim_cur) / 2;
-        /* Cap at uint32_t max to avoid overflow */
-        if (usable > UINT32_MAX) {
-            usable = UINT32_MAX;
-        }
-        return (uint32_t)usable;
-    }
-    /* Fallback if getrlimit fails */
-    return 0;
-#endif
-}
-
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
@@ -2129,68 +2104,81 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
     uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_request_body);
 
-    /**
-     * Iterate through the meta requests to update meta requests and get new requests that can then be prepared
-     * (reading from any streams, signing, etc.) for sending.
-     */
-    while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
+    const uint32_t pass_flags[] = {
+        AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE,
+        0,
+    };
 
-        struct aws_linked_list_node *meta_request_node = aws_linked_list_begin(&client->threaded_data.meta_requests);
-        struct aws_s3_meta_request *meta_request =
-            AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
+    const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
-        if (!s_s3_client_should_update_meta_request(
-                client,
-                meta_request,
-                num_requests_in_flight,
-                num_requests_streaming,
-                max_requests_in_flight,
-                max_requests_prepare)) {
+    for (uint32_t pass_index = client->enable_dynamic_connection_scaling; pass_index < num_passes; ++pass_index) {
 
-            /* Move the meta request to be processed from next loop. */
-            aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
-            aws_linked_list_push_back(
-                &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
-            continue;
-        }
+        /**
+         * Iterate through the meta requests to update meta requests and get new requests that can then be prepared
+         * (reading from any streams, signing, etc.) for sending.
+         */
+        while (!aws_linked_list_empty(&client->threaded_data.meta_requests)) {
 
-        struct aws_s3_request *request = NULL;
+            struct aws_linked_list_node *meta_request_node =
+                aws_linked_list_begin(&client->threaded_data.meta_requests);
+            struct aws_s3_meta_request *meta_request =
+                AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
-        /* Try to grab the next request from the meta request. */
-        bool work_remaining = aws_s3_meta_request_update(meta_request, 0, &request);
+            if (!s_s3_client_should_update_meta_request(
+                    client,
+                    meta_request,
+                    num_requests_in_flight,
+                    num_requests_streaming,
+                    max_requests_in_flight,
+                    max_requests_prepare)) {
 
-        if (work_remaining) {
-            /* If there is work remaining, but we didn't get a request back, take the meta request out of the
-             * list so that we don't use it again during this function, with the intention of putting it back in
-             * the list before this function ends. */
-            if (request == NULL) {
+                /* Move the meta request to be processed from next loop. */
                 aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
                 aws_linked_list_push_back(
                     &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
-            } else {
-                request->tracked_by_client = true;
-
-                ++client->threaded_data.num_requests_being_prepared;
-                ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
-
-                num_requests_in_flight = (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
-
-                /**
-                 * When upload with streaming, the prepare stage will not read into buffer.
-                 * But it should prevent more requests to be preapred so that the request will not staying in the
-                 * queue to wait for the connection available. Prevents the credentials to be expired during waiting
-                 * for too long.
-                 */
-                if (meta_request->fio_opts.should_stream) {
-                    /* If the request is a streaming request, update the states to track the request that is
-                     * streaming request body. */
-                    aws_atomic_fetch_add(&client->stats.num_requests_streaming_request_body, 1);
-                }
-
-                s_acquire_mem_and_prepare_request(client, request, s_s3_client_prepare_callback_queue_request, client);
+                continue;
             }
-        } else {
-            s_s3_client_remove_meta_request_threaded(client, meta_request);
+
+            struct aws_s3_request *request = NULL;
+
+            /* Try to grab the next request from the meta request. */
+            bool work_remaining = aws_s3_meta_request_update(meta_request, 0, &request);
+
+            if (work_remaining) {
+                /* If there is work remaining, but we didn't get a request back, take the meta request out of the
+                 * list so that we don't use it again during this function, with the intention of putting it back in
+                 * the list before this function ends. */
+                if (request == NULL) {
+                    aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
+                    aws_linked_list_push_back(
+                        &meta_requests_work_remaining, &meta_request->client_process_work_threaded_data.node);
+                } else {
+                    request->tracked_by_client = true;
+
+                    ++client->threaded_data.num_requests_being_prepared;
+                    ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
+
+                    num_requests_in_flight =
+                        (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+
+                    /**
+                     * When upload with streaming, the prepare stage will not read into buffer.
+                     * But it should prevent more requests to be preapred so that the request will not staying in the
+                     * queue to wait for the connection available. Prevents the credentials to be expired during waiting
+                     * for too long.
+                     */
+                    if (meta_request->fio_opts.should_stream) {
+                        /* If the request is a streaming request, update the states to track the request that is
+                         * streaming request body. */
+                        aws_atomic_fetch_add(&client->stats.num_requests_streaming_request_body, 1);
+                    }
+
+                    s_acquire_mem_and_prepare_request(
+                        client, request, s_s3_client_prepare_callback_queue_request, client);
+                }
+            } else {
+                s_s3_client_remove_meta_request_threaded(client, meta_request);
+            }
         }
     }
 
@@ -2265,7 +2253,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
-
+        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
         /* As the request removed from the queue. Decrement the preparing track */
         --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         if (request->is_noop) {
@@ -2287,7 +2275,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
-        } else {
+        } else if (client->enable_dynamic_connection_scaling) {
             /* Calculate allowed connections for this meta request based on weight ratio */
             bool should_allocate_connection = false;
             uint32_t current_connections = (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network);
@@ -2322,6 +2310,14 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
                 /* Increment the count as we put it back to the queue. */
                 ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
             }
+        } else if ((uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) < max_active_connections) {
+            /* Make sure it's above the max request level limitation. */
+            s_s3_client_create_connection_for_request(client, request);
+        } else {
+            /* Push the request into the left-over list to be used in a future call of this function. */
+            aws_linked_list_push_back(&left_over_requests, &request->node);
+            /* Increment the count as we put it back to the queue. */
+            ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
         }
         client_max_active_connections = aws_s3_client_get_max_active_connections(client, NULL);
         num_requests_network_io = s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX);
