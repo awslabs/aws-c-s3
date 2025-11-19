@@ -2142,7 +2142,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
             struct aws_s3_request *request = NULL;
 
             /* Try to grab the next request from the meta request. */
-            bool work_remaining = aws_s3_meta_request_update(meta_request, 0, &request);
+            bool work_remaining = aws_s3_meta_request_update(meta_request, pass_flags[pass_index], &request);
 
             if (work_remaining) {
                 /* If there is work remaining, but we didn't get a request back, take the meta request out of the
