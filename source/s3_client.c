@@ -1948,8 +1948,9 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
-    if (meta_request->client_process_work_threaded_data.num_request_being_prepared >=
-        aws_s3_client_get_max_active_connections(client, meta_request)) {
+    /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
+    size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
+    if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
         /* Don't prepare more than it's allowed for the meta request */
         return false;
     }
@@ -2167,7 +2168,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     request->tracked_by_client = true;
 
                     ++client->threaded_data.num_requests_being_prepared;
-                    ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
+                    aws_atomic_fetch_add(&meta_request->num_request_being_prepared, 1);
 
                     num_requests_in_flight =
                         (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
@@ -2234,6 +2235,7 @@ static void s_s3_client_prepare_callback_queue_request(
         request = aws_s3_request_release(request);
     }
 
+    aws_atomic_fetch_sub(&meta_request->num_request_being_prepared, 1);
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
@@ -2265,8 +2267,6 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
         const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
-        /* As the request removed from the queue. Decrement the preparing track */
-        --meta_request->client_process_work_threaded_data.num_request_being_prepared;
         if (request->is_noop) {
             /* If request is no-op, finishes and cleans up the request */
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_SUCCESS);
@@ -2292,8 +2292,6 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
         } else {
             /* Push the request into the left-over list to be used in a future call of this function. */
             aws_linked_list_push_back(&left_over_requests, &request->node);
-            /* Increment the count as we put it back to the queue. */
-            ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
         }
         client_max_active_connections = aws_s3_client_get_max_active_connections(client, NULL);
         num_requests_network_io = s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX);
