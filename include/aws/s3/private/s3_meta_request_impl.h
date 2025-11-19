@@ -195,6 +195,9 @@ struct aws_s3_meta_request {
     /* If the buffer pool optimized for the specific size or not. */
     bool buffer_pool_optimized;
 
+    /* Track the number of requests being prepared for this meta request. */
+    struct aws_atomic_var num_request_being_prepared;
+
     struct {
         struct aws_mutex lock;
 
@@ -277,9 +280,6 @@ struct aws_s3_meta_request {
 
         /* True if this meta request is currently in the client's list. */
         bool scheduled;
-
-        /* Track the number of requests being prepared for this meta request. */
-        size_t num_request_being_prepared;
 
     } client_process_work_threaded_data;
 
