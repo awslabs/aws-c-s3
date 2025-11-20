@@ -42,6 +42,7 @@ The S3 client uses a buffer pool to manage memory for concurrent transfers. You 
 **Default Behavior**: If neither is set (config is 0 and environment variable is not set), the client sets a default memory limit based on the target throughput.
 
 **Notes**:
+* The limit applies per client. If multiple clients created, limit will apply to each separately.
 * The environment variable value must be a valid positive integer representing gigabytes (GiB).
 * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
 * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
