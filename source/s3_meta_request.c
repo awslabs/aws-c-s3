@@ -200,6 +200,7 @@ int aws_s3_meta_request_init_base(
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_atomic_init_int(&meta_request->num_requests_network, 0);
+    aws_atomic_init_int(&meta_request->num_request_being_prepared, 0);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
