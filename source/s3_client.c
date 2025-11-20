@@ -21,8 +21,10 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
+#include <aws/common/environment.h>
 #include <aws/common/file.h>
 #include <aws/common/json.h>
+#include <aws/common/math.h>
 #include <aws/common/priority_queue.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -89,6 +91,11 @@ static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 /* Interval for scheduling endpoints cleanup task. This is to trim endpoints with a zero reference
  * count. S3 closes the idle connections in ~5 seconds. */
 static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
+
+/**
+ * The envrionment variable name for memory limit control.
+ */
+static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -321,7 +328,42 @@ struct aws_s3_client *aws_s3_client_new(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+    uint64_t mem_limit_configured = 0;
+    if (client_config->memory_limit_in_bytes == 0) {
+        /* Try to read from the envrionment variable for memory limit */
+        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
+        if (memory_limit_from_env_var) {
+            uint64_t mem_limit_in_gib = 0;
+            if (aws_byte_cursor_utf8_parse_u64(
+                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                aws_string_destroy(memory_limit_from_env_var);
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot create client from client_config; envrionment variable: %s, is not set correctly, only "
+                    "integers supported.",
+                    s_memory_limit_env_var);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+            aws_string_destroy(memory_limit_from_env_var);
+            uint64_t mem_limit_in_bytes = 0;
+            /* Covert mem_limit_in_gib to bytes */
+            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot create client from client_config; envrionment variable: %s, overflow detected.",
+                    s_memory_limit_env_var);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
 
+            mem_limit_configured = mem_limit_in_bytes;
+        }
+    } else {
+        mem_limit_configured = client_config->memory_limit_in_bytes;
+    }
 #ifdef BYO_CRYPTO
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
         AWS_LOGF_ERROR(
@@ -338,7 +380,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->allocator = allocator;
 
     size_t mem_limit = 0;
-    if (client_config->memory_limit_in_bytes == 0) {
+    if (mem_limit_configured == 0) {
 #if SIZE_BITS == 32
         if (client_config->throughput_target_gbps > 25.0) {
             mem_limit = GB_TO_BYTES(2);
@@ -360,10 +402,10 @@ struct aws_s3_client *aws_s3_client_new(
 #endif
     } else {
         // cap memory limit to SIZE_MAX
-        if (client_config->memory_limit_in_bytes > SIZE_MAX) {
+        if (mem_limit_configured > SIZE_MAX) {
             mem_limit = SIZE_MAX;
         } else {
-            mem_limit = (size_t)client_config->memory_limit_in_bytes;
+            mem_limit = (size_t)mem_limit_configured;
         }
     }
 
