@@ -71,21 +71,37 @@ def generate_c_file_from_json(json_content, c_file_name, c_struct_name):
         print(f"An error occurred: {e}")
 
 
-def get_secret_from_secrets_manager(secret_name, region_name):
-    session = boto3.session.Session()
-    client = session.client(
-        service_name='secretsmanager',
-        region_name=region_name
-    )
+def extract_rule_set(s3_model):
+    """
+    Extract the smithy.rules#endpointRuleSet from the s3_model JSON.
 
+    The ruleset is nested at: shapes -> com.amazonaws.s3#AmazonS3 -> traits -> smithy.rules#endpointRuleSet
+
+    Args:
+        s3_model: The full s3-2006-03-01.json model as a dictionary
+
+    Returns:
+        The endpoint ruleset dictionary
+
+    Raises:
+        KeyError: If the expected path doesn't exist in the model
+    """
     try:
-        get_secret_value_response = client.get_secret_value(
-            SecretId=secret_name
-        )
-    except Exception as e:
-        raise e
+        # Navigate through the nested structure to find the endpoint ruleset
+        shapes = s3_model.get('shapes', {})
+        amazon_s3_shape = shapes.get('com.amazonaws.s3#AmazonS3', {})
+        traits = amazon_s3_shape.get('traits', {})
+        rule_set = traits.get('smithy.rules#endpointRuleSet', None)
 
-    return json.loads(get_secret_value_response['SecretString'])
+        if rule_set is None:
+            raise KeyError(
+                "smithy.rules#endpointRuleSet not found in s3_model")
+
+        return rule_set
+
+    except KeyError as e:
+        raise KeyError(
+            f"Failed to extract endpoint ruleset from s3_model: {e}")
 
 
 def download_from_git(url, token=None):
@@ -112,8 +128,9 @@ if __name__ == '__main__':
         with open(parsed_args.ruleset) as f:
             rule_set = json.load(f)
     else:
-        rule_set = download_from_git(
-            'https://raw.githubusercontent.com/aws/api-models-aws/main/models/s3-control/service/2018-08-20/s3-control-2018-08-20.json')
+        s3_model = download_from_git(
+            'https://raw.githubusercontent.com/aws/api-models-aws/refs/heads/main/models/s3/service/2006-03-01/s3-2006-03-01.json')
+        rule_set = extract_rule_set(s3_model)
 
     if (parsed_args.partitions):
         with open(parsed_args.partitions) as f:
