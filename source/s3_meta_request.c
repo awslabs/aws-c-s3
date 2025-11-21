@@ -2041,9 +2041,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                      * callback. */
                     aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
                     if (response_body.len > (size_t)bytes_allowed_to_deliver) {
-                        response_body.len = bytes_allowed_to_deliver;
+                        response_body.len = (size_t)bytes_allowed_to_deliver;
                         delivery_incomplete = true;
                     }
+                    /* Update the remaining bytes we allow to delivery. */
+                    bytes_allowed_to_deliver -= response_body.len;
                 } else {
                     /* We should not have any incomplete delivery in this case. */
                     AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
