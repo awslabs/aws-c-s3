@@ -1753,11 +1753,8 @@ static int s_apply_backpressure_until_meta_request_finish(
         size_t received_body_size_delta = aws_atomic_exchange_int(&test_results->received_body_size_delta, 0);
         accumulated_data_size += (uint64_t)received_body_size_delta;
 
-        /* Check that we haven't received more data than the window allows.
-         * TODO: Stop allowing "hacky wiggle room". The current implementation
-         *       may push more bytes to the user (up to 1 part) than they've asked for. */
-        uint64_t hacky_wiggle_room = part_size;
-        uint64_t max_data_allowed = accumulated_window_increments + hacky_wiggle_room;
+        /* Check that we haven't received more data than the window allows */
+        uint64_t max_data_allowed = accumulated_window_increments;
         ASSERT_TRUE(accumulated_data_size <= max_data_allowed, "Received more data than the read window allows");
 
         /* If we're done, we're done */
@@ -1891,7 +1888,7 @@ static int s_test_s3_get_object_backpressure_small_increments(struct aws_allocat
     size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
-    uint64_t window_increment_size = part_size / 2;
+    uint64_t window_increment_size = part_size / 4;
     return s_test_s3_get_object_backpressure_helper(
         allocator, part_size, window_initial_size, window_increment_size, false);
 }

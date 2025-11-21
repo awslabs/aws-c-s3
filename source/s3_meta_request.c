@@ -2016,7 +2016,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
             case AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY: {
                 struct aws_s3_request *request = event.u.response_body.completed_request;
-                uint64_t bytes_delivered_for_request = event.u.response_body.bytes_delivered;
+                size_t bytes_delivered_for_request = event.u.response_body.bytes_delivered;
                 AWS_ASSERT(meta_request == request->meta_request);
                 bool delivery_incomplete = false;
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
