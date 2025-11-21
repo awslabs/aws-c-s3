@@ -1726,6 +1726,7 @@ static int s_apply_backpressure_until_meta_request_finish(
     size_t part_size,
     size_t window_initial_size,
     uint64_t window_increment_size) {
+    (void)part_size;
 
     /* Remember the last time something happened (we received download data, or incremented read window) */
     uint64_t last_time_something_happened;
