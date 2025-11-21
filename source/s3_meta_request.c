@@ -412,6 +412,8 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
     /* Response will never approach UINT64_MAX, so do a saturating sum instead of worrying about overflow */
     meta_request->synced_data.read_window_running_total =
         aws_add_u64_saturating(bytes, meta_request->synced_data.read_window_running_total);
+    /* Kick off the event delivery task again see if we need to */
+    aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
@@ -1882,12 +1884,13 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
     const struct aws_s3_meta_request_event *event) {
 
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    if (event) {
+        aws_array_list_push_back(&meta_request->synced_data.event_delivery_array, event);
+    }
 
-    aws_array_list_push_back(&meta_request->synced_data.event_delivery_array, event);
-
-    /* If the array was empty before, schedule task to deliver all events in the array.
-     * If the array already had things in it, then the task is already scheduled and will run soon. */
-    if (aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 1) {
+    /* If the event delivery task is not scheduled before, and there are more to be delivery. */
+    if (!meta_request->synced_data.event_delivery_task_scheduled &&
+        aws_array_list_length(&meta_request->synced_data.event_delivery_array) > 0) {
         aws_s3_meta_request_acquire(meta_request);
 
         aws_task_init(
@@ -1896,6 +1899,7 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
             meta_request,
             "s3_meta_request_event_delivery");
         aws_event_loop_schedule_task_now(meta_request->io_event_loop, &meta_request->synced_data.event_delivery_task);
+        meta_request->synced_data.event_delivery_task_scheduled = true;
     }
 }
 
@@ -1991,6 +1995,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
         aws_array_list_swap_contents(event_delivery_array, &meta_request->synced_data.event_delivery_array);
         meta_request->synced_data.event_delivery_active = true;
+        meta_request->synced_data.event_delivery_task_scheduled = false;
 
         if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             error_code = AWS_ERROR_S3_CANCELED;
