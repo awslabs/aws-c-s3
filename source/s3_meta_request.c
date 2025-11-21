@@ -2027,7 +2027,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     break;
                 }
 
-                if (meta_request->body_callback) {
+                if (meta_request->body_callback && meta_request->client->enable_read_backpressure) {
                     /* If customer set the body callback, make sure we are not delivery them more than asked via the
                      * callback. */
                     aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
@@ -2209,6 +2209,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+    aws_array_list_clean_up(&incomplete_deliver_events_array);
 
     aws_s3_client_schedule_process_work(client);
     aws_s3_meta_request_release(meta_request);
