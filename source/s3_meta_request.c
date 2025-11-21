@@ -1976,9 +1976,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     struct aws_array_list *event_delivery_array = &meta_request->io_threaded_data.event_delivery_array;
     AWS_FATAL_ASSERT(aws_array_list_length(event_delivery_array) == 0);
 
+    struct aws_array_list incomplete_deliver_events_array;
+    aws_array_list_init_dynamic(
+        &incomplete_deliver_events_array, meta_request->allocator, 1, sizeof(struct aws_s3_meta_request_event));
+
     /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
+    uint64_t bytes_allowed_to_deliver = 0;
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -1990,6 +1995,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             error_code = AWS_ERROR_S3_CANCELED;
         }
+
+        bytes_allowed_to_deliver = meta_request->synced_data.read_window_running_total -
+                                   meta_request->io_threaded_data.num_bytes_delivery_completed;
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
@@ -2003,15 +2011,42 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
             case AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY: {
                 struct aws_s3_request *request = event.u.response_body.completed_request;
+                uint64_t bytes_delivered_for_request = event.u.response_body.bytes_delivered;
                 AWS_ASSERT(meta_request == request->meta_request);
+                bool delivery_incomplete = false;
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                if (response_body.len == 0) {
+                    /* Nothing to delivery, finish this delivery event and break out. */
+                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
+
+                    ++num_parts_delivered;
+                    request->send_data.metrics =
+                        s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+
+                    aws_s3_request_release(request);
+                    break;
+                }
+
+                if (meta_request->body_callback) {
+                    /* If customer set the body callback, make sure we are not delivery them more than asked via the
+                     * callback. */
+                    aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
+                    if (response_body.len > bytes_allowed_to_deliver) {
+                        response_body.len = bytes_allowed_to_deliver;
+                        delivery_incomplete = true;
+                    }
+                } else {
+                    /* We should not have any incomplete delivery in this case. */
+                    AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
+                }
+                uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
 
                 AWS_ASSERT(request->part_number >= 1);
                 if (request->part_number == 1) {
-                    meta_request->io_threaded_data.next_deliver_range_start = request->part_range_start;
+                    meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
                 }
                 /* Make sure the response body is delivered in the sequential order */
-                AWS_FATAL_ASSERT(request->part_range_start == meta_request->io_threaded_data.next_deliver_range_start);
+                AWS_FATAL_ASSERT(delivery_range_start == meta_request->io_threaded_data.next_deliver_range_start);
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
@@ -2055,7 +2090,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                 meta_request,
                                 &response_body,
                                 (struct aws_s3_meta_request_receive_body_extra_info){
-                                    .range_start = request->part_range_start, .ticket = request->ticket},
+                                    .range_start = delivery_range_start, .ticket = request->ticket},
                                 meta_request->user_data)) {
                             error_code = aws_last_error_or_unknown();
                             AWS_LOGF_ERROR(
@@ -2067,7 +2102,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         } else if (
                             meta_request->body_callback != NULL &&
                             meta_request->body_callback(
-                                meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
+                                meta_request, &response_body, delivery_range_start, meta_request->user_data)) {
 
                             error_code = aws_last_error_or_unknown();
                             AWS_LOGF_ERROR(
@@ -2087,13 +2122,25 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
                     }
                 }
-                aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
+                event.u.response_body.bytes_delivered += response_body.len;
+                meta_request->io_threaded_data.num_bytes_delivery_completed += response_body.len;
 
-                ++num_parts_delivered;
-                request->send_data.metrics =
-                    s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+                if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
+                    /* We completed the delivery for this request. */
+                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
-                aws_s3_request_release(request);
+                    ++num_parts_delivered;
+                    request->send_data.metrics =
+                        s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+
+                    aws_s3_request_release(request);
+                } else {
+                    /* We didn't complete the delivery for this request and no error happened */
+                    /* Push to the front of the queue and wait for the next tick to deliver the rest of the bytes. */
+                    /* Note: we push to the front of the array since when we move those incomplete events back to the
+                     * synced_queue, we need to make sure it still has the same order. */
+                    aws_array_list_push_front(&incomplete_deliver_events_array, &event);
+                }
             } break;
 
             case AWS_S3_META_REQUEST_EVENT_PROGRESS: {
@@ -2148,6 +2195,13 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         aws_s3_meta_request_lock_synced_data(meta_request);
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+        }
+        /* Push the iocompileted events back to the queue */
+        for (size_t i = 0; i < aws_array_list_length(&incomplete_deliver_events_array); ++i) {
+            struct aws_s3_meta_request_event event;
+            aws_array_list_get_at(&incomplete_deliver_events_array, &event, i);
+            /* Push the incomplete one to the front of the queue. */
+            aws_array_list_push_front(&meta_request->synced_data.event_delivery_array, &event);
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;

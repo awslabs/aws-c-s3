@@ -66,6 +66,7 @@ struct aws_s3_meta_request_event {
         /* data for AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY */
         struct {
             struct aws_s3_request *completed_request;
+            size_t bytes_delivered;
         } response_body;
 
         /* data for AWS_S3_META_REQUEST_EVENT_PROGRESS */
@@ -292,6 +293,10 @@ struct aws_s3_meta_request {
 
         /* The range start for the next response body delivery */
         uint64_t next_deliver_range_start;
+
+        /* Total number of bytes that have been attempted to be delivered. (Will equal the sum of succeeded and
+         * failed.)*/
+        uint64_t num_bytes_delivery_completed;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
