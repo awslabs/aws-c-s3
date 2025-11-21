@@ -1988,6 +1988,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
     uint64_t bytes_allowed_to_deliver = 0;
+    uint64_t read_window_to_increment = 0;
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -2007,6 +2008,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+    if (bytes_allowed_to_deliver > SIZE_MAX) {
+        bytes_allowed_to_deliver = SIZE_MAX;
+    }
 
     /* Deliver all events */
     for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
@@ -2036,7 +2040,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     /* If customer set the body callback, make sure we are not delivery them more than asked via the
                      * callback. */
                     aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
-                    if (response_body.len > bytes_allowed_to_deliver) {
+                    if (response_body.len > (size_t)bytes_allowed_to_deliver) {
                         response_body.len = bytes_allowed_to_deliver;
                         delivery_incomplete = true;
                     }
@@ -2087,7 +2091,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                     aws_error_name(error_code));
                             }
                             if (meta_request->client->enable_read_backpressure) {
-                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                read_window_to_increment += response_body.len;
                             }
                         } else if (
                             meta_request->body_callback_ex != NULL &&
@@ -2214,6 +2218,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+    aws_s3_meta_request_increment_read_window(meta_request, read_window_to_increment);
     aws_array_list_clean_up(&incomplete_deliver_events_array);
 
     aws_s3_client_schedule_process_work(client);

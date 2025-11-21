@@ -1755,6 +1755,9 @@ static int s_apply_backpressure_until_meta_request_finish(
 
         /* Check that we haven't received more data than the window allows */
         uint64_t max_data_allowed = accumulated_window_increments;
+        if (accumulated_data_size > max_data_allowed) {
+            AWS_FATAL_ASSERT(false);
+        }
         ASSERT_TRUE(accumulated_data_size <= max_data_allowed, "Received more data than the read window allows");
 
         /* If we're done, we're done */
