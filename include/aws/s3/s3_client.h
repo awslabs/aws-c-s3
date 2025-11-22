@@ -606,7 +606,8 @@ struct aws_s3_client_config {
      *
      * WARNING: This feature is experimental.
      * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
-     * and you may still receive some data after the window reaches 0.
+     * - you may still receive some data after the window reaches 0 for body_callback_ex.
+     * - If you set body_callback, no more data will be delivered once the window reaches 0.
      */
     bool enable_read_backpressure;
 
@@ -1220,7 +1221,8 @@ struct aws_future_void *aws_s3_meta_request_write(
  *
  * WARNING: This feature is experimental.
  * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
- * and you may still receive some data after the window reaches 0.
+ * - you may still receive some data after the window reaches 0 for body_callback_ex.
+ * - If you set body_callback, no more data will be delivered once the window reaches 0.
  */
 AWS_S3_API
 void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes);
