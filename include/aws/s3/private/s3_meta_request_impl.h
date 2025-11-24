@@ -66,6 +66,7 @@ struct aws_s3_meta_request_event {
         /* data for AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY */
         struct {
             struct aws_s3_request *completed_request;
+            size_t bytes_delivered;
         } response_body;
 
         /* data for AWS_S3_META_REQUEST_EVENT_PROGRESS */
@@ -224,11 +225,14 @@ struct aws_s3_meta_request {
 
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
-         * If `event_delivery_array` has items in it, then this task is scheduled.
+         * If `event_delivery_task_scheduled` is true, then this task is scheduled.
          * If `event_delivery_active` is true, then this task is actively running.
          * Delivery is not 100% complete until `event_delivery_array` is empty AND `event_delivery_active` is false
          * (use aws_s3_meta_request_are_events_out_for_delivery_synced()  to check) */
         struct aws_task event_delivery_task;
+
+        /* Whether or not event delivery is currently scheduled. */
+        uint32_t event_delivery_task_scheduled : 1;
 
         /* Array of `struct aws_s3_meta_request_event` to deliver when the `event_delivery_task` runs. */
         struct aws_array_list event_delivery_array;
@@ -292,6 +296,10 @@ struct aws_s3_meta_request {
 
         /* The range start for the next response body delivery */
         uint64_t next_deliver_range_start;
+
+        /* Total number of bytes that have been attempted to be delivered. (Will equal the sum of succeeded and
+         * failed.)*/
+        uint64_t num_bytes_delivery_completed;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
