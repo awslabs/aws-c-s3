@@ -412,7 +412,7 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
     /* Response will never approach UINT64_MAX, so do a saturating sum instead of worrying about overflow */
     meta_request->synced_data.read_window_running_total =
         aws_add_u64_saturating(bytes, meta_request->synced_data.read_window_running_total);
-    /* Kick off the event delivery task again see if we need to */
+    /* Try to schedule the delivery task again. */
     aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
@@ -1888,7 +1888,7 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
         aws_array_list_push_back(&meta_request->synced_data.event_delivery_array, event);
     }
 
-    /* If the event delivery task is not scheduled before, and there are more to be delivery. */
+    /* If the event delivery task is not scheduled before, and there are more to be delivered. */
     if (!meta_request->synced_data.event_delivery_task_scheduled &&
         aws_array_list_length(&meta_request->synced_data.event_delivery_array) > 0) {
         aws_s3_meta_request_acquire(meta_request);
