@@ -237,14 +237,14 @@ uint32_t aws_s3_client_get_max_active_connections(
 }
 
 /* Initialize token bucket based on target throughput */
-void aws_s3_client_init_tokens(struct aws_s3_client *client, double target_throughput_gbps) {
+void s_s3_client_init_tokens(struct aws_s3_client *client, double target_throughput_gbps) {
     AWS_PRECONDITION(client);
     if (target_throughput_gbps == 0.0) target_throughput_gbps = 150.0;
     aws_atomic_store_int(&client->token_bucket, aws_max_u32(target_throughput_gbps * 1024, s_s3_minimum_tokens));
 }
 
 /* Releases tokens back after request is complete. */
-void aws_s3_client_release_tokens(
+void s_s3_client_release_tokens(
     struct aws_s3_client *client,
     struct aws_s3_request *request) {
     AWS_PRECONDITION(client);
@@ -280,7 +280,7 @@ void aws_s3_client_release_tokens(
 
 /* Returns true or false based on whether the request was able to avail the required amount of tokens.
  * TODO: try to introduce a scalability factor instead of using pure latency. */
-bool aws_s3_client_acquire_tokens(
+bool s_s3_client_acquire_tokens(
     struct aws_s3_client *client,
     struct aws_s3_request *request) {
     AWS_PRECONDITION(client);
@@ -532,6 +532,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
         g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
+
+    s_s3_client_init_tokens(client, client->throughput_target_gbps);
 
     size_t part_size = (size_t)g_default_part_size_fallback;
     if (client_config->part_size != 0) {
@@ -2398,7 +2400,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
-        } else if (aws_s3_avail_tokens(client, request)) {
+        } else if (s_s3_client_acquire_tokens(client, request)) {
             /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);
         } else {
@@ -2723,6 +2725,9 @@ reset_connection:
     request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
         request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
         request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+
+    // release tokens acquired for the request
+    s_s3_client_release_tokens(client, request);
 
     if (connection->retry_token != NULL) {
         /* If we have a retry token and successfully finished, record that success. */
