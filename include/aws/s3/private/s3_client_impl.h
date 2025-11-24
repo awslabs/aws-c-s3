@@ -277,7 +277,7 @@ struct aws_s3_client {
 
     /* Tokens added when meta requests are created and subtracted when requests use the tokens to allocate connections
      */
-    struct struct_atomic_var token_bucket;
+    struct aws_atomic_var token_bucket;
 
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified

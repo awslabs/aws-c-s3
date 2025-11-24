@@ -277,12 +277,12 @@ void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_requ
             break;
         }
         default: {
-            tokens = g_default_min_tokens;
+            tokens = s_s3_minimum_tokens;
         }
     }
 
     // do we need error handling here?
-    aws_atomic_fetch_add(client->token_bucket, tokens);
+    aws_atomic_fetch_add(&client->token_bucket, tokens);
 }
 
 /* Returns true or false based on whether the request was able to avail the required amount of tokens.
@@ -319,13 +319,13 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
             break;
         }
         default: {
-            required_tokens = g_default_min_tokens;
+            required_tokens = s_s3_minimum_tokens;
         }
     }
 
-    if ((uint32_t *)aws_atomic_load_int(&client->token_bucket) > required_tokens) {
+    if ((uint32_t)aws_atomic_load_int(&client->token_bucket) > required_tokens) {
         // do we need error handling here?
-        aws_atomic_fetch_sub(client->token_bucket, required_tokens);
+        aws_atomic_fetch_sub(&client->token_bucket, required_tokens);
         return true;
     }
     return false;
@@ -2393,7 +2393,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
         struct aws_s3_meta_request *meta_request = request->meta_request;
-        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
+
         if (request->is_noop) {
             /* If request is no-op, finishes and cleans up the request */
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_SUCCESS);
