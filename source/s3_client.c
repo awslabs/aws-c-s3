@@ -255,17 +255,17 @@ void aws_s3_client_release_tokens(
     switch (request->request_type) {
         case AWS_S3_REQUEST_TYPE_GET_OBJECT: {
             if (request->meta_request->is_express) {
-                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_express_p50_request_latency_ms), s_s3_express_download_throughput_per_connection_mbps);
+                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_express_p50_request_latency_ms)), s_s3_express_download_throughput_per_connection_mbps);
             } else {
-                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_p50_request_latency_ms), s_s3_download_throughput_per_connection_mbps);
+                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_p50_request_latency_ms)), s_s3_download_throughput_per_connection_mbps);
             }
             break;
         }
         case AWS_S3_REQUEST_TYPE_PUT_OBJECT: {
             if (request->meta_request->is_express) {
-                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_express_p50_request_latency_ms), s_s3_express_upload_throughput_per_connection_mbps);
+                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_express_p50_request_latency_ms)), s_s3_express_upload_throughput_per_connection_mbps);
             } else {
-                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_p50_request_latency_ms), s_s3_upload_throughput_per_connection_mbps);
+                tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_p50_request_latency_ms)), s_s3_upload_throughput_per_connection_mbps);
             }
             break;
         }
@@ -291,17 +291,17 @@ bool aws_s3_client_acquire_tokens(
     switch (request->request_type) {
         case AWS_S3_REQUEST_TYPE_GET_OBJECT: {
             if (request->meta_request->is_express) {
-                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_express_p50_request_latency_ms), s_s3_express_download_throughput_per_connection_mbps);
+                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_express_p50_request_latency_ms)), s_s3_express_download_throughput_per_connection_mbps);
             } else {
-                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_p50_request_latency_ms), s_s3_download_throughput_per_connection_mbps);
+                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_p50_request_latency_ms)), s_s3_download_throughput_per_connection_mbps);
             }
             break;
         }
         case AWS_S3_REQUEST_TYPE_PUT_OBJECT: {
             if (request->meta_request->is_express) {
-                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_express_p50_request_latency_ms), s_s3_express_upload_throughput_per_connection_mbps);
+                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_express_p50_request_latency_ms)), s_s3_express_upload_throughput_per_connection_mbps);
             } else {
-                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / s_s3_p50_request_latency_ms), s_s3_upload_throughput_per_connection_mbps);
+                required_tokens = aws_min_u32(ceil((request->buffer_size * 1000) / (MB_TO_BYTES(8) * s_s3_p50_request_latency_ms)), s_s3_upload_throughput_per_connection_mbps);
             }
             break;
         }
