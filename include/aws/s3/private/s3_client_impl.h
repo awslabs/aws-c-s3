@@ -275,7 +275,8 @@ struct aws_s3_client {
     /* The calculated ideal number of HTTP connections, based on throughput target and throughput per connection. */
     const uint32_t ideal_connection_count;
 
-    /* Tokens added when meta requests are created and subtracted when requests use the tokens to allocate connections */
+    /* Tokens added when meta requests are created and subtracted when requests use the tokens to allocate connections
+     */
     struct struct_atomic_var token_bucket;
 
     /**
