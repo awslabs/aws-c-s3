@@ -44,6 +44,9 @@
 #include <inttypes.h>
 #include <math.h>
 
+#define S_IDEAL_PART_SIZE 8
+#define S_S3_CLIENT_MINIMUM_CONCURRENT_REQUESTS 8
+
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif                              /* _MSC_VER */
@@ -99,12 +102,8 @@ const double s_s3_express_p50_request_latency_ms = 0.004;
 
 /* Currently the ideal part size is 8MB and hence the value set.
  * However, this is subject to change due to newer part sizes and adjustments. */
-const uint32_t s_ideal_part_size = 8;
 
-const uint32_t s_s3_client_minimum_concurrent_requests = 8;
-
-/* x 8 to convert to megabits and match token unit */
-uint32_t s_s3_minimum_tokens = s_ideal_part_size * 8 * s_s3_client_minimum_concurrent_requests;
+const uint32_t s_s3_minimum_tokens = S_IDEAL_PART_SIZE * 8 * S_S3_CLIENT_MINIMUM_CONCURRENT_REQUESTS;
 
 /**
  * Default max part size is 5GiB as the server limit.
