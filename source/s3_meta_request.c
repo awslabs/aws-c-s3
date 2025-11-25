@@ -1988,7 +1988,6 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
     uint64_t bytes_allowed_to_deliver = 0;
-    uint64_t read_window_to_increment = 0;
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -2093,7 +2092,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                     aws_error_name(error_code));
                             }
                             if (meta_request->client->enable_read_backpressure) {
-                                read_window_to_increment += response_body.len;
+                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
                             }
                         } else if (
                             meta_request->body_callback_ex != NULL &&
@@ -2207,12 +2206,24 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
         }
-        /* Push the iocompileted events back to the queue */
-        for (size_t i = 0; i < aws_array_list_length(&incomplete_deliver_events_array); ++i) {
-            struct aws_s3_meta_request_event event;
-            aws_array_list_get_at(&incomplete_deliver_events_array, &event, i);
-            /* Push the incomplete one to the front of the queue. */
-            aws_array_list_push_front(&meta_request->synced_data.event_delivery_array, &event);
+        if (aws_array_list_length(&incomplete_deliver_events_array) > 0) {
+            /* Only if we don't have any window to deliver the bytes, we will have incomplete parts. */
+            AWS_FATAL_ASSERT(bytes_allowed_to_deliver == 0);
+            /* Push the incomplete events back to the queue */
+            for (size_t i = 0; i < aws_array_list_length(&incomplete_deliver_events_array); ++i) {
+                struct aws_s3_meta_request_event event;
+                aws_array_list_get_at(&incomplete_deliver_events_array, &event, i);
+                /* Push the incomplete one to the front of the queue. */
+                aws_array_list_push_front(&meta_request->synced_data.event_delivery_array, &event);
+            }
+            /* As we push to the event delivery array, we check if we need to schedule another delivery by if there
+             * is space to make the delivery or not. */
+            bytes_allowed_to_deliver = meta_request->synced_data.read_window_running_total -
+                                       meta_request->io_threaded_data.num_bytes_delivery_completed;
+            if (bytes_allowed_to_deliver > 0 && error_code == AWS_ERROR_SUCCESS) {
+                /* We have more space now, let's try another delivery now. */
+                aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
+            }
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
@@ -2220,7 +2231,6 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
-    aws_s3_meta_request_increment_read_window(meta_request, read_window_to_increment);
     aws_array_list_clean_up(&incomplete_deliver_events_array);
 
     aws_s3_client_schedule_process_work(client);
