@@ -2209,7 +2209,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         if (aws_array_list_length(&incomplete_deliver_events_array) > 0) {
             /* Only if we don't have any window to deliver the bytes, we will have incomplete parts. */
             AWS_FATAL_ASSERT(bytes_allowed_to_deliver == 0);
-            /* Push the iocompileted events back to the queue */
+            /* Push the incomplete events back to the queue */
             for (size_t i = 0; i < aws_array_list_length(&incomplete_deliver_events_array); ++i) {
                 struct aws_s3_meta_request_event event;
                 aws_array_list_get_at(&incomplete_deliver_events_array, &event, i);
