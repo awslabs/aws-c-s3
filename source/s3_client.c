@@ -99,9 +99,9 @@ const double s_s3_express_p50_request_latency_ms = 0.004;
 
 /* Currently the ideal part size is 8MB and hence the value set.
  * However, this is subject to change due to newer part sizes and adjustments. */
-static const uint32_t s_ideal_part_size = 8;
+const uint32_t s_ideal_part_size = 8;
 
-static const uint32_t s_s3_client_minimum_concurrent_requests = 8;
+const uint32_t s_s3_client_minimum_concurrent_requests = 8;
 
 /* x 8 to convert to megabits and match token unit */
 uint32_t s_s3_minimum_tokens = s_ideal_part_size * 8 * s_s3_client_minimum_concurrent_requests;
