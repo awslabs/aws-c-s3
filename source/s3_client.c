@@ -291,6 +291,21 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
+    // We ensure we do not violate the user set max-connections limit
+    if ((uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_total) >=
+            client->max_active_connections_override &&
+        client->max_active_connections_override > 0) {
+        return false;
+    }
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    if (meta_request &&
+        (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) >=
+            meta_request->max_active_connections_override &&
+        meta_request->max_active_connections_override > 0) {
+        return false;
+    }
+
     uint32_t required_tokens = 0;
 
     switch (request->request_type) {
@@ -2463,6 +2478,7 @@ static void s_s3_client_create_connection_for_request_default(
 
     aws_atomic_fetch_add(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_add(&client->stats.num_requests_network_io[meta_request->type], 1);
+    aws_atomic_fetch_add(&client->stats.num_requests_network_total, 1);
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
 
@@ -2761,6 +2777,7 @@ reset_connection:
     }
     aws_atomic_fetch_sub(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_sub(&client->stats.num_requests_network_io[meta_request->type], 1);
+    aws_atomic_fetch_sub(&client->stats.num_requests_network_total, 1);
 
     s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
 
