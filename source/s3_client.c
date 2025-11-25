@@ -104,7 +104,7 @@ static const uint32_t s_ideal_part_size = 8;
 static const uint32_t s_s3_client_minimum_concurrent_requests = 8;
 
 /* x 8 to convert to megabits and match token unit */
-const uint32_t s_s3_minimum_tokens = s_ideal_part_size * 8 * s_s3_client_minimum_concurrent_requests;
+static uint32_t s_s3_minimum_tokens = s_ideal_part_size * 8 * s_s3_client_minimum_concurrent_requests;
 
 /**
  * Default max part size is 5GiB as the server limit.
