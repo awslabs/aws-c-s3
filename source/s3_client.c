@@ -101,9 +101,11 @@ const uint32_t s_s3_client_minimum_concurrent_requests = 8;
 
 /* Currently the ideal part size is 8MB and hence the value set.
  * However, this is subject to change due to newer part sizes and adjustments. */
-const uint32_t s_ideal_part_size = 8 * 8;
+const uint32_t s_ideal_part_size = 8;
 
-const uint32_t s_s3_minimum_tokens = s_ideal_part_size * 8 * s_s3_client_minimum_concurrent_requests;
+const uint32_t s_s3_minimum_tokens =
+    s_ideal_part_size * 8 *
+    s_s3_client_minimum_concurrent_requests; /* x 8 to convert to megabits and match token unit */
 
 /**
  * Default max part size is 5GiB as the server limit.
@@ -262,7 +264,7 @@ void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_requ
             }
             break;
         }
-        case AWS_S3_REQUEST_TYPE_PUT_OBJECT: {
+        case AWS_S3_REQUEST_TYPE_UPLOAD_PART: {
             if (request->meta_request->is_express) {
                 tokens = aws_min_u32(
                     ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
@@ -304,7 +306,7 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
             }
             break;
         }
-        case AWS_S3_REQUEST_TYPE_PUT_OBJECT: {
+        case AWS_S3_REQUEST_TYPE_UPLOAD_PART: {
             if (request->meta_request->is_express) {
                 required_tokens = aws_min_u32(
                     ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
