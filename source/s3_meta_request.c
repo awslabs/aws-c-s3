@@ -1411,13 +1411,34 @@ static int s_s3_meta_request_incoming_headers(
                     aws_error_str(aws_last_error()));
                 return AWS_OP_ERR;
             } else {
+                /* Make we get what we ask for. */
                 if (request->part_range_end != 0) {
-                    AWS_FATAL_ASSERT(request->part_range_start == object_range_start);
+                    if (request->part_range_start != object_range_start) {
+                        /* Log the error */
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Part range start mismatch. Expected: %" PRIu64 ", Actual: %" PRIu64 "",
+                            (void *)meta_request,
+                            request->part_range_start,
+                            object_range_start);
+                        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+                    }
                     if (request->part_range_end != object_range_end) {
-                        /* In the case where the object size is less than the range requested, it will return the bytes
-                         * to the object size. Range is inclusive */
-                        AWS_FATAL_ASSERT(object_range_start + object_size - 1 == object_range_end);
-                        AWS_FATAL_ASSERT(request->part_range_end > object_range_end);
+                        /* In the case where the object size is less than the range requested. It must be return the
+                         * last part to the end of the object. */
+                        if (object_size != object_range_end + 1 || request->part_range_end < object_range_end) {
+                            /* Something went wrong if it's matching. Log the error. */
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p: Part range end mismatch. Expected: %" PRIu64 ", Actual: %" PRIu64
+                                ", while object size is: "
+                                "%" PRIu64 ".",
+                                (void *)meta_request,
+                                request->part_range_end,
+                                object_range_end,
+                                object_size);
+                            return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+                        }
                     }
                 }
             }
@@ -2059,7 +2080,17 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
                 }
                 /* Make sure the response body is delivered in the sequential order */
-                AWS_FATAL_ASSERT(delivery_range_start == meta_request->io_threaded_data.next_deliver_range_start);
+                if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
+                    /* Unexpected error, log the error */
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Unexpected code error. Please report the error to the team, "
+                        "delivery_range_start:%" PRIu64 ", next_deliver_range_start:%" PRIu64 ".",
+                        (void *)meta_request,
+                        delivery_range_start,
+                        meta_request->io_threaded_data.next_deliver_range_start);
+                    error_code = AWS_ERROR_INVALID_STATE;
+                }
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
