@@ -2080,7 +2080,17 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
                 }
                 /* Make sure the response body is delivered in the sequential order */
-                AWS_FATAL_ASSERT(delivery_range_start == meta_request->io_threaded_data.next_deliver_range_start);
+                if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
+                    /* Unexpected error, log the error */
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Unexpected code error. Please report the error to the team, "
+                        "delivery_range_start:%" PRIu64 ", next_deliver_range_start:%" PRIu64 ".",
+                        (void *)meta_request,
+                        delivery_range_start,
+                        meta_request->io_threaded_data.next_deliver_range_start);
+                    error_code = AWS_ERROR_INVALID_STATE;
+                }
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
