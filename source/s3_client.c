@@ -239,7 +239,8 @@ uint32_t aws_s3_client_get_max_active_connections(
 /* Initialize token bucket based on target throughput */
 void s_s3_client_init_tokens(struct aws_s3_client *client, double target_throughput_gbps) {
     AWS_PRECONDITION(client);
-    aws_atomic_store_int(&client->token_bucket, aws_max_u32(target_throughput_gbps * 1024, s_s3_minimum_tokens));
+    aws_atomic_store_int(
+        &client->token_bucket, aws_max_u32((uint32_t)target_throughput_gbps * 1024, s_s3_minimum_tokens));
 }
 
 /* Releases tokens back after request is complete. */
@@ -253,11 +254,11 @@ void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_requ
         case AWS_S3_REQUEST_TYPE_GET_OBJECT: {
             if (request->meta_request->is_express) {
                 tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
                     s_s3_express_download_throughput_per_connection_mbps);
             } else {
                 tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
                     s_s3_download_throughput_per_connection_mbps);
             }
             break;
@@ -265,11 +266,11 @@ void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_requ
         case AWS_S3_REQUEST_TYPE_UPLOAD_PART: {
             if (request->meta_request->is_express) {
                 tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
                     s_s3_express_upload_throughput_per_connection_mbps);
             } else {
                 tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
                     s_s3_upload_throughput_per_connection_mbps);
             }
             break;
@@ -310,11 +311,11 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
         case AWS_S3_REQUEST_TYPE_GET_OBJECT: {
             if (request->meta_request->is_express) {
                 required_tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
                     s_s3_express_download_throughput_per_connection_mbps);
             } else {
                 required_tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
                     s_s3_download_throughput_per_connection_mbps);
             }
             break;
@@ -322,11 +323,11 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
         case AWS_S3_REQUEST_TYPE_UPLOAD_PART: {
             if (request->meta_request->is_express) {
                 required_tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
                     s_s3_express_upload_throughput_per_connection_mbps);
             } else {
                 required_tokens = aws_min_u32(
-                    ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
+                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
                     s_s3_upload_throughput_per_connection_mbps);
             }
             break;
