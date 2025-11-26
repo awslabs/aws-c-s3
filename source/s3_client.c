@@ -44,9 +44,6 @@
 #include <inttypes.h>
 #include <math.h>
 
-#define S_IDEAL_PART_SIZE 8
-#define S_S3_CLIENT_MINIMUM_CONCURRENT_REQUESTS 8
-
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif                              /* _MSC_VER */
@@ -78,10 +75,12 @@ const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old b
  * be 2500 Gbps. */
 const uint32_t g_max_num_connections = 10000;
 
-/* This is a first pass at a token based implementation, the calculations are approximate and can be improved in the
- * future. The idea is to scale the number of connections we require up and down based on the different requests we
- * receive and hence dynamically scale the maximum number of connections we need to open. One token is equivalent to
- * 1Mbps of throughput. */
+/*
+ * This is a token based implementation dor dynamic scaling of connections.
+ * The calculations are approximate and can be improved in the future. The idea is to scale the number of connections
+ * we require up and down based on the different requests we receive and hence dynamically scale the maximum number
+ * of connections we need to open. One token is equivalent to 1Mbps of throughput.
+ */
 
 /* All throughput values are in MBps and provided by S3 team */
 
@@ -100,10 +99,12 @@ const double s_s3_p50_request_latency_ms = 0.03;
 // 4ms
 const double s_s3_express_p50_request_latency_ms = 0.004;
 
-/* Currently the ideal part size is 8MB and hence the value set.
- * However, this is subject to change due to newer part sizes and adjustments. */
-
-const uint32_t s_s3_minimum_tokens = S_IDEAL_PART_SIZE * 8 * S_S3_CLIENT_MINIMUM_CONCURRENT_REQUESTS;
+/*
+ * Represents the minimum number of tokens a particular request might use irrespective of payload size or throughput
+ * achieved. This is required to hard limit the number of connections we open for extremely small request sizes. The
+ * number below is arbitrary until we come up with more sophisticated math.
+ */
+const uint32_t s_s3_minimum_tokens = 500;
 
 /**
  * Default max part size is 5GiB as the server limit.
@@ -186,8 +187,9 @@ void aws_s3_set_dns_ttl(size_t ttl) {
 
 /**
  * Determine how many connections are ideal by dividing target-throughput by throughput-per-connection.
- * TODO: we may consider to alter this, upload to regular s3 can use more connections, and s3 express
- * can use less connections to reach the target throughput..
+ * TODO: we have begun altering the calculation behind this. get_ideal_connection_number no longer provides
+ * the basis for the number of connections we use for a particular meta request. It will soon be removed
+ * as part of future work towards moving to a dynamic connection allocation implementation.
  **/
 static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
     double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
@@ -237,10 +239,11 @@ uint32_t aws_s3_client_get_max_active_connections(
 }
 
 /* Initialize token bucket based on target throughput */
-void s_s3_client_init_tokens(struct aws_s3_client *client, double target_throughput_gbps) {
+void s_s3_client_init_tokens(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
+
     aws_atomic_store_int(
-        &client->token_bucket, aws_max_u32((uint32_t)target_throughput_gbps * 1024, s_s3_minimum_tokens));
+        &client->token_bucket, aws_max_u32((uint32_t)client->throughput_target_gbps * 1024, s_s3_minimum_tokens));
 }
 
 /* Releases tokens back after request is complete. */
@@ -248,45 +251,13 @@ void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_requ
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
-    uint32_t tokens = 0;
-
-    switch (request->request_type) {
-        case AWS_S3_REQUEST_TYPE_GET_OBJECT: {
-            if (request->meta_request->is_express) {
-                tokens = aws_min_u32(
-                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
-                    s_s3_express_download_throughput_per_connection_mbps);
-            } else {
-                tokens = aws_min_u32(
-                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
-                    s_s3_download_throughput_per_connection_mbps);
-            }
-            break;
-        }
-        case AWS_S3_REQUEST_TYPE_UPLOAD_PART: {
-            if (request->meta_request->is_express) {
-                tokens = aws_min_u32(
-                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_express_p50_request_latency_ms)),
-                    s_s3_express_upload_throughput_per_connection_mbps);
-            } else {
-                tokens = aws_min_u32(
-                    (uint32_t)ceil(request->buffer_size * 8 / (MB_TO_BYTES(1) * s_s3_p50_request_latency_ms)),
-                    s_s3_upload_throughput_per_connection_mbps);
-            }
-            break;
-        }
-        default: {
-            tokens = s_s3_minimum_tokens;
-        }
-    }
-
-    // do we need error handling here?
-    aws_atomic_fetch_add(&client->token_bucket, tokens);
+    aws_atomic_fetch_add(&client->token_bucket, request->tokens_used);
+    request->tokens_used = 0;
 }
 
-/* Returns true or false based on whether the request was able to avail the required amount of tokens.
- * TODO: try to introduce a scalability factor instead of using pure latency. */
-bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_request *request) {
+/* Checks to ensure we are not violating user configured connection limits althought we are dynamically increasing
+ * and decreasing connections */
+bool s_check_connection_limits(struct aws_s3_client *client, struct aws_s3_request *request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
@@ -305,7 +276,32 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
         return false;
     }
 
+    return true;
+}
+
+/* Returns true or false based on whether the request was able to avail the required amount of tokens.
+ * TODO: try to introduce a scalability factor instead of using pure latency. */
+bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_request *request) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(request);
+
     uint32_t required_tokens = 0;
+
+    /*
+     * In each of the following cases, we determine the number of tokens required using the following formula, (One
+     * token is equivalent to attaining 1Mbps of target throughput):-
+     *
+     * For each operation (upload/download) and each service (s3/s3express), we have a hardcoded attainable throughput
+     * per connection value obtained from S3. also the latency involved in the respective services.
+     *
+     * The attained throughput per request is atmost the attainable throughput of the respective service-operation or
+     * when the payload size is small enough the delivery time is neglegible and hence close to payload/latency.
+     *
+     * The tokens used is basically the minimum of the two since larger objects end up getting closer to the attainable
+     * throughput and the smaller object max out at a theoretical limit of what it can attain.
+     *
+     * This calculation is an approximation of reality and might continuously improve based on S3 performance.
+     */
 
     switch (request->request_type) {
         case AWS_S3_REQUEST_TYPE_GET_OBJECT: {
@@ -340,6 +336,7 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
     if ((uint32_t)aws_atomic_load_int(&client->token_bucket) > required_tokens) {
         // do we need error handling here?
         aws_atomic_fetch_sub(&client->token_bucket, required_tokens);
+        request->tokens_used = required_tokens;
         return true;
     }
     return false;
@@ -560,7 +557,7 @@ struct aws_s3_client *aws_s3_client_new(
     *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
         g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
 
-    s_s3_client_init_tokens(client, client->throughput_target_gbps);
+    s_s3_client_init_tokens(client);
 
     size_t part_size = (size_t)g_default_part_size_fallback;
     if (client_config->part_size != 0) {
@@ -1967,12 +1964,20 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
                                          num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
+
+        uint32_t total_tokens = client->throughput_target_gbps * 1024;
+
+        uint32_t available_tokens = (uint32_t)aws_atomic_load_int(&client->token_bucket);
+
+        uint32_t used_tokens = total_tokens - available_tokens;
+
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
             "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
             "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  "
             "Requests-streaming-response:%d "
+            "Total Tokens: %d, Tokens Available: %d, Tokens Used: %d"
             " Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
@@ -1985,6 +1990,9 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             num_requests_network_io,
             num_requests_stream_queued_waiting,
             num_requests_streaming_response,
+            total_tokens,
+            available_tokens,
+            used_tokens,
             num_endpoints_in_table,
             num_endpoints_allocated);
     }
@@ -2427,7 +2435,7 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
-        } else if (s_s3_client_acquire_tokens(client, request)) {
+        } else if (s_check_connection_limits(client, request) && s_s3_client_acquire_tokens(client, request)) {
             /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);
         } else {
