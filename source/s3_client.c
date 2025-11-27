@@ -1965,7 +1965,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
                                          num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
 
-        uint32_t total_tokens = client->throughput_target_gbps * 1024;
+        uint32_t total_tokens = (uint32_t)client->throughput_target_gbps * 1024;
 
         uint32_t available_tokens = (uint32_t)aws_atomic_load_int(&client->token_bucket);
 
