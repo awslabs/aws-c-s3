@@ -156,10 +156,18 @@ struct aws_s3_meta_request {
     struct aws_parallel_input_stream *request_body_parallel_stream;
     bool request_body_using_async_writes;
 
+    /* object_size based on the earliest estimate */
+    size_t object_size;
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
     /* Hard limit on max connections set through the meta request option. */
     const uint32_t max_active_connections_override;
+
+    /* Weight of this meta request for connection allocation. Weight = object_size / (part_size * part_size) */
+    double weight;
+
+    /* Number of connections this meta request requires for optimal throughput */
+    uint32_t required_connections;
 
     struct aws_cached_signing_config_aws *cached_signing_config;
 

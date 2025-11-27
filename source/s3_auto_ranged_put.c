@@ -13,6 +13,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
+#include <aws/io/event_loop.h>
 #include <aws/io/stream.h>
 
 /* TODO: better logging of steps */
@@ -366,6 +367,17 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->total_num_parts_from_content_length = has_content_length ? num_parts : 0;
     auto_ranged_put->upload_id = NULL;
     auto_ranged_put->resume_token = options->resume_token;
+
+    /* Calculate weight for upload: weight = object_size / (part_size * part_size) */
+    if (has_content_length && part_size > 0) {
+        auto_ranged_put->base.weight = (double)content_length / ((double)part_size * (double)part_size);
+        /* Add this meta request's weight to client's total weight */
+        aws_mutex_lock(&client->stats.total_weight_mutex);
+        client->stats.total_weight += auto_ranged_put->base.weight;
+        aws_mutex_unlock(&client->stats.total_weight_mutex);
+    } else {
+        auto_ranged_put->base.weight = 0.0;
+    }
 
     aws_s3_meta_request_resume_token_acquire(auto_ranged_put->resume_token);
 
@@ -1129,10 +1141,12 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             request->request_body.capacity = (size_t)request->content_length;
         }
 
-        part_prep->asyncstep_read_part =
-            aws_s3_meta_request_read_body(meta_request, request->part_range_start, &request->request_body);
-        aws_future_bool_register_callback(
-            part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
+        struct aws_event_loop *loop =
+            aws_event_loop_group_get_next_loop(request->meta_request->client->body_streaming_elg);
+
+        part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, 0, &request->request_body);
+        aws_future_bool_register_event_loop_callback(
+            part_prep->asyncstep_read_part, loop, s_s3_prepare_upload_part_on_read_done, part_prep);
     } else {
         /* Not the first time preparing request (e.g. retry).
          * We can skip over the async steps that read the body stream */

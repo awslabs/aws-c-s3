@@ -108,6 +108,10 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     }
 
     meta_request_default->content_length = (size_t)content_length;
+    /* copy content_length as object size.
+    DISCLAIMER: content_length might be zero if object size is unknown. We might not always initialize it with some
+    value. */
+    meta_request_default->base.object_size = meta_request_default->content_length;
 
     /* If request_type is unknown, look it up from operation name */
     if (request_type != AWS_S3_REQUEST_TYPE_UNKNOWN) {

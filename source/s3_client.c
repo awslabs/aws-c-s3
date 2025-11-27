@@ -44,6 +44,10 @@
 #include <inttypes.h>
 #include <math.h>
 
+#ifndef _WIN32
+#    include <sys/resource.h>
+#endif
+
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
 #endif                              /* _MSC_VER */
@@ -59,15 +63,17 @@ static const enum aws_log_level s_log_level_client_stats = AWS_LL_INFO;
 static const uint32_t s_max_requests_multiplier = 4;
 
 /* This is used to determine the ideal number of HTTP connections. Algorithm is roughly:
- * num-connections-max = throughput-target-gbps / s_throughput_per_connection_gbps
+ * num-connections-max = throughput-target-gbps / throughput_per_connection_gbps
  *
  * Magic value based on: match results of the previous algorithm,
  * where throughput-target-gpbs of 100 resulted in 250 connections.
- *
- * TODO: Improve this algorithm (expect higher throughput for S3 Express,
- * expect lower throughput for small objects, etc)
  */
-static const double s_throughput_per_connection_gbps = 100.0 / 250;
+const double g_s3_throughput_per_connection_gbps = 100 / 250.0;
+
+/* S3 Express has higher throughput per connection due to its performance characteristics.
+ * TODO: Tune this value based on actual S3 Express performance measurements.
+ */
+const double g_s3express_throughput_per_connection_gbps = 100 / 250.0; /* Assume 2x throughput */
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
@@ -160,7 +166,7 @@ void aws_s3_set_dns_ttl(size_t ttl) {
  * can use less connections to reach the target throughput..
  **/
 static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
-    double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
+    double ideal_connection_count_double = throughput_gps / g_s3_throughput_per_connection_gbps;
     /* round up and clamp */
     ideal_connection_count_double = ceil(ideal_connection_count_double);
     ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
@@ -181,11 +187,25 @@ uint32_t aws_s3_client_get_max_active_connections(
     AWS_PRECONDITION(client);
 
     uint32_t max_active_connections = client->ideal_connection_count;
+
+    /* Respect total_required_connections calculated */
+    size_t total_required = aws_atomic_load_int(&client->stats.total_required_connections);
+    if (total_required > 0) {
+        max_active_connections = aws_min_u32((uint32_t)total_required, max_active_connections);
+    }
+
+    /* Respect user override */
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
     }
+
     if (meta_request) {
+        /* Total number of connections for a meta request should not exceed number of parts */
+        if (meta_request->object_size && meta_request->part_size) {
+            max_active_connections =
+                aws_min_u32(meta_request->object_size / meta_request->part_size, max_active_connections);
+        }
         if (meta_request->max_active_connections_override) {
             /* Apply the meta request level override the max active connections, but less than the client side settings.
              */
@@ -520,6 +540,9 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
+    client->stats.total_weight = 0.0;
+    aws_mutex_init(&client->stats.total_weight_mutex);
+    aws_atomic_init_int(&client->stats.total_required_connections, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -722,6 +745,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+    *((bool *)&client->enable_dynamic_connection_scaling) = true;
 
     return client;
 
@@ -749,6 +773,7 @@ on_error:
     }
     aws_client_bootstrap_release(client->client_bootstrap);
     aws_mutex_clean_up(&client->synced_data.lock);
+    aws_mutex_clean_up(&client->stats.total_weight_mutex);
 
     aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
     for (size_t i = 0; i < aws_array_list_length(&client->network_interface_names); i++) {
@@ -853,6 +878,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
+    aws_mutex_clean_up(&client->stats.total_weight_mutex);
 
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
@@ -1826,13 +1852,17 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
                                          num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
+
+        /* Load required connections from atomic counter for logging */
+        uint32_t required_connections = (uint32_t)aws_atomic_load_int(&client->stats.total_required_connections);
+
         AWS_LOGF(
             s_log_level_client_stats,
             AWS_LS_S3_CLIENT_STATS,
             "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
             "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  "
             "Requests-streaming-response:%d "
-            " Endpoints(in-table/allocated):%d/%d",
+            "Required-connections:%u  Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
             num_requests_tracked_requests,
@@ -1844,6 +1874,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             num_requests_network_io,
             num_requests_stream_queued_waiting,
             num_requests_streaming_response,
+            required_connections,
             num_endpoints_in_table,
             num_endpoints_allocated);
     }
@@ -2123,7 +2154,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
     const uint32_t num_passes = AWS_ARRAY_SIZE(pass_flags);
 
-    for (uint32_t pass_index = 0; pass_index < num_passes; ++pass_index) {
+    for (uint32_t pass_index = client->enable_dynamic_connection_scaling; pass_index < num_passes; ++pass_index) {
 
         /**
          * Iterate through the meta requests to update meta requests and get new requests that can then be prepared
@@ -2192,9 +2223,9 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 s_s3_client_remove_meta_request_threaded(client, meta_request);
             }
         }
-
-        aws_linked_list_move_all_front(&client->threaded_data.meta_requests, &meta_requests_work_remaining);
     }
+
+    aws_linked_list_move_all_front(&client->threaded_data.meta_requests, &meta_requests_work_remaining);
 }
 
 static void s_s3_client_meta_request_finished_request(
@@ -2286,6 +2317,41 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
+        } else if (client->enable_dynamic_connection_scaling) {
+            /* Calculate allowed connections for this meta request based on weight ratio */
+            bool should_allocate_connection = false;
+            uint32_t current_connections = (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network);
+
+            if (meta_request->weight > (double)0) {
+                aws_mutex_lock(&client->stats.total_weight_mutex);
+                double total_weight = client->stats.total_weight;
+                aws_mutex_unlock(&client->stats.total_weight_mutex);
+                if (total_weight > (double)0) {
+                    /* Calculate: (meta_request->weight / client->total_weight) * 300 */
+                    double weight_ratio = meta_request->weight / total_weight;
+                    uint32_t allowed_connections = (uint32_t)(weight_ratio * client_max_active_connections);
+                    const uint32_t max_active_connections =
+                        aws_s3_client_get_max_active_connections(client, meta_request);
+                    allowed_connections = aws_min_u32(allowed_connections, max_active_connections);
+
+                    should_allocate_connection = (current_connections < allowed_connections);
+                } else {
+                    /* No total weight yet, allow allocation */
+                    should_allocate_connection = true;
+                }
+            } else {
+                /* No weight calculated yet (e.g., download before discovery), allow allocation */
+                should_allocate_connection = true;
+            }
+
+            if (should_allocate_connection) {
+                s_s3_client_create_connection_for_request(client, request);
+            } else {
+                /* Push the request into the left-over list to be used in a future call of this function. */
+                aws_linked_list_push_back(&left_over_requests, &request->node);
+                /* Increment the count as we put it back to the queue. */
+                ++meta_request->client_process_work_threaded_data.num_request_being_prepared;
+            }
         } else if ((uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) < max_active_connections) {
             /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);

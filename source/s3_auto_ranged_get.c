@@ -118,6 +118,16 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
+
+        /* Calculate weight early if object size hint is available: weight = object_size / (part_size * part_size) */
+        if (auto_ranged_get->object_size_hint > 0 && auto_ranged_get->base.part_size > 0) {
+            auto_ranged_get->base.weight =
+                (double)auto_ranged_get->object_size_hint /
+                ((double)auto_ranged_get->base.part_size * (double)auto_ranged_get->base.part_size);
+            aws_mutex_lock(&client->stats.total_weight_mutex);
+            client->stats.total_weight += auto_ranged_get->base.weight;
+            aws_mutex_unlock(&client->stats.total_weight_mutex);
+        }
     }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
@@ -609,6 +619,8 @@ static int s_discover_object_range_and_size(
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_size = content_length;
+                /* copy it to meta request */
+                meta_request->object_size = object_size;
                 if (content_length > 0) {
                     object_range_end = content_length - 1; /* range-end is inclusive */
                 }
@@ -966,6 +978,17 @@ update_synced_data:
                     auto_ranged_get->synced_data.first_part_size,
                     object_range_start,
                     object_range_end);
+            }
+
+            /* Calculate weight for download: weight = object_size / (part_size * part_size) */
+            /* Only calculate if weight wasn't already set from object_size_hint */
+            if (object_size > 0 && meta_request->part_size > 0 && meta_request->weight == 0.0) {
+                meta_request->weight =
+                    (double)object_size / ((double)meta_request->part_size * (double)meta_request->part_size);
+                /* Add this meta request's weight to client's total weight */
+                aws_mutex_lock(&meta_request->client->stats.total_weight_mutex);
+                meta_request->client->stats.total_weight += meta_request->weight;
+                aws_mutex_unlock(&meta_request->client->stats.total_weight_mutex);
             }
         }
 
