@@ -104,8 +104,13 @@ const double s_s3_express_p50_request_latency_ms = 0.004;
  * achieved. This is required to hard limit the number of connections we open for extremely small request sizes. The
  * number below is arbitrary until we come up with more sophisticated math.
  */
-const uint32_t s_s3_minimum_tokens = 500;
+const uint32_t s_s3_minimum_tokens = 10;
 
+/*
+ * Represents a rough estimate of the tokens used by a request we do not have the idea of type or payload for.
+ * This is hard to set and hence is an approximation.
+ */
+const uint32_t s_s3_default_tokens = 500;
 /**
  * Default max part size is 5GiB as the server limit.
  */
@@ -242,8 +247,7 @@ uint32_t aws_s3_client_get_max_active_connections(
 void s_s3_client_init_tokens(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
-    aws_atomic_store_int(
-        &client->token_bucket, aws_max_u32((uint32_t)client->throughput_target_gbps * 1024, s_s3_minimum_tokens));
+    aws_atomic_store_int(&client->token_bucket, (uint32_t)client->throughput_target_gbps * 1024);
 }
 
 /* Releases tokens back after request is complete. */
@@ -329,9 +333,12 @@ bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_requ
             break;
         }
         default: {
-            required_tokens = s_s3_minimum_tokens;
+            required_tokens = s_s3_default_tokens;
         }
     }
+
+    // Ensure we are using atleast minimum number of tokens irrespective of payload size.
+    required_tokens = aws_max_u32(required_tokens, s_s3_minimum_tokens);
 
     if ((uint32_t)aws_atomic_load_int(&client->token_bucket) > required_tokens) {
         // do we need error handling here?
