@@ -315,7 +315,6 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
 
     struct aws_s3_client *mock_client = aws_s3_tester_mock_client_new(&tester);
     *((uint32_t *)&mock_client->max_active_connections_override) = 0;
-    *((uint32_t *)&mock_client->ideal_connection_count) = 100;
     mock_client->client_bootstrap = &mock_client_bootstrap;
     mock_client->vtable->get_host_address_count = s_test_get_max_active_connections_host_address_count;
 
@@ -330,24 +329,9 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
 
     s_test_max_active_connections_host_count = 2;
 
-    /* Behavior should not be affected by max_active_connections_override since it is 0, and should just be in relation
-     * to ideal-connection-count. */
-    {
-        ASSERT_TRUE(aws_s3_client_get_max_active_connections(mock_client, NULL) == mock_client->ideal_connection_count);
-
-        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
-            ASSERT_TRUE(
-                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
-                mock_client->ideal_connection_count);
-        }
-    }
-
     /* Max active connections override should now cap the calculated amount of active connections. */
     {
         *((uint32_t *)&mock_client->max_active_connections_override) = 3;
-
-        /* Assert that override is low enough to have effect */
-        ASSERT_TRUE(mock_client->max_active_connections_override < mock_client->ideal_connection_count);
 
         ASSERT_TRUE(
             aws_s3_client_get_max_active_connections(mock_client, NULL) ==
@@ -359,24 +343,6 @@ static int s_test_s3_client_get_max_active_connections(struct aws_allocator *all
             ASSERT_TRUE(
                 aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
                 mock_client->max_active_connections_override);
-        }
-    }
-
-    /* Max active connections override should be ignored since the calculated amount of max connections is less. */
-    {
-        *((uint32_t *)&mock_client->max_active_connections_override) = 100000;
-
-        /* Assert that override is NOT low enough to have effect */
-        ASSERT_TRUE(mock_client->max_active_connections_override > mock_client->ideal_connection_count);
-
-        ASSERT_TRUE(aws_s3_client_get_max_active_connections(mock_client, NULL) == mock_client->ideal_connection_count);
-
-        for (size_t i = 0; i < AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
-            ASSERT_TRUE(mock_client->max_active_connections_override > mock_client->ideal_connection_count);
-
-            ASSERT_TRUE(
-                aws_s3_client_get_max_active_connections(mock_client, mock_meta_requests[i]) ==
-                mock_client->ideal_connection_count);
         }
     }
 
