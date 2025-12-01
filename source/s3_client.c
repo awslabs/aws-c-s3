@@ -217,7 +217,7 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
 
-    uint32_t max_active_connections = client->ideal_connection_count;
+    uint32_t max_active_connections = g_max_num_connections;
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
@@ -244,14 +244,16 @@ uint32_t aws_s3_client_get_max_active_connections(
 }
 
 /* Initialize token bucket based on target throughput */
-void s_s3_client_init_tokens(struct aws_s3_client *client) {
+static void s_s3_client_init_tokens(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
-    aws_atomic_store_int(&client->token_bucket, (uint32_t)client->throughput_target_gbps * 1024);
+    uint32_t target_throughput_mbps = 0;
+    aws_mul_u32_checked(client->throughput_target_gbps, 1024, &target_throughput_mbps);
+    aws_atomic_store_int(&client->token_bucket, target_throughput_mbps);
 }
 
 /* Releases tokens back after request is complete. */
-void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_request *request) {
+static void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_request *request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
@@ -259,33 +261,9 @@ void s_s3_client_release_tokens(struct aws_s3_client *client, struct aws_s3_requ
     request->tokens_used = 0;
 }
 
-/* Checks to ensure we are not violating user configured connection limits althought we are dynamically increasing
- * and decreasing connections */
-bool s_check_connection_limits(struct aws_s3_client *client, struct aws_s3_request *request) {
-    AWS_PRECONDITION(client);
-    AWS_PRECONDITION(request);
-
-    // We ensure we do not violate the user set max-connections limit
-    if ((uint32_t)aws_atomic_load_int(&client->stats.num_requests_network_total) >=
-            client->max_active_connections_override &&
-        client->max_active_connections_override > 0) {
-        return false;
-    }
-
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    if (meta_request &&
-        (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) >=
-            meta_request->max_active_connections_override &&
-        meta_request->max_active_connections_override > 0) {
-        return false;
-    }
-
-    return true;
-}
-
 /* Returns true or false based on whether the request was able to avail the required amount of tokens.
  * TODO: try to introduce a scalability factor instead of using pure latency. */
-bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_request *request) {
+static bool s_s3_client_acquire_tokens(struct aws_s3_client *client, struct aws_s3_request *request) {
     AWS_PRECONDITION(client);
     AWS_PRECONDITION(request);
 
@@ -2442,7 +2420,10 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
             s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
-        } else if (s_check_connection_limits(client, request) && s_s3_client_acquire_tokens(client, request)) {
+        } else if (
+            (uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) <
+                (uint32_t)aws_s3_client_get_max_active_connections(client, meta_request) &&
+            s_s3_client_acquire_tokens(client, request)) {
             /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);
         } else {
