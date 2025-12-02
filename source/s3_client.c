@@ -249,7 +249,7 @@ static void s_s3_client_init_tokens(struct aws_s3_client *client) {
     AWS_PRECONDITION(client);
 
     uint32_t target_throughput_mbps = 0;
-    aws_mul_u32_checked(client->throughput_target_gbps, 1024, &target_throughput_mbps);
+    aws_mul_u32_checked((uint32_t)client->throughput_target_gbps, 1024, &target_throughput_mbps);
     aws_atomic_store_int(&client->token_bucket, target_throughput_mbps);
 }
 
