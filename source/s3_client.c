@@ -192,9 +192,10 @@ void aws_s3_set_dns_ttl(size_t ttl) {
 
 /**
  * Determine how many connections are ideal by dividing target-throughput by throughput-per-connection.
- * TODO: we have begun altering the calculation behind this. get_ideal_connection_number no longer provides
- * the basis for the number of connections we use for a particular meta request. It will soon be removed
- * as part of future work towards moving to a dynamic connection allocation implementation.
+ * We have begun altering the calculation behind this. get_ideal_connection_number no longer provides
+ * the basis for the number of connections we use for a particular meta request. However, we may use lesser
+ * number of connections that the ideal_connection_count incase of endpoints which may have higher connection
+ * throughput allowing us to use the memory and connection more efficiently.
  **/
 static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
     double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
@@ -206,7 +207,7 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
 
 /* Returns the max number of connections allowed.
  *
- * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
+ * When meta request is NULL, this will return the overall allowed number of connections based on the client
  * configurations.
  *
  * If meta_request is not NULL, this will return the number of connections allowed based on the meta request
@@ -217,7 +218,7 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
 
-    uint32_t max_active_connections = g_max_num_connections;
+    uint32_t max_active_connections = client->ideal_connection_count;
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
