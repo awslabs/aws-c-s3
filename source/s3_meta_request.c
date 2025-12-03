@@ -1426,6 +1426,7 @@ static int s_s3_meta_request_incoming_headers(
                     if (request->part_range_end != object_range_end) {
                         /* In the case where the object size is less than the range requested. It must be return the
                          * last part to the end of the object. */
+                        AWS_FATAL_ASSERT(object_range_start + object_size - 1 == object_range_end);
                         if (object_size != object_range_end + 1 || request->part_range_end < object_range_end) {
                             /* Something went wrong if it's matching. Log the error. */
                             AWS_LOGF_ERROR(

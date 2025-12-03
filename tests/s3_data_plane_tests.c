@@ -6937,6 +6937,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
         // Last 8K
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-8192"),
+
+        // 1MiB - 8K to the end.
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=1040384-"),
     };
 
     /* List of headers that should have matching values between the auto_ranged_get and default (which sends the HTTP
@@ -7122,6 +7125,54 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
             aws_http_headers_release(verify_range_get_headers);
             aws_byte_buf_clean_up(&verify_range_get_buffer);
         }
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Using the range to fetch the object that has less than 1 part. */
+AWS_TEST_CASE(test_s3_range_requests_less_than_a_part, s_test_s3_range_requests_less_than_a_part)
+static int s_test_s3_range_requests_less_than_a_part(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(1), // Use 1 MiB as the part.
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    const struct aws_byte_cursor ranges[] = {
+        // 0.5 MB - 2 MB range.  This overlaps and goes beyond the 1 MB test file size.
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=524288-2097151"),
+
+        // Get everything after the first 0.5 MB
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=524288-"),
+    };
+    const size_t num_ranges = AWS_ARRAY_SIZE(ranges);
+
+    for (size_t range_index = 0; range_index < num_ranges; ++range_index) {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .get_options =
+                {
+                    .object_path = g_pre_existing_object_1MB,
+                    .object_range = ranges[range_index],
+                },
+        };
+        struct aws_s3_meta_request_test_results results;
+        aws_s3_meta_request_test_results_init(&results, allocator);
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &results));
+        aws_s3_meta_request_test_results_clean_up(&results);
     }
 
     aws_s3_client_release(client);
