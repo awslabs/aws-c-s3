@@ -709,7 +709,7 @@ TEST_CASE(single_upload_unsigned_with_trailer_checksum_mock_server) {
 
 TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     (void)ctx;
-#if defined(AWS_OS_WINDOWS) || defined(AWS_OS_APPLE)
+#if defined(AWS_OS_WINDOWS)
     (void)allocator;
     return AWS_OP_SKIP;
 #else
