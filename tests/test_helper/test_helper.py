@@ -244,11 +244,14 @@ def cleanup(bucket_name, availability_zone=None, client=s3_client):
 
     print(f"s3://{bucket_name}/* - Listing objects...")
     try:
-        objects = client.list_objects_v2(Bucket=bucket_name)["Contents"]
+        response = client.list_objects_v2(Bucket=bucket_name)
+        # 'Contents' key only exists when there are objects in the bucket
+        objects = response.get("Contents", [])
     except botocore.exceptions.ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchBucket':
             print(f"s3://{bucket_name} - Did not exist. Moving on...")
             return
+        raise
     objects = list(map(lambda x: {"Key": x["Key"]}, objects))
     if objects:
         print(f"s3://{bucket_name}/* - Deleting {len(objects)} objects...")

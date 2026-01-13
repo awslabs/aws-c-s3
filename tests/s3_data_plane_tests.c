@@ -1803,7 +1803,8 @@ static int s_test_s3_get_object_backpressure_helper(
     size_t part_size,
     size_t window_initial_size,
     uint64_t window_increment_size,
-    bool file_on_disk) {
+    bool file_on_disk,
+    bool s3express) {
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -1811,6 +1812,7 @@ static int s_test_s3_get_object_backpressure_helper(
     struct aws_s3_client_config client_config = {
         .part_size = part_size,
         .enable_read_backpressure = true,
+        .enable_s3express = s3express,
         .initial_read_window = window_initial_size,
     };
 
@@ -1822,18 +1824,28 @@ static int s_test_s3_get_object_backpressure_helper(
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
-
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+    if (s3express) {
+        host_cursor = g_test_s3express_bucket_usw2_az1_endpoint;
+    }
     /* Put together a simple S3 Get Object request. */
-    struct aws_http_message *message = aws_s3_test_get_object_request_new(
-        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_1MB);
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, host_cursor, g_pre_existing_object_10MB);
 
+    struct aws_signing_config_aws s3express_signing_config = {
+        .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
+        .service = g_s3express_service_name,
+    };
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .message = message,
     };
+    if (s3express) {
+        options.signing_config = &s3express_signing_config;
+    }
     struct aws_string *filepath_str = NULL;
     if (file_on_disk) {
-        filepath_str = aws_s3_tester_create_file(allocator, g_pre_existing_object_1MB, NULL);
+        filepath_str = aws_s3_tester_create_file(allocator, g_pre_existing_object_10MB, NULL);
         options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
     }
 
@@ -1890,12 +1902,12 @@ static int s_test_s3_get_object_backpressure_small_increments(struct aws_allocat
     /* Test increments smaller than part-size.
      * Only 1 part at a time should be in flight */
     (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size / 4;
     return s_test_s3_get_object_backpressure_helper(
-        allocator, part_size, window_initial_size, window_increment_size, false);
+        allocator, part_size, window_initial_size, window_increment_size, false, false);
 }
 
 AWS_TEST_CASE(test_s3_get_object_backpressure_big_increments, s_test_s3_get_object_backpressure_big_increments)
@@ -1903,24 +1915,24 @@ static int s_test_s3_get_object_backpressure_big_increments(struct aws_allocator
     /* Test increments larger than part-size.
      * Multiple parts should be in flight at a time */
     (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
     size_t part_size = file_size / 8;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size * 3;
     return s_test_s3_get_object_backpressure_helper(
-        allocator, part_size, window_initial_size, window_increment_size, false);
+        allocator, part_size, window_initial_size, window_increment_size, false, false);
 }
 
 AWS_TEST_CASE(test_s3_get_object_backpressure_initial_size_zero, s_test_s3_get_object_backpressure_initial_size_zero)
 static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_allocator *allocator, void *ctx) {
     /* Test with initial window size of zero */
     (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;
     return s_test_s3_get_object_backpressure_helper(
-        allocator, part_size, window_initial_size, window_increment_size, false);
+        allocator, part_size, window_initial_size, window_increment_size, false, false);
 }
 
 AWS_TEST_CASE(
@@ -1932,12 +1944,12 @@ static int s_test_s3_get_object_backpressure_small_increments_recv_filepath(
     /* Test increments smaller than part-size.
      * Only 1 part at a time should be in flight */
     (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size / 2;
     return s_test_s3_get_object_backpressure_helper(
-        allocator, part_size, window_initial_size, window_increment_size, true);
+        allocator, part_size, window_initial_size, window_increment_size, true, false);
 }
 
 AWS_TEST_CASE(
@@ -1947,12 +1959,12 @@ static int s_test_s3_get_object_backpressure_big_increments_recv_filepath(struct
     /* Test increments larger than part-size.
      * Multiple parts should be in flight at a time */
     (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
     size_t part_size = file_size / 8;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size * 3;
     return s_test_s3_get_object_backpressure_helper(
-        allocator, part_size, window_initial_size, window_increment_size, true);
+        allocator, part_size, window_initial_size, window_increment_size, true, false);
 }
 
 AWS_TEST_CASE(
@@ -1963,12 +1975,56 @@ static int s_test_s3_get_object_backpressure_initial_size_zero_recv_filepath(
     void *ctx) {
     /* Test with initial window size of zero */
     (void)ctx;
-    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;
     return s_test_s3_get_object_backpressure_helper(
-        allocator, part_size, window_initial_size, window_increment_size, true);
+        allocator, part_size, window_initial_size, window_increment_size, true, false);
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_backpressure_small_increments_s3express,
+    s_test_s3_get_object_backpressure_small_increments_s3express)
+static int s_test_s3_get_object_backpressure_small_increments_s3express(struct aws_allocator *allocator, void *ctx) {
+    /* Test increments smaller than part-size with S3 Express.
+     * Only 1 part at a time should be in flight */
+    (void)ctx;
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t part_size = file_size / 4;
+    size_t window_initial_size = 1024;
+    uint64_t window_increment_size = part_size / 4;
+    return s_test_s3_get_object_backpressure_helper(
+        allocator, part_size, window_initial_size, window_increment_size, false, true);
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_backpressure_big_increments_s3express,
+    s_test_s3_get_object_backpressure_big_increments_s3express)
+static int s_test_s3_get_object_backpressure_big_increments_s3express(struct aws_allocator *allocator, void *ctx) {
+    /* Test increments larger than part-size with S3 Express.
+     * Multiple parts should be in flight at a time */
+    (void)ctx;
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t part_size = file_size / 8;
+    size_t window_initial_size = 1024;
+    uint64_t window_increment_size = part_size * 3;
+    return s_test_s3_get_object_backpressure_helper(
+        allocator, part_size, window_initial_size, window_increment_size, false, true);
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_backpressure_initial_size_s3express,
+    s_test_s3_get_object_backpressure_initial_size_s3express)
+static int s_test_s3_get_object_backpressure_initial_size_s3express(struct aws_allocator *allocator, void *ctx) {
+    /* Test with initial window size of zero with S3 Express */
+    (void)ctx;
+    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t part_size = file_size / 4;
+    size_t window_initial_size = 0;
+    uint64_t window_increment_size = part_size / 2;
+    return s_test_s3_get_object_backpressure_helper(
+        allocator, part_size, window_initial_size, window_increment_size, false, true);
 }
 
 AWS_TEST_CASE(test_s3_get_object_part, s_test_s3_get_object_part)
