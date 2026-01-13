@@ -601,8 +601,11 @@ struct aws_s3_client_config {
      * If true, each meta request has a flow-control window that shrinks as
      * response body data is downloaded (headers do not affect the window).
      * `initial_read_window` determines the starting size of each meta request's window.
-     * You will stop downloading data whenever the flow-control window reaches 0
-     * You must call aws_s3_meta_request_increment_read_window() to keep data flowing.
+     *
+     * - You will stop receiving response body data whenever the flow-control window reaches 0
+     * - If the window size remaining is smaller than the part download, client will buffer the part until
+     *   the window opens up to delivery the full part.
+     * - You must call aws_s3_meta_request_increment_read_window() to keep data flowing.
      *
      * WARNING: This feature is experimental.
      * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
@@ -1220,7 +1223,7 @@ struct aws_future_void *aws_s3_meta_request_write(
  * no backpressure is being applied and data is being downloaded as fast as possible.
  *
  * WARNING: This feature is experimental.
- * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
+ * Currently, backpressure is applied to GetObject requests,
  * - If you set body_callback, no more data will be delivered once the window reaches 0.
  * - If you set body_callback_ex, you may still receive some data after the window reaches 0. TODO: fix it.
  */

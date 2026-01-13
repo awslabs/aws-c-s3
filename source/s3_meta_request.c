@@ -1985,6 +1985,26 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
     return NULL;
 }
 
+static bool s_should_apply_backpressure(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    if (!meta_request->client->enable_read_backpressure) {
+        /* Backpressure is disabled. */
+        return false;
+    }
+    if (!meta_request->body_callback) {
+        /* No callback to deliver the body, don't apply backpressure */
+        return false;
+    }
+    /* Apply backpressure only for GetObject request */
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        return true;
+    }
+    if (aws_string_eq_c_str(request->operation_name, "GetObject")) {
+        return true;
+    }
+    return false;
+}
+
 /* Deliver events in event_delivery_array.
  * This task runs on the meta-request's io_event_loop thread. */
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -2059,9 +2079,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     break;
                 }
 
-                if (meta_request->body_callback && meta_request->client->enable_read_backpressure) {
-                    /* If customer set the body callback, make sure we are not delivery them more than asked via the
-                     * callback. */
+                if (s_should_apply_backpressure(request)) {
+                    /* Apply backpressure for the request, only deliver the bytes that allowed to deliver. */
                     aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
                     if (response_body.len > (size_t)bytes_allowed_to_deliver) {
                         response_body.len = (size_t)bytes_allowed_to_deliver;
