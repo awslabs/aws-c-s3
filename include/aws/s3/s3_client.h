@@ -1220,7 +1220,7 @@ struct aws_future_void *aws_s3_meta_request_write(
  * no backpressure is being applied and data is being downloaded as fast as possible.
  *
  * WARNING: This feature is experimental.
- * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
+ * Currently, backpressure is applied to GetObject requests,
  * - If you set body_callback, no more data will be delivered once the window reaches 0.
  * - If you set body_callback_ex, you may still receive some data after the window reaches 0. TODO: fix it.
  */
