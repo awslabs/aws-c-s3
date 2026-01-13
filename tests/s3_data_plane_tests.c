@@ -1830,7 +1830,7 @@ static int s_test_s3_get_object_backpressure_helper(
     }
     /* Put together a simple S3 Get Object request. */
     struct aws_http_message *message =
-        aws_s3_test_get_object_request_new(allocator, host_cursor, g_pre_existing_object_10MB);
+        aws_s3_test_get_object_request_new(allocator, host_cursor, g_pre_existing_object_1MB);
 
     struct aws_signing_config_aws s3express_signing_config = {
         .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
@@ -1845,7 +1845,7 @@ static int s_test_s3_get_object_backpressure_helper(
     }
     struct aws_string *filepath_str = NULL;
     if (file_on_disk) {
-        filepath_str = aws_s3_tester_create_file(allocator, g_pre_existing_object_10MB, NULL);
+        filepath_str = aws_s3_tester_create_file(allocator, g_pre_existing_object_1MB, NULL);
         options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
     }
 
@@ -1902,7 +1902,7 @@ static int s_test_s3_get_object_backpressure_small_increments(struct aws_allocat
     /* Test increments smaller than part-size.
      * Only 1 part at a time should be in flight */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size / 4;
@@ -1915,7 +1915,7 @@ static int s_test_s3_get_object_backpressure_big_increments(struct aws_allocator
     /* Test increments larger than part-size.
      * Multiple parts should be in flight at a time */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 8;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size * 3;
@@ -1927,7 +1927,7 @@ AWS_TEST_CASE(test_s3_get_object_backpressure_initial_size_zero, s_test_s3_get_o
 static int s_test_s3_get_object_backpressure_initial_size_zero(struct aws_allocator *allocator, void *ctx) {
     /* Test with initial window size of zero */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;
@@ -1944,7 +1944,7 @@ static int s_test_s3_get_object_backpressure_small_increments_recv_filepath(
     /* Test increments smaller than part-size.
      * Only 1 part at a time should be in flight */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size / 2;
@@ -1959,7 +1959,7 @@ static int s_test_s3_get_object_backpressure_big_increments_recv_filepath(struct
     /* Test increments larger than part-size.
      * Multiple parts should be in flight at a time */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 8;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size * 3;
@@ -1975,7 +1975,7 @@ static int s_test_s3_get_object_backpressure_initial_size_zero_recv_filepath(
     void *ctx) {
     /* Test with initial window size of zero */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;
@@ -1990,7 +1990,7 @@ static int s_test_s3_get_object_backpressure_small_increments_s3express(struct a
     /* Test increments smaller than part-size with S3 Express.
      * Only 1 part at a time should be in flight */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size / 4;
@@ -2005,7 +2005,7 @@ static int s_test_s3_get_object_backpressure_big_increments_s3express(struct aws
     /* Test increments larger than part-size with S3 Express.
      * Multiple parts should be in flight at a time */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 8;
     size_t window_initial_size = 1024;
     uint64_t window_increment_size = part_size * 3;
@@ -2019,7 +2019,7 @@ AWS_TEST_CASE(
 static int s_test_s3_get_object_backpressure_initial_size_s3express(struct aws_allocator *allocator, void *ctx) {
     /* Test with initial window size of zero with S3 Express */
     (void)ctx;
-    size_t file_size = 10 * 1024 * 1024; /* Test downloads 10MB file */
+    size_t file_size = 1 * 1024 * 1024; /* Test downloads 1MB file */
     size_t part_size = file_size / 4;
     size_t window_initial_size = 0;
     uint64_t window_increment_size = part_size / 2;

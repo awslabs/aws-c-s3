@@ -189,6 +189,8 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client, regio
 
     put_pre_existing_objects(
         10*MB, 'pre-existing-10MB', bucket=bucket_name, client=client)
+    put_pre_existing_objects(
+        1*MB, 'pre-existing-1MB', bucket=bucket_name, client=client)
 
     if args.large_objects:
         put_pre_existing_objects(
@@ -201,8 +203,6 @@ def create_bucket_with_lifecycle(availability_zone=None, client=s3_client, regio
             10*MB, 'pre-existing-10MB-aes256', sse='aes256', bucket=bucket_name)
         put_pre_existing_objects(
             10*MB, 'pre-existing-10MB-kms', sse='kms', bucket=bucket_name)
-        put_pre_existing_objects(
-            1*MB, 'pre-existing-1MB', bucket=bucket_name)
         put_pre_existing_objects(
             1*MB, 'pre-existing-1MB-@', bucket=bucket_name)
         put_pre_existing_objects(
