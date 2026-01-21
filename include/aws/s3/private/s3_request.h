@@ -255,6 +255,10 @@ struct aws_s3_request {
     /* The upload_timeout used. Zero, if the request is not a upload part */
     size_t upload_timeout_ms;
 
+    /* The number of tokens used to send the request. Initialized to zero until connection needs to be created. In case
+     * of failure, we also set it back to zero until the retry requires a connection again. */
+    uint32_t tokens_used;
+
     /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual
      * prepare function, this will be 0.*/
     uint32_t num_times_prepared;

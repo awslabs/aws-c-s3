@@ -895,6 +895,9 @@ struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester
     aws_atomic_init_int(&mock_client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&mock_client->stats.num_requests_streaming_response, 0);
 
+    // create tokens for mock use
+    aws_atomic_init_int(&mock_client->token_bucket, 1000000);
+
     return mock_client;
 }
 

@@ -275,6 +275,10 @@ struct aws_s3_client {
     /* The calculated ideal number of HTTP connections, based on throughput target and throughput per connection. */
     const uint32_t ideal_connection_count;
 
+    /* Tokens added when meta requests are created and subtracted when requests use the tokens to allocate connections
+     */
+    struct aws_atomic_var token_bucket;
+
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
@@ -284,8 +288,6 @@ struct aws_s3_client {
 
     /* Hard limit on max connections set through the client config. */
     const uint32_t max_active_connections_override;
-
-    struct aws_atomic_var max_allowed_connections;
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
@@ -362,6 +364,9 @@ struct aws_s3_client {
 
         /* Number of requests being sent/received over network. */
         struct aws_atomic_var num_requests_network_io[AWS_S3_META_REQUEST_TYPE_MAX];
+
+        /* Total number of requests on the network over all the meta requests. */
+        struct aws_atomic_var num_requests_network_total;
 
         /* Number of requests sitting in their meta request priority queue, waiting to be streamed. */
         struct aws_atomic_var num_requests_stream_queued_waiting;
