@@ -6,6 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include <aws/common/hash_table.h>
+#include <aws/common/mutex.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_buffer_pool.h>
 
@@ -59,9 +61,77 @@ struct aws_s3_default_buffer_pool_usage_stats {
     /* Secondary memory reserved, but not yet used. Accurate, maps directly to base allocator. */
     size_t secondary_reserved;
 
+    /* Overall memory allocated for special-sized blocks. */
+    size_t special_blocks_allocated;
+    /* Number of special block sizes created. */
+    size_t special_blocks_num;
+    /* Memory reserved in special-sized blocks. */
+    size_t special_blocks_reserved;
+    /* Memory used in special-sized blocks. */
+    size_t special_blocks_used;
+
     /* Bytes used in "forced" buffers (created even if they exceed memory limits).
      * This is always <= primary_used + secondary_used */
     size_t forced_used;
+};
+
+/* Structure to track special-sized blocks */
+struct s3_special_block_list {
+    struct aws_allocator *allocator;
+    size_t buffer_size;           /* Size of buffers in this list */
+    struct aws_array_list blocks; /* Array of uint8_t* pointers to allocated blocks */
+};
+
+struct aws_s3_default_buffer_pool {
+    struct aws_allocator *base_allocator;
+    struct aws_mutex mutex;
+
+    size_t block_size;
+    size_t chunk_size;
+    /* size at which allocations should go to secondary */
+    size_t primary_size_cutoff;
+
+    /* NOTE: See aws_s3_buffer_pool_usage_stats for descriptions of most fields */
+
+    size_t mem_limit;
+
+    size_t primary_allocated;
+    size_t primary_reserved;
+    size_t primary_used;
+
+    size_t special_blocks_allocated;
+    size_t special_blocks_reserved;
+    size_t special_blocks_used;
+
+    size_t secondary_reserved;
+    size_t secondary_used;
+
+    size_t forced_used;
+
+    struct aws_array_list blocks;
+
+    struct aws_linked_list pending_reserves;
+
+    /* Special-sized blocks: hash table mapping size -> struct s3_special_block_list * */
+    /* TODO: let's discuss about the special list lifetime. Should we just keep it with the memory pool? Concern is that
+     * the pool will live with the client, and may result in all sorts of special lists to be around. */
+    struct aws_hash_table special_blocks;
+
+    /* TEST ONLY: to force the special blocks alive during trim. */
+    bool force_keeping_special_blocks;
+};
+
+struct s3_pending_reserve {
+    struct aws_linked_list_node node;
+    struct aws_future_s3_buffer_ticket *ticket_future;
+    struct aws_s3_default_buffer_ticket *ticket;
+    struct aws_s3_buffer_pool_reserve_meta meta;
+};
+
+struct s3_buffer_pool_block {
+    size_t block_size;
+    uint8_t *block_ptr;
+    uint16_t alloc_bit_mask;
 };
 
 /*

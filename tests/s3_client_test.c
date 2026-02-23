@@ -465,3 +465,78 @@ TEST_CASE(client_meta_request_override_multipart_upload_threshold) {
 
     return AWS_OP_SUCCESS;
 }
+
+/* Test that optimal range size is calculated and stored correctly in client config */
+TEST_CASE(s3_calculate_client_optimal_range_size) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Test with default configuration */
+    {
+        struct aws_s3_client_config client_config = {
+            .part_size = MB_TO_BYTES(8),
+            .throughput_target_gbps = 10.0,
+            .memory_limit_in_bytes = GB_TO_BYTES(2),
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_bind_client(
+            &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+        struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+        ASSERT_TRUE(client != NULL);
+
+        /* Verify optimal range size is calculated and within expected bounds */
+        ASSERT_TRUE(client->optimal_range_size >= MB_TO_BYTES(8)); /* At least 8MiB minimum */
+        ASSERT_TRUE(client->optimal_range_size <= GB_TO_BYTES(1)); /* At most 1GB maximum */
+
+        /* Verify it's properly initialized (not zero) */
+        ASSERT_TRUE(client->optimal_range_size > 0);
+
+        aws_s3_client_release(client);
+    }
+
+    /* Test with high memory limit */
+    {
+        struct aws_s3_client_config client_config = {
+            .part_size = MB_TO_BYTES(8),
+            .throughput_target_gbps = 10.0,
+            .memory_limit_in_bytes = GB_TO_BYTES(16),
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_bind_client(
+            &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+        struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+        ASSERT_TRUE(client != NULL);
+
+        /* With higher memory limit, optimal range size should be larger but capped at 1GB */
+        ASSERT_TRUE(client->optimal_range_size >= MB_TO_BYTES(8));
+        ASSERT_TRUE(client->optimal_range_size <= GB_TO_BYTES(1)); /* Capped at 1GB */
+
+        aws_s3_client_release(client);
+    }
+
+    /* Test with low memory limit */
+    {
+        struct aws_s3_client_config client_config = {
+            .part_size = MB_TO_BYTES(8),
+            .throughput_target_gbps = 100.0,           /* High throughput = more connections */
+            .memory_limit_in_bytes = MB_TO_BYTES(512), /* Low memory */
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_bind_client(
+            &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+        struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+        ASSERT_TRUE(client != NULL);
+
+        /* With low memory and high connection count, should still respect 8MiB minimum */
+        ASSERT_TRUE(client->optimal_range_size >= MB_TO_BYTES(8));
+
+        aws_s3_client_release(client);
+    }
+
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}

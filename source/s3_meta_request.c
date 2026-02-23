@@ -29,6 +29,9 @@
 #include <errno.h>
 #include <inttypes.h>
 
+#define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
+#define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
+
 static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
@@ -154,6 +157,7 @@ int aws_s3_meta_request_init_base(
     struct aws_s3_client *client,
     size_t part_size,
     bool should_compute_content_md5,
+    bool should_default_streaming,
     const struct aws_s3_meta_request_options *options,
     void *impl,
     struct aws_s3_meta_request_vtable *vtable,
@@ -177,12 +181,40 @@ int aws_s3_meta_request_init_base(
 
     meta_request->allocator = allocator;
     meta_request->type = options->type;
+
+    /* Deep copy the file io options. */
+    if (options->fio_opts) {
+        meta_request->fio_opts = *options->fio_opts;
+    } else if (client != NULL && client->fio_options_set) {
+        meta_request->fio_opts = client->fio_opts;
+    } else {
+        /* Take a default options. */
+        meta_request->fio_opts.should_stream = should_default_streaming;
+    }
+
+    if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps == 0) {
+        /* If disk throughput is not set, set it to the default. */
+        meta_request->fio_opts.disk_throughput_gbps = client->throughput_target_gbps;
+    }
+
     /* Set up reference count. */
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
+    aws_atomic_init_int(&meta_request->num_requests_network, 0);
+    aws_atomic_init_int(&meta_request->num_request_being_prepared, 0);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
 
     if (part_size == SIZE_MAX) {
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        goto error;
+    }
+
+    if (meta_request->fio_opts.should_stream && options->checksum_config &&
+        options->checksum_config->location == AWS_SCL_HEADER) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Invalid meta request configuration - Cannot use checksum via header with streaming upload.",
+            (void *)meta_request);
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         goto error;
     }
@@ -227,6 +259,7 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_meta_request_event));
 
     *((size_t *)&meta_request->part_size) = part_size;
+    *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
     if (aws_s3_meta_request_checksum_config_storage_init(
             meta_request->allocator,
@@ -306,10 +339,24 @@ int aws_s3_meta_request_init_base(
      * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
         /* Create parallel read stream from file */
-        meta_request->request_body_parallel_stream =
-            client->vtable->parallel_input_stream_new_from_file(allocator, options->send_filepath);
+        meta_request->request_body_parallel_stream = client->vtable->parallel_input_stream_new_from_file(
+            allocator, options->send_filepath, client->body_streaming_elg, meta_request->fio_opts.direct_io);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
+        }
+        if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.should_stream) {
+            size_t page_size = aws_system_info_page_size();
+            if (part_size % page_size != 0) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Invalid meta request configuration - direct_io without streaming upload requires part size "
+                    "to be aligned with page size. part size is:%zu, while page size is:%zu",
+                    (void *)meta_request,
+                    part_size,
+                    page_size);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                goto error;
+            }
         }
 
     } else if (options->send_async_stream != NULL) {
@@ -365,6 +412,8 @@ void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_
     /* Response will never approach UINT64_MAX, so do a saturating sum instead of worrying about overflow */
     meta_request->synced_data.read_window_running_total =
         aws_add_u64_saturating(bytes, meta_request->synced_data.read_window_running_total);
+    /* Try to schedule the delivery task again. */
+    aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
 
     aws_s3_meta_request_unlock_synced_data(meta_request);
     /* END CRITICAL SECTION */
@@ -525,6 +574,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
+        if (meta_request->buffer_pool_optimized) {
+            aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
+        }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
@@ -1136,7 +1188,10 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
-    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART) {
+    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART && !meta_request->is_express) {
+        /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause server
+         * receive two same part and result in confusing during complete MPU with etag doesn't match.
+         * Disable the first byte timeout for s3 express.  */
         options.response_first_byte_timeout_ms = aws_atomic_load_int(&meta_request->client->upload_timeout_ms);
         request->upload_timeout_ms = (size_t)options.response_first_byte_timeout_ms;
     }
@@ -1240,7 +1295,8 @@ static bool s_header_value_from_list(
     return false;
 }
 
-static void s_get_part_response_headers_checksum_helper(
+/* Return if we found the checksum from headers or not. */
+static bool s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
@@ -1264,9 +1320,10 @@ static void s_get_part_response_headers_checksum_helper(
                     aws_checksum_new(meta_request->allocator, algorithm);
                 AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 static int s_s3_meta_request_incoming_headers(
@@ -1311,7 +1368,7 @@ static int s_s3_meta_request_incoming_headers(
 
     if (successful_response && meta_request->checksum_config.validate_response_checksum &&
         request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
-        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` :) */
+        /* We have `struct aws_http_header *` array instead of `struct aws_http_headers *` */
         s_get_part_response_headers_checksum_helper(connection, meta_request, headers, headers_count);
     }
 
@@ -1336,7 +1393,57 @@ static int s_s3_meta_request_incoming_headers(
         }
         if (request->send_data.amz_id_2 == NULL && aws_byte_cursor_eq(name, &g_amz_id_2_header_name)) {
             request->send_data.amz_id_2 = aws_string_new_from_cursor(connection->request->allocator, value);
+            if (collect_metrics) {
+                request->send_data.metrics->req_resp_info_metrics.extended_request_id =
+                    aws_string_new_from_cursor(connection->request->allocator, value);
+            }
         }
+        if (aws_byte_cursor_eq(name, &g_content_range_header_name) && successful_response &&
+            request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT) {
+            uint64_t object_range_start = 0;
+            uint64_t object_range_end = 0;
+            uint64_t object_size = 0;
+            if (aws_s3_parse_content_range_cursor(*value, &object_range_start, &object_range_end, &object_size)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Could not parse content range header (%s)",
+                    (void *)meta_request,
+                    aws_error_str(aws_last_error()));
+                return AWS_OP_ERR;
+            } else {
+                /* Make we get what we ask for. */
+                if (request->part_range_end != 0) {
+                    if (request->part_range_start != object_range_start) {
+                        /* Log the error */
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Part range start mismatch. Expected: %" PRIu64 ", Actual: %" PRIu64 "",
+                            (void *)meta_request,
+                            request->part_range_start,
+                            object_range_start);
+                        return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+                    }
+                    if (request->part_range_end != object_range_end) {
+                        /* In the case where the object size is less than the range requested. It must be return the
+                         * last part to the end of the object. */
+                        if (object_size != object_range_end + 1 || request->part_range_end < object_range_end) {
+                            /* Something went wrong if it's matching. Log the error. */
+                            AWS_LOGF_ERROR(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p: Part range end mismatch. Expected: %" PRIu64 ", Actual: %" PRIu64
+                                ", while object size is: "
+                                "%" PRIu64 ".",
+                                (void *)meta_request,
+                                request->part_range_end,
+                                object_range_end,
+                                object_size);
+                            return aws_raise_error(AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
+                        }
+                    }
+                }
+            }
+        }
+
         if (collect_metrics) {
             aws_http_headers_add(request->send_data.metrics->req_resp_info_metrics.response_headers, *name, *value);
         }
@@ -1474,13 +1581,19 @@ static void s_s3_meta_request_stream_metrics(
     s3_metrics->time_metrics.send_end_timestamp_ns = http_metrics->send_end_timestamp_ns;
     s3_metrics->time_metrics.sending_duration_ns = http_metrics->sending_duration_ns;
     s3_metrics->time_metrics.receive_start_timestamp_ns = http_metrics->receive_start_timestamp_ns;
+
+    if (s3_metrics->time_metrics.receive_start_timestamp_ns != -1) {
+        s3_metrics->time_metrics.service_call_duration_ns = s3_metrics->time_metrics.receive_start_timestamp_ns -
+                                                            s3_metrics->time_metrics.conn_acquire_start_timestamp_ns;
+    }
+
     s3_metrics->time_metrics.receive_end_timestamp_ns = http_metrics->receive_end_timestamp_ns;
     s3_metrics->time_metrics.receiving_duration_ns = http_metrics->receiving_duration_ns;
 
     s3_metrics->crt_info_metrics.stream_id = http_metrics->stream_id;
 
     /* Also related metrics from the request/response. */
-    s3_metrics->crt_info_metrics.connection_id = (void *)connection->http_connection;
+    s3_metrics->crt_info_metrics.connection_ptr = (void *)connection->http_connection;
     const struct aws_socket_endpoint *endpoint = aws_http_connection_get_remote_endpoint(connection->http_connection);
     request->send_data.metrics->crt_info_metrics.ip_address =
         aws_string_new_from_c_str(request->allocator, endpoint->address);
@@ -1795,12 +1908,13 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
     const struct aws_s3_meta_request_event *event) {
 
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+    if (event) {
+        aws_array_list_push_back(&meta_request->synced_data.event_delivery_array, event);
+    }
 
-    aws_array_list_push_back(&meta_request->synced_data.event_delivery_array, event);
-
-    /* If the array was empty before, schedule task to deliver all events in the array.
-     * If the array already had things in it, then the task is already scheduled and will run soon. */
-    if (aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 1) {
+    /* If the event delivery task is not scheduled before, and there are more to be delivered. */
+    if (!meta_request->synced_data.event_delivery_task_scheduled &&
+        aws_array_list_length(&meta_request->synced_data.event_delivery_array) > 0) {
         aws_s3_meta_request_acquire(meta_request);
 
         aws_task_init(
@@ -1809,6 +1923,7 @@ void aws_s3_meta_request_add_event_for_delivery_synced(
             meta_request,
             "s3_meta_request_event_delivery");
         aws_event_loop_schedule_task_now(meta_request->io_event_loop, &meta_request->synced_data.event_delivery_task);
+        meta_request->synced_data.event_delivery_task_scheduled = true;
     }
 }
 
@@ -1858,6 +1973,7 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
             aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
             metrics->time_metrics.total_duration_ns =
                 metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
         }
 
         if (meta_request->telemetry_callback != NULL) {
@@ -1867,6 +1983,26 @@ static struct aws_s3_request_metrics *s_s3_request_finish_up_and_release_metrics
         aws_s3_request_metrics_release(metrics);
     }
     return NULL;
+}
+
+static bool s_should_apply_backpressure(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    if (!meta_request->client->enable_read_backpressure) {
+        /* Backpressure is disabled. */
+        return false;
+    }
+    if (!meta_request->body_callback) {
+        /* No callback to deliver the body, don't apply backpressure */
+        return false;
+    }
+    /* Apply backpressure only for GetObject request */
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        return true;
+    }
+    if (aws_string_eq_c_str(request->operation_name, "GetObject")) {
+        return true;
+    }
+    return false;
 }
 
 /* Deliver events in event_delivery_array.
@@ -1888,9 +2024,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     struct aws_array_list *event_delivery_array = &meta_request->io_threaded_data.event_delivery_array;
     AWS_FATAL_ASSERT(aws_array_list_length(event_delivery_array) == 0);
 
+    struct aws_array_list incomplete_deliver_events_array;
+    aws_array_list_init_dynamic(
+        &incomplete_deliver_events_array, meta_request->allocator, 1, sizeof(struct aws_s3_meta_request_event));
+
     /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
+    uint64_t bytes_allowed_to_deliver = 0;
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -1898,14 +2039,21 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
         aws_array_list_swap_contents(event_delivery_array, &meta_request->synced_data.event_delivery_array);
         meta_request->synced_data.event_delivery_active = true;
+        meta_request->synced_data.event_delivery_task_scheduled = false;
 
         if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             error_code = AWS_ERROR_S3_CANCELED;
         }
 
+        bytes_allowed_to_deliver = meta_request->synced_data.read_window_running_total -
+                                   meta_request->io_threaded_data.num_bytes_delivery_completed;
+
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+    if (bytes_allowed_to_deliver > SIZE_MAX) {
+        bytes_allowed_to_deliver = SIZE_MAX;
+    }
 
     /* Deliver all events */
     for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
@@ -1915,10 +2063,54 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
             case AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY: {
                 struct aws_s3_request *request = event.u.response_body.completed_request;
+                size_t bytes_delivered_for_request = event.u.response_body.bytes_delivered;
                 AWS_ASSERT(meta_request == request->meta_request);
+                bool delivery_incomplete = false;
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                if (response_body.len == 0) {
+                    /* Nothing to delivery, finish this delivery event and break out. */
+                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
+
+                    ++num_parts_delivered;
+                    request->send_data.metrics =
+                        s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+
+                    aws_s3_request_release(request);
+                    break;
+                }
+
+                if (s_should_apply_backpressure(request)) {
+                    /* Apply backpressure for the request, only deliver the bytes that allowed to deliver. */
+                    aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
+                    if (response_body.len > (size_t)bytes_allowed_to_deliver) {
+                        response_body.len = (size_t)bytes_allowed_to_deliver;
+                        delivery_incomplete = true;
+                    }
+                    /* Update the remaining bytes we allow to delivery. */
+                    bytes_allowed_to_deliver -= response_body.len;
+                } else {
+                    /* We should not have any incomplete delivery in this case. */
+                    AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
+                }
+                uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
 
                 AWS_ASSERT(request->part_number >= 1);
+                if (request->part_number == 1) {
+                    meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
+                }
+                /* Make sure the response body is delivered in the sequential order */
+                if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
+                    /* Unexpected error, log the error */
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: Unexpected code error. Please report the error to the team, "
+                        "delivery_range_start:%" PRIu64 ", next_deliver_range_start:%" PRIu64 ".",
+                        (void *)meta_request,
+                        delivery_range_start,
+                        meta_request->io_threaded_data.next_deliver_range_start);
+                    error_code = AWS_ERROR_INVALID_STATE;
+                }
+                meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
                     if (meta_request->meta_request_level_running_response_sum) {
@@ -1961,7 +2153,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                 meta_request,
                                 &response_body,
                                 (struct aws_s3_meta_request_receive_body_extra_info){
-                                    .range_start = request->part_range_start, .ticket = request->ticket},
+                                    .range_start = delivery_range_start, .ticket = request->ticket},
                                 meta_request->user_data)) {
                             error_code = aws_last_error_or_unknown();
                             AWS_LOGF_ERROR(
@@ -1973,7 +2165,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         } else if (
                             meta_request->body_callback != NULL &&
                             meta_request->body_callback(
-                                meta_request, &response_body, request->part_range_start, meta_request->user_data)) {
+                                meta_request, &response_body, delivery_range_start, meta_request->user_data)) {
 
                             error_code = aws_last_error_or_unknown();
                             AWS_LOGF_ERROR(
@@ -1993,13 +2185,25 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
                     }
                 }
-                aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
+                event.u.response_body.bytes_delivered += response_body.len;
+                meta_request->io_threaded_data.num_bytes_delivery_completed += response_body.len;
 
-                ++num_parts_delivered;
-                request->send_data.metrics =
-                    s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+                if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
+                    /* We completed the delivery for this request. */
+                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
-                aws_s3_request_release(request);
+                    ++num_parts_delivered;
+                    request->send_data.metrics =
+                        s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
+
+                    aws_s3_request_release(request);
+                } else {
+                    /* We didn't complete the delivery for this request and no error happened */
+                    /* Push to the front of the queue and wait for the next tick to deliver the rest of the bytes. */
+                    /* Note: we push to the front of the array since when we move those incomplete events back to the
+                     * synced_queue, we need to make sure it still has the same order. */
+                    aws_array_list_push_front(&incomplete_deliver_events_array, &event);
+                }
             } break;
 
             case AWS_S3_META_REQUEST_EVENT_PROGRESS: {
@@ -2055,12 +2259,32 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         if (error_code != AWS_ERROR_SUCCESS) {
             aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
         }
+        if (aws_array_list_length(&incomplete_deliver_events_array) > 0) {
+            /* Only if we don't have any window to deliver the bytes, we will have incomplete parts. */
+            AWS_FATAL_ASSERT(bytes_allowed_to_deliver == 0);
+            /* Push the incomplete events back to the queue */
+            for (size_t i = 0; i < aws_array_list_length(&incomplete_deliver_events_array); ++i) {
+                struct aws_s3_meta_request_event event;
+                aws_array_list_get_at(&incomplete_deliver_events_array, &event, i);
+                /* Push the incomplete one to the front of the queue. */
+                aws_array_list_push_front(&meta_request->synced_data.event_delivery_array, &event);
+            }
+            /* As we push to the event delivery array, we check if we need to schedule another delivery by if there
+             * is space to make the delivery or not. */
+            bytes_allowed_to_deliver = meta_request->synced_data.read_window_running_total -
+                                       meta_request->io_threaded_data.num_bytes_delivery_completed;
+            if (bytes_allowed_to_deliver > 0 && error_code == AWS_ERROR_SUCCESS) {
+                /* We have more space now, let's try another delivery now. */
+                aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
+            }
+        }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
         meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+    aws_array_list_clean_up(&incomplete_deliver_events_array);
 
     aws_s3_client_schedule_process_work(client);
     aws_s3_meta_request_release(meta_request);
@@ -2219,8 +2443,14 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
      * hold. So that, the downstream high level language doesn't need to wait for shutdown to clean related resource
      * (eg: input stream) */
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
-    meta_request->request_body_parallel_stream =
+
+    if (meta_request->request_body_parallel_stream) {
+        struct aws_future_void *shutdown_future =
+            aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
         aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+        aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
+        aws_future_void_release(shutdown_future);
+    }
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */
@@ -2254,7 +2484,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If parallel-stream, simply call read(), which must fill the buffer and/or EOF */
     if (meta_request->request_body_parallel_stream != NULL) {
-        return aws_parallel_input_stream_read(meta_request->request_body_parallel_stream, offset, buffer);
+        return aws_parallel_input_stream_read(
+            meta_request->request_body_parallel_stream, offset, buffer->capacity, buffer);
     }
 
     /* Further techniques are synchronous... */

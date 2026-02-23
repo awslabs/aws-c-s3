@@ -7,6 +7,7 @@
 #include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_list_parts.h"
+#include "aws/s3/private/s3_part_streaming_input_stream.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/clock.h>
@@ -379,6 +380,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
             part_size,
             client->compute_content_md5 == AWS_MR_CONTENT_MD5_ENABLED ||
                 aws_http_headers_has(aws_http_message_get_headers(options->message), g_content_md5_header_name),
+            content_length > g_streaming_object_size_threshold,
             options,
             auto_ranged_put,
             &s_s3_auto_ranged_put_vtable,
@@ -490,8 +492,11 @@ static void s_s3_auto_ranged_put_send_request_finish(
     struct aws_http_stream *stream,
     int error_code) {
     struct aws_s3_request *request = connection->request;
-    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART) {
+    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART && !request->meta_request->is_express) {
         /* TODO: the single part upload may also be improved from a timeout as multipart. */
+        /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause server
+         * receive two same part and result in confusing during complete MPU with etag doesn't match.
+         * Disable the first byte timeout for s3 express.  */
         aws_s3_client_update_upload_part_timeout(request->meta_request->client, request, error_code);
     }
     aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
@@ -512,6 +517,14 @@ static bool s_s3_auto_ranged_put_update(
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+        if (meta_request->vtable->synced_update_stub && meta_request->vtable->synced_update_stub(meta_request)) {
+            /* TEST ONLY, allow test to stub here. */
+            aws_s3_meta_request_unlock_synced_data(meta_request);
+            return true;
+        }
+#endif
 
         if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
             /* If resuming and list part has not been sent, do it now. */
@@ -780,6 +793,36 @@ static bool s_s3_auto_ranged_put_update(
     return work_remaining;
 }
 
+/**
+ * Helper to initialize the request ranges and content-length
+ * based on the request->part_number and meta_request->part_size
+ */
+static int s_compute_request_body_size(const struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(request);
+
+    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    size_t request_body_size = meta_request->part_size;
+    /* Last part--adjust size to match remaining content length. */
+    if (auto_ranged_put->has_content_length &&
+        request->part_number == auto_ranged_put->total_num_parts_from_content_length) {
+        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+
+        if (content_remainder > 0) {
+            request_body_size = content_remainder;
+        }
+    }
+    if (aws_mul_u64_checked(request->part_number - 1, meta_request->part_size, &request->part_range_start)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_add_u64_checked(request->part_range_start, request_body_size - 1, &request->part_range_end)) {
+        return AWS_OP_ERR;
+    }
+    request->content_length = request_body_size;
+    return AWS_OP_SUCCESS;
+}
+
 static int s_verify_part_matches_checksum(
     struct aws_allocator *allocator,
     struct aws_byte_cursor body_cur,
@@ -854,6 +897,9 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
      * reading. */
     bool parallel_prepare =
         (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
+    if (parallel_prepare && meta_request->fio_opts.should_stream) {
+        request->fio_streaming = true;
+    }
 
     aws_s3_meta_request_schedule_prepare_request_default_impl(
         meta_request, request, parallel_prepare /*parallel*/, callback, user_data);
@@ -975,92 +1021,21 @@ struct aws_future_http_message *s_s3_prepare_create_multipart_upload(struct aws_
     return future;
 }
 
-/* Prepare an UploadPart request */
-struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *request) {
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    struct aws_allocator *allocator = request->allocator;
-
-    struct aws_future_http_message *message_future = aws_future_http_message_new(allocator);
-
-    struct aws_s3_prepare_upload_part_job *part_prep =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_upload_part_job));
-    part_prep->allocator = allocator;
-    part_prep->request = request;
-    part_prep->on_complete = aws_future_http_message_acquire(message_future);
-
-    if (request->num_times_prepared == 0) {
-        /* Preparing request for the first time.
-         * Next async step: read through the body stream until we've
-         * skipped over parts that were already uploaded (in case we're resuming
-         * from an upload that had been paused) */
-
-        /* Read the body */
-        uint64_t offset = 0;
-        size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-        if (request->request_body.capacity == 0) {
-            AWS_FATAL_ASSERT(request->ticket);
-            request->request_body = aws_s3_buffer_ticket_claim(request->ticket);
-            request->request_body.capacity = request_body_size;
-        }
-
-        part_prep->asyncstep_read_part = aws_s3_meta_request_read_body(meta_request, offset, &request->request_body);
-        aws_future_bool_register_callback(
-            part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
-    } else {
-        /* Not the first time preparing request (e.g. retry).
-         * We can skip over the async steps that read the body stream */
-        s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
-    }
-
-    return message_future;
-}
-
-/* Completion callback for reading this part's chunk of the body stream */
-static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
-    struct aws_s3_prepare_upload_part_job *part_prep = user_data;
-    struct aws_s3_request *request = part_prep->request;
-    struct aws_s3_meta_request *meta_request = request->meta_request;
+/* When preparing the request for the first time, after the request finished reading the body or setting up the body
+ * stream, create the new part info and push to the list. */
+static int s_s3_new_upload_part_info_after_body(
+    struct aws_s3_request *request,
+    struct aws_s3_meta_request *meta_request,
+    bool is_body_stream_at_end) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-    bool has_content_length = auto_ranged_put->has_content_length != 0;
 
-    int error_code = aws_future_bool_get_error(part_prep->asyncstep_read_part);
-
-    /* If reading failed, the prepare-upload-part job has failed */
-    if (error_code != AWS_ERROR_SUCCESS) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Failed reading request body, error %d (%s) req len %zu req cap %zu",
-            (void *)meta_request,
-            error_code,
-            aws_error_str(error_code),
-            request->request_body.len,
-            request->request_body.capacity);
-        goto on_done;
-    }
-    /* Reading succeeded. */
-    bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
-
-    uint64_t offset = 0;
-    size_t request_body_size = s_compute_request_body_size(meta_request, request->part_number, &offset);
-    /* If Content-Length is defined, check that we read the expected amount */
-    if (has_content_length && (request->request_body.len < request_body_size)) {
-        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Request body is smaller than 'Content-Length' header said it would be",
-            (void *)meta_request);
-        goto on_done;
-    }
-    request->is_noop = request->part_number >
-                           1 && /* allow first part to have 0 length to support empty unknown content length objects. */
-                       request->request_body.len == 0;
-
+    int error_code = AWS_ERROR_SUCCESS;
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
+    auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
     --auto_ranged_put->synced_data.num_parts_pending_read;
 
-    auto_ranged_put->synced_data.is_body_stream_at_end = is_body_stream_at_end;
     struct aws_s3_mpu_part_info *previously_uploaded_info = NULL;
     if (request->was_previously_uploaded) {
         aws_array_list_get_at(
@@ -1069,6 +1044,7 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
         /* Already uploaded, set the noop to be true. */
         request->is_noop = true;
     }
+
     if (!request->is_noop) {
         /* The part can finish out of order. Resize array-list to be long enough to hold this part,
          * filling any intermediate slots with NULL. */
@@ -1127,6 +1103,121 @@ static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
      * Poking now gives measurable speedup (1%) for async streaming,
      * vs waiting until all the part-prep steps are complete (still need to sign, etc) */
     aws_s3_client_schedule_process_work(meta_request->client);
+on_done:
+    if (error_code) {
+        return aws_raise_error(error_code);
+    }
+    return AWS_OP_SUCCESS;
+}
+
+/* Prepare an UploadPart request */
+struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_allocator *allocator = request->allocator;
+
+    struct aws_future_http_message *message_future = aws_future_http_message_new(allocator);
+
+    struct aws_s3_prepare_upload_part_job *part_prep =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_prepare_upload_part_job));
+    part_prep->allocator = allocator;
+    part_prep->request = request;
+    part_prep->on_complete = aws_future_http_message_acquire(message_future);
+    if (s_compute_request_body_size(meta_request, request)) {
+        s_s3_prepare_upload_part_finish(part_prep, aws_last_error_or_unknown());
+        return message_future;
+    }
+
+    if (request->fio_streaming) {
+        /* Create the request body stream for the HTTP to read directly from the file. If retry happens, just recreate
+         * it. */
+        aws_input_stream_release(request->request_body_stream);
+        AWS_ASSERT(meta_request->request_body_parallel_stream != NULL);
+        int error_code = AWS_ERROR_SUCCESS;
+        request->request_body_stream = aws_part_streaming_input_stream_new(
+            allocator,
+            meta_request->request_body_parallel_stream,
+            request->ticket,
+            request->part_range_start,
+            (size_t)request->content_length,
+            meta_request->fio_opts.direct_io);
+
+        if (request->num_times_prepared == 0) {
+            if (s_s3_new_upload_part_info_after_body(request, meta_request, false)) {
+                error_code = aws_last_error_or_unknown();
+            }
+        }
+        /* Skip `aws_s3_meta_request_read_body` to buffer the part. invoke prepare upload part finish directly. */
+        s_s3_prepare_upload_part_finish(part_prep, error_code);
+    } else if (request->num_times_prepared == 0) {
+        /* Preparing request for the first time.
+         * Next async step: read through the body stream until we've
+         * skipped over parts that were already uploaded (in case we're resuming
+         * from an upload that had been paused) */
+
+        /* Read the body */
+        if (request->request_body.capacity == 0) {
+            AWS_FATAL_ASSERT(request->ticket);
+            request->request_body = aws_s3_buffer_ticket_claim(request->ticket);
+            request->request_body.capacity = (size_t)request->content_length;
+        }
+
+        part_prep->asyncstep_read_part =
+            aws_s3_meta_request_read_body(meta_request, request->part_range_start, &request->request_body);
+        aws_future_bool_register_callback(
+            part_prep->asyncstep_read_part, s_s3_prepare_upload_part_on_read_done, part_prep);
+    } else {
+        /* Not the first time preparing request (e.g. retry).
+         * We can skip over the async steps that read the body stream */
+        s_s3_prepare_upload_part_finish(part_prep, AWS_ERROR_SUCCESS);
+    }
+
+    return message_future;
+}
+
+/* Completion callback for reading this part's chunk of the body stream */
+static void s_s3_prepare_upload_part_on_read_done(void *user_data) {
+    struct aws_s3_prepare_upload_part_job *part_prep = user_data;
+    struct aws_s3_request *request = part_prep->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+    bool has_content_length = auto_ranged_put->has_content_length != 0;
+
+    int error_code = aws_future_bool_get_error(part_prep->asyncstep_read_part);
+
+    /* If reading failed, the prepare-upload-part job has failed */
+    if (error_code != AWS_ERROR_SUCCESS) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Failed reading request body, error %d (%s) req len %zu req cap %zu",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code),
+            request->request_body.len,
+            request->request_body.capacity);
+        goto on_done;
+    }
+    bool is_body_stream_at_end = aws_future_bool_get_result(part_prep->asyncstep_read_part);
+    /* If Content-Length is defined, check that we read the expected amount */
+    if (has_content_length && (request->request_body.len < request->content_length)) {
+        error_code = AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH;
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Request body is smaller than 'Content-Length' header said it would be",
+            (void *)meta_request);
+        goto on_done;
+    }
+    if (!has_content_length && (request->request_body.len < request->content_length)) {
+        /* The stream is not ready to provide enough data as expected. Update the tracking numbers. */
+        request->content_length = request->request_body.len;
+        request->part_range_end = request->part_range_start + request->content_length - 1;
+    }
+    request->is_noop = request->part_number >
+                           1 && /* allow first part to have 0 length to support empty unknown content length objects. */
+                       request->request_body.len == 0;
+    if (s_s3_new_upload_part_info_after_body(request, meta_request, is_body_stream_at_end)) {
+        error_code = aws_last_error_or_unknown();
+        goto on_done;
+    }
 
 on_done:
     s_s3_prepare_upload_part_finish(part_prep, error_code);
@@ -1136,7 +1227,6 @@ on_done:
 static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_job *part_prep, int error_code) {
     struct aws_s3_request *request = part_prep->request;
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    struct aws_s3_client *client = meta_request->client;
     struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
 
     if (error_code != AWS_ERROR_SUCCESS) {
@@ -1161,11 +1251,13 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
             aws_s3_meta_request_lock_synced_data(meta_request);
             struct aws_s3_mpu_part_info *part = NULL;
             aws_array_list_get_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
+            /**
+             * 1. If request retries, get the checksum context from the previous attempt to reuse it. In case of the the
+             *      request body in memory mangled
+             * 2. If this is the first attempt, the context is initialized from the previous prepare step.
+             **/
             AWS_ASSERT(part != NULL && part->checksum_context != NULL);
-            /* Use checksum context if available, otherwise NULL for new parts */
             checksum_context = part->checksum_context;
-            /* If checksum already calculated, it means either the part being retried or the part resumed from list
-             * parts. Keep reusing the old checksum in case of the request body in memory mangled */
             aws_s3_meta_request_unlock_synced_data(meta_request);
         }
         /* END CRITICAL SECTION */
@@ -1178,22 +1270,38 @@ static void s_s3_prepare_upload_part_finish(struct aws_s3_prepare_upload_part_jo
     }
 
     /* Create a new put-object message to upload a part. */
-    struct aws_http_message *message = aws_s3_upload_part_message_new(
-        meta_request->allocator,
-        meta_request->initial_request_message,
-        &request->request_body,
-        request->part_number,
-        auto_ranged_put->upload_id,
-        meta_request->should_compute_content_md5,
-        checksum_context);
+    struct aws_http_message *message = NULL;
+    if (request->request_body_stream != NULL) {
+        message = aws_s3_upload_part_message_new_streaming(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            request->request_body_stream,
+            request->part_number,
+            auto_ranged_put->upload_id,
+            meta_request->should_compute_content_md5,
+            checksum_context);
+    } else {
+        message = aws_s3_upload_part_message_new(
+            meta_request->allocator,
+            meta_request->initial_request_message,
+            &request->request_body,
+            request->part_number,
+            auto_ranged_put->upload_id,
+            meta_request->should_compute_content_md5,
+            checksum_context);
+    }
     if (message == NULL) {
         aws_future_http_message_set_error(part_prep->on_complete, aws_last_error());
         goto on_done;
     }
-    if (client->vtable->after_prepare_upload_part_finish) {
+
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    struct aws_s3_client *client = meta_request->client;
+    if (client->vtable->after_prepare_upload_part_finish_stub) {
         /* TEST ONLY, allow test to stub here. */
-        client->vtable->after_prepare_upload_part_finish(request, message);
+        client->vtable->after_prepare_upload_part_finish_stub(request, message);
     }
+#endif
 
     /* Success! */
     aws_future_http_message_set_result_by_move(part_prep->on_complete, &message);
@@ -1635,7 +1743,7 @@ static void s_s3_auto_ranged_put_request_finished(
                     /* Send progress_callback for delivery on io_event_loop thread */
                     if (meta_request->progress_callback != NULL) {
                         struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_PROGRESS};
-                        event.u.progress.info.bytes_transferred = request->request_body.len;
+                        event.u.progress.info.bytes_transferred = request->content_length;
                         event.u.progress.info.content_length = auto_ranged_put->content_length;
                         aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
                     }
@@ -1721,6 +1829,8 @@ static void s_s3_auto_ranged_put_request_finished(
     aws_s3_meta_request_unlock_synced_data(meta_request);
 }
 
+/* NOTES: the implementation has been copy/pasted to `s_pause_meta_request_synced` for testing purpose, if changed made
+ * here, please update the other function correspondingly. */
 static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {

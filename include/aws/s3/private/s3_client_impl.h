@@ -168,14 +168,20 @@ struct aws_s3_client_vtable {
 
     void (*finish_destroy)(struct aws_s3_client *client);
 
-    struct aws_parallel_input_stream *(
-        *parallel_input_stream_new_from_file)(struct aws_allocator *allocator, struct aws_byte_cursor file_name);
+    struct aws_parallel_input_stream *(*parallel_input_stream_new_from_file)(
+        struct aws_allocator *allocator,
+        struct aws_byte_cursor file_name,
+        struct aws_event_loop_group *reading_elg,
+        bool direct_io_read);
 
     struct aws_http_stream *(*http_connection_make_request)(
         struct aws_http_connection *client_connection,
         const struct aws_http_make_request_options *options);
 
-    void (*after_prepare_upload_part_finish)(struct aws_s3_request *request, struct aws_http_message *message);
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    /********************* TEST ONLY STUB **************************/
+    void (*after_prepare_upload_part_finish_stub)(struct aws_s3_request *request, struct aws_http_message *message);
+#endif
 };
 
 struct aws_s3_upload_part_timeout_stats {
@@ -231,9 +237,20 @@ struct aws_s3_client {
      * to meta requests for use. */
     const size_t part_size;
 
+    bool part_size_set;
+
     /* Size of parts for files when doing gets or puts.  This exists on the client as configurable option that is passed
      * to meta requests for use. */
     const uint64_t max_part_size;
+
+    /* Calculated optimal range size for GET operations based on client configuration (memory limits, throughput
+     * targets). This is used when part_size is not explicitly configured, replacing the default with reasonable
+     * calculation. Value is calculated during client initialization and remains constant for the client's lifetime. */
+    const uint64_t optimal_range_size;
+
+    /* File I/O options. */
+    bool fio_options_set;
+    struct aws_s3_file_io_options fio_opts;
 
     /* The size threshold in bytes for when to use multipart uploads for a AWS_S3_META_REQUEST_TYPE_PUT_OBJECT meta
      * request. Uploads over this size will automatically use a multipart upload strategy, while uploads smaller or
@@ -351,6 +368,9 @@ struct aws_s3_client {
 
         /* Number of requests currently scheduled to be streamed the response body or are actively being streamed. */
         struct aws_atomic_var num_requests_streaming_response;
+
+        /* Number of overall requests currently streaming the request body instead of buffering. */
+        struct aws_atomic_var num_requests_streaming_request_body;
     } stats;
 
     struct {

@@ -314,7 +314,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
     {
         uint64_t object_size = 0ULL;
 
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        ASSERT_FAILS(aws_s3_parse_content_range_response_header(response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_MISSING_CONTENT_RANGE_HEADER);
     }
 
@@ -326,8 +326,8 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
         uint64_t range_start = 0ULL;
         uint64_t range_end = 0ULL;
 
-        ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(
-            allocator, response_headers, &range_start, &range_end, &object_size));
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_range_response_header(response_headers, &range_start, &range_end, &object_size));
         ASSERT_TRUE(range_start == 55ULL);
         ASSERT_TRUE(range_end == 100ULL);
         ASSERT_TRUE(object_size == 12345ULL);
@@ -337,8 +337,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
     {
         uint64_t object_size = 0ULL;
 
-        ASSERT_SUCCESS(
-            aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        ASSERT_SUCCESS(aws_s3_parse_content_range_response_header(response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(object_size == 12345ULL);
     }
 
@@ -347,7 +346,7 @@ static int s_test_s3_parse_content_range_response_header(struct aws_allocator *a
     /* Try to parse an invalid header. */
     {
         uint64_t object_size = 0ULL;
-        ASSERT_FAILS(aws_s3_parse_content_range_response_header(allocator, response_headers, NULL, NULL, &object_size));
+        ASSERT_FAILS(aws_s3_parse_content_range_response_header(response_headers, NULL, NULL, &object_size));
         ASSERT_TRUE(aws_last_error() == AWS_ERROR_S3_INVALID_CONTENT_RANGE_HEADER);
     }
 
@@ -780,4 +779,268 @@ static int s_test_s3_aws_xml_get_body_at_path(struct aws_allocator *allocator, v
                 allocator, aws_byte_cursor_from_c_str("Obviously invalid XML document"), xml_path, &error_code));
     }
     return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_s3_calculate_client_optimal_range_size, s_test_s3_calculate_client_optimal_range_size)
+static int s_test_s3_calculate_client_optimal_range_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    uint64_t client_optimal_range_size = 0;
+
+    /* Test 1: Basic calculation with sufficient memory */
+    {
+        uint64_t memory_limit = GB_TO_BYTES(1); /* 1 GB */
+        uint32_t max_connections = 10;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 1GB / 10 / 3 = 34.13MB -> rounded up to alignment boundary */
+        uint64_t memory_constrained = memory_limit / max_connections / 3;
+        uint64_t expected =
+            (memory_constrained < g_default_part_size_fallback) ? g_default_part_size_fallback : memory_constrained;
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 2: Memory-constrained scenario */
+    {
+        uint64_t memory_limit = MB_TO_BYTES(100); /* 100 MB */
+        uint32_t max_connections = 10;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 100MB / 10 / 3 = 3.33MB -> minimum size (minimum constraint) */
+        uint64_t expected = g_default_part_size_fallback; /* minimum size */
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 3: High concurrency scenario */
+    {
+        uint64_t memory_limit = GB_TO_BYTES(1); /* 1 GB */
+        uint32_t max_connections = 50;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 1GB / 50 / 3 = 6.83MB -> minimum size (minimum constraint) */
+        uint64_t expected = g_default_part_size_fallback; /* minimum size */
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 4: Alignment to buffer pool boundaries */
+    {
+        uint64_t memory_limit = MB_TO_BYTES(300); /* 300 MB */
+        uint32_t max_connections = 10;
+
+        ASSERT_SUCCESS(
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+
+        /* Expected: 300MB / 10 / 3 = 10MB -> rounded up to alignment boundary */
+        uint64_t memory_constrained = memory_limit / max_connections / 3;
+        uint64_t expected =
+            (memory_constrained < g_default_part_size_fallback) ? g_default_part_size_fallback : memory_constrained;
+        ASSERT_UINT_EQUALS(expected, client_optimal_range_size);
+    }
+
+    /* Test 5: Error cases - zero memory limit */
+    {
+        uint64_t memory_limit = 0;
+        uint32_t max_connections = 10;
+
+        ASSERT_ERROR(
+            AWS_ERROR_INVALID_ARGUMENT,
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+    }
+
+    /* Test 6: Error cases - zero max connections */
+    {
+        uint64_t memory_limit = GB_TO_BYTES(1);
+        uint32_t max_connections = 0;
+
+        ASSERT_ERROR(
+            AWS_ERROR_INVALID_ARGUMENT,
+            aws_s3_calculate_client_optimal_range_size(memory_limit, max_connections, &client_optimal_range_size));
+    }
+
+    aws_s3_library_clean_up();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_calculate_request_optimal_range_size, s_test_s3_calculate_request_optimal_range_size)
+static int s_test_s3_calculate_request_optimal_range_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    uint64_t request_optimal_range_size = 0;
+
+    /* Test 1: Estimated part size is larger than client size - use client size */
+    {
+        uint64_t client_optimal_range_size = MB_TO_BYTES(160); /* 160 MB (5 * 32MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(200);       /* 200 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, false, &request_optimal_range_size));
+
+        /* Expected: min(160MB, 200MB) = 160MB */
+        uint64_t expected = client_optimal_range_size; /* 160 MB (5 * 32MB) */
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 2: Estimated part size is smaller than client size - use estimated size */
+    {
+        uint64_t client_optimal_range_size = MB_TO_BYTES(64); /* 64 MB */
+        uint64_t estimated_part_size = MB_TO_BYTES(50);       /* 50 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, false, &request_optimal_range_size));
+
+        /* Expected: min(64MB, 50MB) = 50MB -> rounded up to alignment boundary */
+        uint64_t smaller_size = estimated_part_size; /* 50MB is smaller than 64MB */
+        uint64_t expected = (smaller_size < g_default_part_size_fallback) ? g_default_part_size_fallback : smaller_size;
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 3: Estimated part size is very small - apply minimum constraint */
+    {
+        uint64_t client_optimal_range_size = MB_TO_BYTES(160); /* 160 MB */
+        uint64_t estimated_part_size = MB_TO_BYTES(1);         /* 1 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, false, &request_optimal_range_size));
+
+        /* Expected: min(160MB, 1MB) = minimum size (minimum constraint) */
+        uint64_t expected = g_default_part_size_fallback; /* minimum size */
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 4: Zero estimated part size (unknown) - use client size */
+    {
+        uint64_t client_optimal_range_size = MB_TO_BYTES(160); /* 160 MB */
+        uint64_t estimated_part_size = 0;                      /* 0 - unknown */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, false, &request_optimal_range_size));
+
+        /* Expected: use client_optimal_range_size when estimated is unknown */
+        uint64_t expected = client_optimal_range_size; /* 160 MB (5 * 32MB) */
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 5: Alignment to buffer pool boundaries */
+    {
+        uint64_t client_optimal_range_size = MB_TO_BYTES(40); /* 40 MB (5 * 8MB) */
+        uint64_t estimated_part_size = MB_TO_BYTES(9);        /* 9 MB */
+
+        ASSERT_SUCCESS(aws_s3_calculate_request_optimal_range_size(
+            client_optimal_range_size, estimated_part_size, false, &request_optimal_range_size));
+
+        /* Expected: min(40MB, 9MB) = 9MB -> rounded up to alignment boundary */
+        uint64_t smaller_size = estimated_part_size; /* 9MB is smaller than 40MB */
+        uint64_t expected = (smaller_size < g_default_part_size_fallback) ? g_default_part_size_fallback : smaller_size;
+        ASSERT_UINT_EQUALS(expected, request_optimal_range_size);
+    }
+
+    /* Test 6: Error cases - zero client optimal range size */
+    {
+        uint64_t client_optimal_range_size = 0;
+        uint64_t estimated_part_size = MB_TO_BYTES(100);
+
+        ASSERT_ERROR(
+            AWS_ERROR_INVALID_ARGUMENT,
+            aws_s3_calculate_request_optimal_range_size(
+                client_optimal_range_size, estimated_part_size, false, &request_optimal_range_size));
+    }
+
+    aws_s3_library_clean_up();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_extract_parts_from_etag, s_test_s3_extract_parts_from_etag)
+static int s_test_s3_extract_parts_from_etag(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    uint32_t num_parts = 0;
+
+    /* Test 1: Single-part upload (no dash) */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"d41d8cd98f00b204e9800998ecf8427e\"");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(1, num_parts);
+    }
+
+    /* Test 2: Single-part upload without quotes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(1, num_parts);
+    }
+
+    /* Test 3: Multi-part upload with 5 parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"d41d8cd98f00b204e9800998ecf8427e-5\"");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(5, num_parts);
+    }
+
+    /* Test 4: Multi-part upload without quotes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-123");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(123, num_parts);
+    }
+
+    /* Test 5: Maximum number of parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-10000");
+        ASSERT_SUCCESS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+        ASSERT_UINT_EQUALS(10000, num_parts);
+    }
+
+    /* Test 6: Error case - empty ETag */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 7: Error case - multiple dashes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-5-extra");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 8: Error case - invalid number */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-abc");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 9: Error case - zero parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-0");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 10: Error case - too many parts */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("d41d8cd98f00b204e9800998ecf8427e-10001");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 11: Edge case - just quotes */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"\"");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    /* Test 12: Edge case - single quote */
+    {
+        struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"");
+        ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
+    }
+
+    aws_s3_library_clean_up();
+    return 0;
 }

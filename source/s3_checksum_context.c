@@ -182,7 +182,6 @@ struct aws_byte_cursor aws_s3_upload_request_checksum_context_get_checksum_curso
         return checksum_cursor;
     }
     s_lock_synced_data(context);
-    /* If not previous calculated */
     if (context->synced_data.checksum_calculated) {
         checksum_cursor = aws_byte_cursor_from_buf(&context->synced_data.base64_checksum);
     }

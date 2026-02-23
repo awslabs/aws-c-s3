@@ -22,7 +22,10 @@
 #include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
+#include <aws/common/environment.h>
+#include <aws/common/file.h>
 #include <aws/common/json.h>
+#include <aws/common/math.h>
 #include <aws/common/priority_queue.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
@@ -69,16 +72,13 @@ static const double s_throughput_per_connection_gbps = 100.0 / 250;
 
 /* After throughput math, clamp the min/max number of connections */
 const uint32_t g_min_num_connections = 10; /* Magic value based on: 10 was old behavior */
+/* Magic value based on: 10000 is picked randomly to be reasonable. Based on s_throughput_per_connection_gbps, that will
+ * be 2500 Gbps. */
+const uint32_t g_max_num_connections = 10000;
 
 /**
- * Default part size is 8 MiB to reach the best performance from the experiments we had.
- * Default max part size is 5GiB as the server limit. Object size limit is 5TiB for now.
- *        max number of upload parts is 10000.
- * TODO Provide more information on other values.
+ * Default max part size is 5GiB as the server limit.
  */
-static const size_t s_default_part_size = 8 * 1024 * 1024;
-static const uint64_t s_default_max_part_size = 5368709120ULL;
-static const double s_default_throughput_target_gbps = 10.0;
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
 
@@ -92,6 +92,11 @@ static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 /* Interval for scheduling endpoints cleanup task. This is to trim endpoints with a zero reference
  * count. S3 closes the idle connections in ~5 seconds. */
 static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
+
+/**
+ * The envrionment variable name for memory limit control.
+ */
+static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -150,24 +155,53 @@ void aws_s3_set_dns_ttl(size_t ttl) {
     s_dns_host_address_ttl_seconds = ttl;
 }
 
+/**
+ * Determine how many connections are ideal by dividing target-throughput by throughput-per-connection.
+ * TODO: we may consider to alter this, upload to regular s3 can use more connections, and s3 express
+ * can use less connections to reach the target throughput..
+ **/
+static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_gps) {
+    double ideal_connection_count_double = throughput_gps / s_throughput_per_connection_gbps;
+    /* round up and clamp */
+    ideal_connection_count_double = ceil(ideal_connection_count_double);
+    ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
+    return (uint32_t)ideal_connection_count_double;
+}
+
 /* Returns the max number of connections allowed.
  *
- * When meta request is NULL, this will return the overall allowed number of connections.
+ * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
+ * configurations.
  *
- * If meta_request is not NULL, this will give the max number of connections allowed for that meta request type on
- * that endpoint.
+ * If meta_request is not NULL, this will return the number of connections allowed based on the meta request
+ * configurations.
  */
 uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
-    (void)meta_request;
 
     uint32_t max_active_connections = client->ideal_connection_count;
-
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
+    }
+    if (meta_request) {
+        if (meta_request->max_active_connections_override) {
+            /* Apply the meta request level override the max active connections, but less than the client side settings.
+             */
+            max_active_connections = aws_min_u32(meta_request->max_active_connections_override, max_active_connections);
+        }
+        if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps > 0) {
+            return aws_min_u32(
+                s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput_gbps),
+                max_active_connections);
+        }
+    }
+    if (client->fio_opts.should_stream && client->fio_opts.disk_throughput_gbps > 0) {
+        return aws_min_u32(
+            s_get_ideal_connection_number_from_throughput(client->fio_opts.disk_throughput_gbps),
+            max_active_connections);
     }
 
     return max_active_connections;
@@ -295,7 +329,42 @@ struct aws_s3_client *aws_s3_client_new(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+    uint64_t mem_limit_configured = 0;
+    if (client_config->memory_limit_in_bytes == 0) {
+        /* Try to read from the envrionment variable for memory limit */
+        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
+        if (memory_limit_from_env_var) {
+            uint64_t mem_limit_in_gib = 0;
+            if (aws_byte_cursor_utf8_parse_u64(
+                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                aws_string_destroy(memory_limit_from_env_var);
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot create client from client_config; envrionment variable: %s, is not set correctly, only "
+                    "integers supported.",
+                    s_memory_limit_env_var);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+            aws_string_destroy(memory_limit_from_env_var);
+            uint64_t mem_limit_in_bytes = 0;
+            /* Covert mem_limit_in_gib to bytes */
+            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot create client from client_config; envrionment variable: %s, overflow detected.",
+                    s_memory_limit_env_var);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
 
+            mem_limit_configured = mem_limit_in_bytes;
+        }
+    } else {
+        mem_limit_configured = client_config->memory_limit_in_bytes;
+    }
 #ifdef BYO_CRYPTO
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
         AWS_LOGF_ERROR(
@@ -312,7 +381,7 @@ struct aws_s3_client *aws_s3_client_new(
     client->allocator = allocator;
 
     size_t mem_limit = 0;
-    if (client_config->memory_limit_in_bytes == 0) {
+    if (mem_limit_configured == 0) {
 #if SIZE_BITS == 32
         if (client_config->throughput_target_gbps > 25.0) {
             mem_limit = GB_TO_BYTES(2);
@@ -334,30 +403,48 @@ struct aws_s3_client *aws_s3_client_new(
 #endif
     } else {
         // cap memory limit to SIZE_MAX
-        if (client_config->memory_limit_in_bytes > SIZE_MAX) {
+        if (mem_limit_configured > SIZE_MAX) {
             mem_limit = SIZE_MAX;
         } else {
-            mem_limit = (size_t)client_config->memory_limit_in_bytes;
+            mem_limit = (size_t)mem_limit_configured;
         }
     }
 
-    size_t part_size = s_default_part_size;
+    if (client_config->throughput_target_gbps > 0.0) {
+        *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
+    } else {
+        *((double *)&client->throughput_target_gbps) = g_default_throughput_target_gbps;
+    }
+
+    *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
+        client_config->compute_content_md5;
+
+    *(uint32_t *)&client->ideal_connection_count = aws_max_u32(
+        g_min_num_connections, s_get_ideal_connection_number_from_throughput(client->throughput_target_gbps));
+
+    size_t part_size = (size_t)g_default_part_size_fallback;
     if (client_config->part_size != 0) {
         if (client_config->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
         } else {
             part_size = (size_t)client_config->part_size;
         }
+        client->part_size_set = true;
     }
 
     /* default max part size is the smallest of either half of mem limit or default max part size */
-    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)s_default_max_part_size);
+    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)g_default_max_part_size);
     if (client_config->max_part_size != 0) {
         if (client_config->max_part_size > SIZE_MAX) {
             max_part_size = SIZE_MAX;
         } else {
             max_part_size = (size_t)client_config->max_part_size;
         }
+    }
+
+    if (client_config->fio_opts) {
+        client->fio_opts = *client_config->fio_opts;
+        client->fio_options_set = true;
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -379,6 +466,38 @@ struct aws_s3_client *aws_s3_client_new(
         goto on_error;
     }
 
+    /* Calculate optimal range size based on memory limits and connection count */
+    uint64_t calculated_optimal_range_size = 0;
+    if (aws_s3_calculate_client_optimal_range_size(
+            mem_limit, client->ideal_connection_count, &calculated_optimal_range_size) != AWS_OP_SUCCESS) {
+        /* Fall back to default if calculation fails */
+        calculated_optimal_range_size = g_default_part_size_fallback;
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT, "id=%p: Failed to calculate optimal range size, falling back to default", (void *)client);
+    }
+    /* Apply a buffer pool alignment to the calculated optimal range size */
+    calculated_optimal_range_size =
+        aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, calculated_optimal_range_size);
+    /* Note: cap the calculated optimal range size based on the initial window size to avoid blocking. */
+    if (client->enable_read_backpressure && client->initial_read_window) {
+        /* Make sure we can have at least 10 parts to be delivered. */
+        uint64_t initial_read_window_cap = client->initial_read_window / 10;
+        initial_read_window_cap = aws_max_u64(initial_read_window_cap, g_default_part_size_fallback);
+        calculated_optimal_range_size = aws_min_u64(calculated_optimal_range_size, initial_read_window_cap);
+    }
+    *((uint64_t *)&client->optimal_range_size) = calculated_optimal_range_size;
+
+    AWS_LOGF_INFO(
+        AWS_LS_S3_CLIENT,
+        "id=%p: Calculated optimal range size: %" PRIu64 " bytes (%.2f MiB) based on memory_limit=%" PRIu64
+        " bytes, ideal_connection_count=%" PRIu32 ", and initial_read_window=%zu.",
+        (void *)client,
+        client->optimal_range_size,
+        (double)client->optimal_range_size / (1024.0 * 1024.0),
+        (uint64_t)mem_limit,
+        client->ideal_connection_count,
+        client->initial_read_window);
+
     client->vtable = &s_s3_client_default_vtable;
 
     aws_ref_count_init(&client->ref_count, client, (aws_simple_completion_callback *)s_s3_client_start_destroy);
@@ -394,6 +513,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_linked_list_init(&client->threaded_data.request_queue);
 
     aws_atomic_init_int(&client->stats.num_requests_in_flight, 0);
+    aws_atomic_init_int(&client->stats.num_requests_streaming_request_body, 0);
 
     for (uint32_t i = 0; i < (uint32_t)AWS_S3_META_REQUEST_TYPE_MAX; ++i) {
         aws_atomic_init_int(&client->stats.num_requests_network_io[i], 0);
@@ -557,25 +677,6 @@ struct aws_s3_client *aws_s3_client_new(
         client->synced_data.body_streaming_elg_allocated = true;
     }
     /* Setup cannot fail after this point. */
-
-    if (client_config->throughput_target_gbps > 0.0) {
-        *((double *)&client->throughput_target_gbps) = client_config->throughput_target_gbps;
-    } else {
-        *((double *)&client->throughput_target_gbps) = s_default_throughput_target_gbps;
-    }
-
-    *((enum aws_s3_meta_request_compute_content_md5 *)&client->compute_content_md5) =
-        client_config->compute_content_md5;
-
-    /* Determine how many connections are ideal by dividing target-throughput by throughput-per-connection. */
-    {
-        double ideal_connection_count_double = client->throughput_target_gbps / s_throughput_per_connection_gbps;
-        /* round up and clamp */
-        ideal_connection_count_double = ceil(ideal_connection_count_double);
-        ideal_connection_count_double = aws_max_double(g_min_num_connections, ideal_connection_count_double);
-        ideal_connection_count_double = aws_min_double(UINT32_MAX, ideal_connection_count_double);
-        *(uint32_t *)&client->ideal_connection_count = (uint32_t)ideal_connection_count_double;
-    }
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
     if (client_config->enable_s3express) {
@@ -992,6 +1093,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "id=%p: Could not create new meta request.", (void *)client);
         return NULL;
     }
+    meta_request->is_express = use_s3express_signing;
 
     bool error_occurred = false;
 
@@ -1171,6 +1273,38 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     }
     if (options->send_filepath.len > 0) {
         ++body_source_count;
+        if (!content_length_found) {
+            /* The content length was not set, but it's a file based upload. Derive the content length from the file
+             * length */
+            struct aws_string *file_path = aws_string_new_from_cursor(client->allocator, &options->send_filepath);
+            struct aws_string *readonly_bytes_mode = aws_string_new_from_c_str(client->allocator, "rb");
+            FILE *file = aws_fopen_safe(file_path, readonly_bytes_mode);
+            int error = true;
+            if (!file) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create meta request."
+                    "the send file path %s is invalid",
+                    aws_string_c_str(file_path));
+            } else if (aws_file_get_length(file, (int64_t *)&content_length)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "Could not create meta request."
+                    "failed to get the length from the send file path %s",
+                    aws_string_c_str(file_path));
+            } else {
+                error = false;
+            }
+            if (file) {
+                fclose(file);
+            }
+            aws_string_destroy(file_path);
+            aws_string_destroy(readonly_bytes_mode);
+            if (error) {
+                return NULL;
+            }
+            content_length_found = true;
+        }
     }
     if (options->send_using_async_writes == true) {
         if (options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
@@ -1205,12 +1339,14 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return NULL;
     }
     size_t part_size = client->part_size;
+    bool part_size_set = false;
     if (options->part_size != 0) {
         if (options->part_size > SIZE_MAX) {
             part_size = SIZE_MAX;
         } else {
             part_size = (size_t)options->part_size;
         }
+        part_size_set = true;
     }
 
     /* Call the appropriate meta-request new function. */
@@ -1244,7 +1380,8 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     }
                 }
             }
-            return aws_s3_meta_request_auto_ranged_get_new(client->allocator, client, part_size, options);
+            return aws_s3_meta_request_auto_ranged_get_new(
+                client->allocator, client, part_size, part_size_set, options);
         }
         case AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: {
             if (body_source_count == 0) {
@@ -1290,12 +1427,26 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         return NULL;
                     }
                     part_size = out_part_size;
-                }
-                if (part_size != options->part_size && part_size != client->part_size) {
-                    AWS_LOGF_DEBUG(
-                        AWS_LS_S3_META_REQUEST,
-                        "The multipart upload part size has been adjusted to %" PRIu64 "",
-                        (uint64_t)part_size);
+                    if (part_size != options->part_size && part_size != client->part_size) {
+                        /* If we already adjusted the part size, let's align the part size with expected alignment from
+                         * buffer pool. */
+                        if (num_parts > 2) {
+                            uint64_t aligned_part_size =
+                                aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, part_size);
+                            /* Incase of overflow, fallback to no alignment. */
+                            aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
+                            part_size = (size_t)aligned_part_size;
+                            /* update the number of parts as well. */
+                            num_parts = (uint32_t)(content_length / part_size);
+                            if ((content_length % part_size) > 0) {
+                                ++num_parts;
+                            }
+                        }
+                        AWS_LOGF_DEBUG(
+                            AWS_LS_S3_META_REQUEST,
+                            "The multipart upload part size has been adjusted to %zu",
+                            part_size);
+                    }
                 }
 
                 /* Default to client level setting */
@@ -1753,6 +1904,7 @@ static bool s_s3_client_should_update_meta_request(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request,
     uint32_t num_requests_in_flight,
+    uint32_t num_requests_streaming,
     const uint32_t max_requests_in_flight,
     const uint32_t max_requests_prepare) {
 
@@ -1765,15 +1917,19 @@ static bool s_s3_client_should_update_meta_request(
     }
 
     /**
-     * If number of being-prepared + already-prepared-and-queued requests is more than the max that can
-     * be in the preparation stage.
-     * Or total number of requests tracked by the client is more than the max tracked ("in flight")
-     * requests.
+     * If number of being-prepared + already-prepared-and-queued + num-requests-streaming-request-body requests is more
+     * than the max that can be in the preparation stage.
+     *
+     * num-requests-streaming-request-body tracks the requests streaming the request body after the request starts.
+     * Limit the number of request preparing based on it because the requests are also reading from the source. Avoiding
+     * more than expected requests to read from the source.
+     *
+     * Or total number of requests tracked by the client is more than the max tracked ("in flight") requests.
      *
      * We cannot create more requests for this meta request.
      */
-    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size) >=
-        max_requests_prepare) {
+    if ((client->threaded_data.num_requests_being_prepared + client->threaded_data.request_queue_size +
+         num_requests_streaming) >= max_requests_prepare) {
         return false;
     }
     if (num_requests_in_flight >= max_requests_in_flight) {
@@ -1790,6 +1946,13 @@ static bool s_s3_client_should_update_meta_request(
         client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
     if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
                                 client->threaded_data.request_queue_size) >= g_min_num_connections) {
+        return false;
+    }
+
+    /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
+    size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
+    if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
+        /* Don't prepare more than it's allowed for the meta request */
         return false;
     }
 
@@ -1904,6 +2067,7 @@ void s_acquire_mem_and_prepare_request(
 
         if (request->send_data.metrics) {
             struct aws_s3_request_metrics *metric = request->send_data.metrics;
+            metric->crt_info_metrics.memory_allocated_from_pool = true;
             aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.mem_acquire_start_timestamp_ns);
         }
 
@@ -1955,6 +2119,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
     aws_linked_list_init(&meta_requests_work_remaining);
 
     uint32_t num_requests_in_flight = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_in_flight);
+    uint32_t num_requests_streaming = (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_request_body);
 
     const uint32_t pass_flags[] = {
         AWS_S3_META_REQUEST_UPDATE_FLAG_CONSERVATIVE,
@@ -1977,7 +2142,12 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 AWS_CONTAINER_OF(meta_request_node, struct aws_s3_meta_request, client_process_work_threaded_data);
 
             if (!s_s3_client_should_update_meta_request(
-                    client, meta_request, num_requests_in_flight, max_requests_in_flight, max_requests_prepare)) {
+                    client,
+                    meta_request,
+                    num_requests_in_flight,
+                    num_requests_streaming,
+                    max_requests_in_flight,
+                    max_requests_prepare)) {
 
                 /* Move the meta request to be processed from next loop. */
                 aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
@@ -2003,9 +2173,22 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                     request->tracked_by_client = true;
 
                     ++client->threaded_data.num_requests_being_prepared;
+                    aws_atomic_fetch_add(&meta_request->num_request_being_prepared, 1);
 
                     num_requests_in_flight =
                         (uint32_t)aws_atomic_fetch_add(&client->stats.num_requests_in_flight, 1) + 1;
+
+                    /**
+                     * When upload with streaming, the prepare stage will not read into buffer.
+                     * But it should prevent more requests to be preapred so that the request will not staying in the
+                     * queue to wait for the connection available. Prevents the credentials to be expired during waiting
+                     * for too long.
+                     */
+                    if (meta_request->fio_opts.should_stream) {
+                        /* If the request is a streaming request, update the states to track the request that is
+                         * streaming request body. */
+                        aws_atomic_fetch_add(&client->stats.num_requests_streaming_request_body, 1);
+                    }
 
                     s_acquire_mem_and_prepare_request(
                         client, request, s_s3_client_prepare_callback_queue_request, client);
@@ -2031,6 +2214,9 @@ static void s_s3_client_meta_request_finished_request(
         /* BEGIN CRITICAL SECTION */
         aws_s3_client_lock_synced_data(client);
         aws_atomic_fetch_sub(&client->stats.num_requests_in_flight, 1);
+        if (meta_request->fio_opts.should_stream) {
+            aws_atomic_fetch_sub(&client->stats.num_requests_streaming_request_body, 1);
+        }
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
         /* END CRITICAL SECTION */
@@ -2054,6 +2240,7 @@ static void s_s3_client_prepare_callback_queue_request(
         request = aws_s3_request_release(request);
     }
 
+    aws_atomic_fetch_sub(&meta_request->num_request_being_prepared, 1);
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
@@ -2076,29 +2263,44 @@ void aws_s3_client_update_connections_threaded(struct aws_s3_client *client) {
 
     struct aws_linked_list left_over_requests;
     aws_linked_list_init(&left_over_requests);
+    uint32_t client_max_active_connections = aws_s3_client_get_max_active_connections(client, NULL);
+    uint32_t num_requests_network_io = s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX);
+    bool queue_is_empty = aws_linked_list_empty(&client->threaded_data.request_queue);
 
-    while (s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX) <
-               aws_s3_client_get_max_active_connections(client, NULL) &&
-           !aws_linked_list_empty(&client->threaded_data.request_queue)) {
+    while (num_requests_network_io < client_max_active_connections && !queue_is_empty) {
 
         struct aws_s3_request *request = aws_s3_client_dequeue_request_threaded(client);
-        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, request->meta_request);
+        struct aws_s3_meta_request *meta_request = request->meta_request;
+        const uint32_t max_active_connections = aws_s3_client_get_max_active_connections(client, meta_request);
         if (request->is_noop) {
             /* If request is no-op, finishes and cleans up the request */
-            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_SUCCESS);
+            s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_SUCCESS);
             request = aws_s3_request_release(request);
-        } else if (!request->always_send && aws_s3_meta_request_has_finish_result(request->meta_request)) {
+        } else if (!request->always_send && aws_s3_meta_request_has_finish_result(meta_request)) {
             /* Unless the request is marked "always send", if this meta request has a finish result, then finish the
              * request now and release it. */
-            s_s3_client_meta_request_finished_request(client, request->meta_request, request, AWS_ERROR_S3_CANCELED);
+            /* Update the error code for the metrics of the request here since we never acquire/release a connection */
+            request->send_data.metrics->crt_info_metrics.error_code = AWS_ERROR_S3_CANCELED;
+
+            /* Record end times as well */
+            aws_high_res_clock_get_ticks(
+                (uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+            request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
+                request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
+                request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+
+            s_s3_client_meta_request_finished_request(client, meta_request, request, AWS_ERROR_S3_CANCELED);
             request = aws_s3_request_release(request);
-        } else if (
-            s_s3_client_get_num_requests_network_io(client, request->meta_request->type) < max_active_connections) {
+        } else if ((uint32_t)aws_atomic_load_int(&meta_request->num_requests_network) < max_active_connections) {
+            /* Make sure it's above the max request level limitation. */
             s_s3_client_create_connection_for_request(client, request);
         } else {
             /* Push the request into the left-over list to be used in a future call of this function. */
             aws_linked_list_push_back(&left_over_requests, &request->node);
         }
+        client_max_active_connections = aws_s3_client_get_max_active_connections(client, NULL);
+        num_requests_network_io = s_s3_client_get_num_requests_network_io(client, AWS_S3_META_REQUEST_TYPE_MAX);
+        queue_is_empty = aws_linked_list_empty(&client->threaded_data.request_queue);
     }
 
     aws_s3_client_queue_requests_threaded(client, &left_over_requests, true);
@@ -2137,6 +2339,7 @@ static void s_s3_client_create_connection_for_request_default(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
+    aws_atomic_fetch_add(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_add(&client->stats.num_requests_network_io[meta_request->type], 1);
 
     struct aws_s3_connection *connection = aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_connection));
@@ -2223,6 +2426,8 @@ static void s_s3_client_acquired_retry_token(
     /* TODO: not a blocker, consider managing the life time of aws_s3_client from aws_s3_endpoint to simplify usage */
     aws_s3_client_acquire(client);
 
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns);
+
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);
 
@@ -2279,6 +2484,11 @@ static void s_s3_client_on_acquire_http_connection(
 
         goto error_retry;
     }
+
+    aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_end_timestamp_ns);
+    request->send_data.metrics->time_metrics.conn_acquire_duration_ns =
+        request->send_data.metrics->time_metrics.conn_acquire_end_timestamp_ns -
+        request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns;
 
     connection->http_connection = incoming_http_connection;
     aws_s3_meta_request_send_request(meta_request, connection);
@@ -2379,6 +2589,7 @@ void aws_s3_client_notify_connection_finished(
         }
 
         /* Ask the retry strategy to schedule a retry of the request. */
+        aws_high_res_clock_get_ticks((uint64_t *)&request->retry_start_timestamp_ns);
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
 
@@ -2400,6 +2611,12 @@ void aws_s3_client_notify_connection_finished(
 
 reset_connection:
 
+    aws_high_res_clock_get_ticks(
+        (uint64_t *)&request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns);
+    request->send_data.metrics->time_metrics.s3_request_total_duration_ns =
+        request->send_data.metrics->time_metrics.s3_request_last_attempt_end_timestamp_ns -
+        request->send_data.metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns;
+
     if (connection->retry_token != NULL) {
         /* If we have a retry token and successfully finished, record that success. */
         if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_SUCCESS) {
@@ -2417,7 +2634,7 @@ reset_connection:
             aws_http_connection_close(connection->http_connection);
         }
     }
-
+    aws_atomic_fetch_sub(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_sub(&client->stats.num_requests_network_io[meta_request->type], 1);
 
     s_s3_client_meta_request_finished_request(client, meta_request, request, error_code);
@@ -2467,6 +2684,8 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
 
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
+
+    aws_high_res_clock_get_ticks((uint64_t *)&request->retry_end_timestamp_ns);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);

@@ -292,7 +292,7 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
-enum aws_s3_recv_file_option {
+enum aws_s3_recv_file_options {
     /**
      * Create a new file if it doesn't exist, otherwise replace the existing file.
      */
@@ -314,6 +314,43 @@ enum aws_s3_recv_file_option {
      */
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
+
+/**
+ * WARNING: experimental/unstable:
+ * Controls how client performance file I/O operations. Only applies to the file based workload.
+ **/
+struct aws_s3_file_io_options {
+    /**
+     * Skip buffering the part in memory before sending the request.
+     *
+     * Default to false on small objects, and true when the object size exceed a certain threshold
+     *`g_streaming_object_size_threshold`.
+     **/
+    bool should_stream;
+
+    /**
+     * The estimated disk throughput. Only be applied when `streaming_upload` is true.
+     * in gigabits per second (Gbps).
+     *
+     * Notes: There are possibilities that cannot reach the all available disk throughput:
+     * 1. Disk is busy with other applications
+     * 2. OS Cache may cap the throughput, use `direct_io` to get around this.
+     *
+     * Default to throughput_target_gbps.
+     **/
+    double disk_throughput_gbps;
+
+    /**
+     * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
+     * Notes:
+     * - Only supported on linux for now.
+     * - Only supports upload for now.
+     * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
+     * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
+     */
+    bool direct_io;
+};
+
 /**
  * Info about a single part, for you to review before the upload completes.
  */
@@ -439,6 +476,20 @@ struct aws_s3_client_config {
     const struct aws_tls_connection_options *tls_connection_options;
 
     /**
+     * Optional.
+     * If set, this controls how the client interact with file I/O.
+     * Read `aws_s3_file_io_options` for details.
+     *  Notes: Only applies to meta requests with `send_filepath` set.
+     *  TODO: adapt it to `recv_filepath`.
+     *
+     * eg:
+     * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in
+     *  memory.
+     * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
+     */
+    struct aws_s3_file_io_options *fio_opts;
+
+    /**
      * Required.
      * Configure the signing for the requests made from the client.
      * - Credentials or credentials provider is required. Other configs are all optional, and will be default to what
@@ -459,7 +510,9 @@ struct aws_s3_client_config {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If not set, this defaults to 8 MiB.
+     *
+     * If not set, a dynamic default part size will be used based on the throughput target, memory_limit_in_bytes.
+     *
      * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
      * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      *
@@ -467,9 +520,7 @@ struct aws_s3_client_config {
      */
     uint64_t part_size;
 
-    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. On 32
-     * bit machine, it will be forced to SIZE_MAX, which is around 4GiB. The server limit is 5GiB, but object size limit
-     * is 5TiB for now. We should be good enough for all the cases. */
+    /* If the part size needs to be adjusted for service limits, this is the maximum size it will be adjusted to. */
     uint64_t max_part_size;
 
     /**
@@ -550,12 +601,16 @@ struct aws_s3_client_config {
      * If true, each meta request has a flow-control window that shrinks as
      * response body data is downloaded (headers do not affect the window).
      * `initial_read_window` determines the starting size of each meta request's window.
-     * You will stop downloading data whenever the flow-control window reaches 0
-     * You must call aws_s3_meta_request_increment_read_window() to keep data flowing.
+     *
+     * - You will stop receiving response body data whenever the flow-control window reaches 0
+     * - If the window size remaining is smaller than the part download, client will buffer the part until
+     *   the window opens up to delivery the full part.
+     * - You must call aws_s3_meta_request_increment_read_window() to keep data flowing.
      *
      * WARNING: This feature is experimental.
      * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
-     * and you may still receive some data after the window reaches 0.
+     * - If you set body_callback, no more data will be delivered once the window reaches 0.
+     * - If you set body_callback_ex, you may still receive some data after the window reaches 0. TODO: fix it.
      */
     bool enable_read_backpressure;
 
@@ -737,7 +792,7 @@ struct aws_s3_meta_request_options {
      * If set, the received data will be written into this file.
      * the `body_callback` will NOT be invoked.
      * This gives a better performance when receiving data to write to a file.
-     * See `aws_s3_recv_file_option` for the configuration on the receive file.
+     * See `aws_s3_recv_file_options` for the configuration on the receive file.
      */
     struct aws_byte_cursor recv_filepath;
 
@@ -745,9 +800,9 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Default to AWS_S3_RECV_FILE_CREATE_OR_REPLACE.
      * This only works with recv_filepath set.
-     * See `aws_s3_recv_file_option`.
+     * See `aws_s3_recv_file_options`.
      */
-    enum aws_s3_recv_file_option recv_file_option;
+    enum aws_s3_recv_file_options recv_file_option;
     /**
      * Optional.
      * The specified position to start writing at for the recv file when `recv_file_option` is set to
@@ -767,6 +822,24 @@ struct aws_s3_meta_request_options {
      * Do not set if the body is being passed by other means (see note above).
      */
     struct aws_byte_cursor send_filepath;
+
+    /**
+     * Optional.
+     * Overrides the client config if set.
+     * If set, this controls how the meta request interact with file I/O.
+     * Read `aws_s3_file_io_options` for details.
+     *  Notes: Only applies when `send_filepath` is set.
+     *  TODO: adapt it to `recv_filepath`.
+     *
+     * Note: if both client and meta request don't set this, for objects larger than 2TiB, this will be set to a default
+     * options with `should_stream` to be True and others follow the default to avoid memory issues.
+     *
+     * eg:
+     * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in
+     *  memory.
+     * - When the disk I/O is faster than OS cache, set `direct_io` to bypass the OS cache.
+     */
+    struct aws_s3_file_io_options *fio_opts;
 
     /**
      * Optional - EXPERIMENTAL/UNSTABLE
@@ -808,12 +881,21 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Size of parts the object will be downloaded or uploaded in, in bytes.
      * This only affects AWS_S3_META_REQUEST_TYPE_GET_OBJECT and AWS_S3_META_REQUEST_TYPE_PUT_OBJECT.
-     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to 8MiB.
+     *
+     * If not set, the value from `aws_s3_client_config.part_size` is used, which defaults to a dynamic value based on
+     * the throughput target, memory_limit_in_bytes and the requested object size.
      *
      * The client will adjust the part size for AWS_S3_META_REQUEST_TYPE_PUT_OBJECT if needed for service limits (max
      * number of parts per upload is 10,000, minimum upload part size is 5 MiB).
      */
     uint64_t part_size;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * Set this to prefer for the dynamic default part_size over the part size set for both client and meta request for
+     * the best performance under the memory constrain, especially for getting large objects.
+     */
+    bool force_dynamic_part_size;
 
     /**
      * Optional.
@@ -927,6 +1009,10 @@ struct aws_s3_meta_request_options {
      * This will be ignored for other operations.
      */
     struct aws_byte_cursor copy_source_uri;
+
+    /* When set, this will cap the number of active connections for the meta request. When 0, the client will determine
+     * it based on client side settings. (Recommended) */
+    uint32_t max_active_connections_override;
 };
 
 /* Result details of a meta request.
@@ -1137,8 +1223,9 @@ struct aws_future_void *aws_s3_meta_request_write(
  * no backpressure is being applied and data is being downloaded as fast as possible.
  *
  * WARNING: This feature is experimental.
- * Currently, backpressure is only applied to GetObject requests which are split into multiple parts,
- * and you may still receive some data after the window reaches 0.
+ * Currently, backpressure is applied to GetObject requests,
+ * - If you set body_callback, no more data will be delivered once the window reaches 0.
+ * - If you set body_callback_ex, you may still receive some data after the window reaches 0. TODO: fix it.
  */
 AWS_S3_API
 void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes);
@@ -1323,6 +1410,17 @@ int aws_s3_request_metrics_get_request_id(
     const struct aws_s3_request_metrics *metrics,
     const struct aws_string **out_request_id);
 
+/**
+ * Get the extended request ID from aws_s3_request_metrics.
+ * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
+ * If available, out_extended_request_id will be set to a string. Be warned this string's lifetime is tied to the
+ * metrics object.
+ **/
+AWS_S3_API
+int aws_s3_request_metrics_get_extended_request_id(
+    const struct aws_s3_request_metrics *metrics,
+    const struct aws_string **out_extended_request_id);
+
 /* Get the start time from aws_s3_request_metrics, which is when S3 client prepare the request to be sent. Always
  * available. Timestamp are from `aws_high_res_clock_get_ticks`  */
 AWS_S3_API
@@ -1496,10 +1594,14 @@ int aws_s3_request_metrics_get_ip_address(
     const struct aws_s3_request_metrics *metrics,
     const struct aws_string **out_ip_address);
 
-/* Get the id of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data
- * not available */
+/* Get the ptr address of connection that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised
+ * if data not available */
 AWS_S3_API
-int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *out_connection_id);
+int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics *metrics, size_t *out_connection_ptr);
+
+/* Get the pointer to the request that attempt was made from. Always available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_request_ptr);
 
 /* Get the thread ID of the thread that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if
  * data not available */
@@ -1536,6 +1638,89 @@ int aws_s3_request_metrics_get_error_code(const struct aws_s3_request_metrics *m
 /* Get retry attempt from request metrics. */
 AWS_S3_API
 uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_metrics *metrics);
+
+/* Get whether the memory for the request was allocated from the pool. Cannot fail */
+AWS_S3_API
+bool aws_s3_request_metrics_get_memory_allocated_from_pool(const struct aws_s3_request_metrics *metrics);
+
+/* Get the beginning range of this part from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_range_start(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_start);
+
+/* Get the last byte of this part from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_range_end(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_part_range_end);
+
+/* Get the part number from request metrics. */
+AWS_S3_API
+void aws_s3_request_metrics_get_part_number(const struct aws_s3_request_metrics *metrics, uint32_t *out_part_number);
+/* Get the request start timestamp from aws_s3_request_metrics. Always available. */
+AWS_S3_API
+void aws_s3_request_metrics_get_s3_request_first_attempt_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_s3_request_first_attempt_start_time);
+
+/* Get the request end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_s3_request_last_attempt_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_s3_request_last_attempt_end_time);
+
+/* Get the request duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_s3_request_total_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_request_duration);
+
+/* Get the connection acquire start timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_conn_acquire_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_conn_acquire_start_time);
+
+/* Get the connection acquire end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not
+ * available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_conn_acquire_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_conn_acquire_end_time);
+
+/* Get the connection acquire duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_conn_acquire_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_conn_acquire_duration);
+
+/* Get the retry delay start timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_retry_delay_start_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_retry_delay_start_time);
+
+/* Get the retry delay end timestamp. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_retry_delay_end_timestamp_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_retry_delay_end_time);
+
+/* Get the retry delay duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_retry_delay_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_retry_delay_duration);
+
+/* Get the service call duration. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if data not available. */
+AWS_S3_API
+int aws_s3_request_metrics_get_service_call_duration_ns(
+    const struct aws_s3_request_metrics *metrics,
+    uint64_t *out_service_call_duration);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL

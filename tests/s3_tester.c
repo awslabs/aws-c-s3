@@ -192,6 +192,8 @@ static void s_s3_test_meta_request_finish(
 
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
+    meta_request_test_results->did_validate = result->did_validate;
+    meta_request_test_results->validation_algorithm = result->validation_algorithm;
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -245,12 +247,7 @@ static void s_s3_test_meta_request_telemetry(
         AWS_FATAL_ASSERT(during_time == (end_time - start_time));
     }
 
-    enum aws_s3_request_type request_type;
-    aws_s3_request_metrics_get_request_type(metrics, &request_type);
-    uint32_t retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
-
-    if (aws_s3_request_metrics_get_error_code(metrics) == 200 && retry_attempt == 0 &&
-        (request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT || request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART)) {
+    if (aws_s3_request_metrics_get_memory_allocated_from_pool(metrics)) {
         uint64_t start_time = 0;
         uint64_t end_time = 0;
         uint64_t duration_time = 0;
@@ -264,6 +261,9 @@ static void s_s3_test_meta_request_telemetry(
 
     aws_s3_tester_lock_synced_data(tester);
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
+    if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS) {
+        aws_array_list_push_back(&meta_request_test_results->synced_data.succeed_metrics, &metrics);
+    }
     aws_s3_request_metrics_acquire(metrics);
     aws_s3_tester_unlock_synced_data(tester);
 }
@@ -558,6 +558,8 @@ void aws_s3_meta_request_test_results_init(
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
+    aws_array_list_init_dynamic(
+        &test_meta_request->synced_data.succeed_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -575,6 +577,8 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
+    /* We don't need to release the metrics from the succeed list, since it's already released from the main list. */
+    aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
 
     for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {
         aws_string_destroy(test_meta_request->upload_review.part_checksums_array[i]);
@@ -1055,6 +1059,7 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         NULL,
         0,
         false,
+        false,
         &options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
@@ -1410,7 +1415,9 @@ int aws_s3_tester_client_new(
         .max_part_size = options->max_part_size,
         .s3express_provider_override_factory = options->s3express_provider_override_factory,
         .factory_user_data = options->factory_user_data,
+        .max_active_connections_override = options->max_active_connections_override,
         .enable_s3express = options->s3express_provider_override_factory != NULL,
+        .memory_limit_in_bytes = options->memory_limit_in_bytes,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,
@@ -1538,6 +1545,8 @@ int aws_s3_tester_send_meta_request_with_options(
         .checksum_config = &checksum_config,
         .resume_token = options->put_options.resume_token,
         .object_size_hint = options->object_size_hint,
+        .fio_opts = options->fio_opts,
+        .part_size = options->part_size,
     };
 
     if (options->mock_server) {
@@ -1618,7 +1627,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
             }
             meta_request_options.message = message;
-
+            meta_request_options.force_dynamic_part_size = options->get_options.force_dynamic_part_size;
         } else if (
             meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
@@ -1716,6 +1725,23 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream = aws_input_stream_new_tester(allocator, &stream_options.base);
                 ASSERT_NOT_NULL(input_stream);
             }
+            struct aws_byte_buf *out_encoded_checksum = NULL;
+            if (options->put_options.full_object_checksum != AWS_TEST_FOC_NONE) {
+                ASSERT_NOT_NULL(input_stream);
+                struct aws_byte_buf data;
+                int64_t out_length = 0;
+                aws_input_stream_get_length(input_stream, &out_length);
+                aws_byte_buf_init(&data, allocator, (size_t)out_length);
+                /* Read everything into the buf */
+                aws_input_stream_read(input_stream, &data);
+                /* Seek back to beginning for upload. */
+                aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
+                /* Get the checksum from the buf */
+                out_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
+                ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
+                    allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, out_encoded_checksum));
+                aws_byte_buf_clean_up(&data);
+            }
 
             /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
             if (options->put_options.file_on_disk) {
@@ -1738,6 +1764,21 @@ int aws_s3_tester_send_meta_request_with_options(
                     test_object_path,
                     upload_size_bytes,
                     options->sse_type);
+            }
+
+            if (options->put_options.full_object_checksum == AWS_TEST_FOC_HEADER) {
+                struct aws_http_headers *headers = aws_http_message_get_headers(message);
+                const struct aws_byte_cursor header_name =
+                    aws_get_http_header_name_from_checksum_algorithm(options->checksum_algorithm);
+                ASSERT_SUCCESS(
+                    aws_http_headers_set(headers, header_name, aws_byte_cursor_from_buf(out_encoded_checksum)));
+                aws_byte_buf_clean_up(out_encoded_checksum);
+                aws_mem_release(allocator, out_encoded_checksum);
+            } else if (options->put_options.full_object_checksum == AWS_TEST_FOC_CALLBACK) {
+                /* Set the full object checksum via the callback. */
+                checksum_config.full_object_checksum_callback = s_full_object_checksum_callback;
+                out_encoded_checksum->allocator = allocator;
+                checksum_config.user_data = out_encoded_checksum;
             }
 
             if (options->put_options.content_length) {
@@ -1767,37 +1808,6 @@ int aws_s3_tester_send_meta_request_with_options(
                     .value = options->put_options.content_encoding,
                 };
                 aws_http_message_add_header(message, content_encoding_header);
-            }
-
-            if (options->put_options.full_object_checksum != AWS_TEST_FOC_NONE) {
-                struct aws_http_headers *headers = aws_http_message_get_headers(message);
-                ASSERT_NOT_NULL(input_stream);
-                struct aws_byte_buf data;
-                int64_t out_length = 0;
-                aws_input_stream_get_length(input_stream, &out_length);
-                aws_byte_buf_init(&data, allocator, (size_t)out_length);
-                /* Read everything into the buf */
-                aws_input_stream_read(input_stream, &data);
-                /* Seek back to beginning for upload. */
-                aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
-                /* Get the checksum from the buf */
-                struct aws_byte_buf *out_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
-                ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
-                    allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, out_encoded_checksum));
-                aws_byte_buf_clean_up(&data);
-                if (options->put_options.full_object_checksum == AWS_TEST_FOC_HEADER) {
-                    const struct aws_byte_cursor header_name =
-                        aws_get_http_header_name_from_checksum_algorithm(options->checksum_algorithm);
-                    ASSERT_SUCCESS(
-                        aws_http_headers_set(headers, header_name, aws_byte_cursor_from_buf(out_encoded_checksum)));
-                    aws_byte_buf_clean_up(out_encoded_checksum);
-                    aws_mem_release(allocator, out_encoded_checksum);
-                } else {
-                    /* Set the full object checksum via the callback. */
-                    checksum_config.full_object_checksum_callback = s_full_object_checksum_callback;
-                    out_encoded_checksum->allocator = allocator;
-                    checksum_config.user_data = out_encoded_checksum;
-                }
             }
             if (options->put_options.if_none_match_header.ptr != NULL) {
                 struct aws_http_header if_none_match_header = {

@@ -48,6 +48,7 @@ python3 test_helper.py clean
   + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
   + Upload files:
     - `pre-existing-10MB` 10MB file.
+    - `pre-existing-1MB` 1MB file.
     - with `--large_objects` enabled
       - `pre-existing-2GB`
 
@@ -55,6 +56,7 @@ python3 test_helper.py clean
   + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
   + Upload files:
     - `pre-existing-10MB` 10MB file.
+    - `pre-existing-1MB` 1MB file.
     - with `--large_objects` enabled
       - `pre-existing-2GB`
 
