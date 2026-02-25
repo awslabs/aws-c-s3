@@ -635,3 +635,38 @@ static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws
 AWS_TEST_CASE(
     test_s3_buffer_pool_forced_buffer_wont_stop_reservations,
     s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations)
+
+
+/* Test small requests reserve expected amount of mem without rounding up to part size. */
+static int s_test_s3_buffer_pool_reserve_tiny_chunks(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    const size_t chunk_size = MB_TO_BYTES(8);
+    const size_t small_size = MB_TO_BYTES(1);
+    const size_t mem_limit = GB_TO_BYTES(1);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = chunk_size, .memory_limit = mem_limit});
+
+    struct aws_s3_buffer_ticket *ticket = NULL;
+    struct aws_future_s3_buffer_ticket *future =
+        aws_s3_default_buffer_pool_reserve(buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = small_size});
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+    ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(future), AWS_OP_SUCCESS);
+    normal_ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+    struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
+    ASSERT_UINT_EQUALS(small, buf.capacity);
+
+    struct aws_s3_default_buffer_pool_usage_stats stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
+    ASSERT_INT_EQUALS(small_size, stats.secondary_used);
+
+    aws_s3_buffer_ticket_release(ticket);
+    aws_future_s3_buffer_ticket_release(future);
+
+    ASSERT_INT_EQUALS(0, stats.secondary_used);
+
+    /* Cleanup */
+    aws_s3_default_buffer_pool_destroy(buffer_pool);
+    return 0;
+}
+AWS_TEST_CASE(
+    test_s3_buffer_pool_reserve_tiny_chunks,
+    s_test_s3_buffer_pool_reserve_tiny_chunks)

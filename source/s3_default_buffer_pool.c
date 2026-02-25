@@ -45,6 +45,12 @@
 
 struct aws_s3_default_buffer_pool;
 
+enum aws_s3_default_buffer_pool_reserved_from {
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY,
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY,
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL,
+};
+
 struct aws_s3_default_buffer_ticket {
     size_t size;
     uint8_t *ptr;
@@ -52,6 +58,7 @@ struct aws_s3_default_buffer_ticket {
     bool forced;
     struct aws_s3_buffer_pool *pool;
     bool is_special_block; /* True if this ticket is from a special-sized block */
+    enum aws_s3_default_buffer_pool_reserved_from reserved_from /* which area ticket was reserved from */
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
@@ -81,6 +88,12 @@ static const size_t s_max_chunk_size_for_buffer_reuse = MB_TO_BYTES(64);
  * For example: if mem_limit is 10GiB, and forced_use is 11GiB, and THIS number is 90(%),
  * we still consider 1GiB available for normal buffer usage. */
 static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage = 80;
+
+/*
+ * primary min cut off. below this number buffers are not allocated from primary and instead use
+ * secondary. 
+ */
+static const size_t s_primary_min_cutoff = KB_TO_BYTES(128);
 
 /*
  * Sets n bits at position starting with LSB.
@@ -232,6 +245,18 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         chunk_size = 0;
     }
 
+    /*
+    * This is fairly arbitrary. System allocator tends to be a bit better on tiny allocations.
+    * And we want to avoid wasting mem in that case.
+    * Note this is not the answer for wasting mem, but it does improve some corner cases.
+    */
+    size_t min_primary_size = 0;
+    if (4 * chunk_size >= s_primary_min_cutoff) {
+        min_primary_size = s_primary_min_cutoff;
+    } else {
+        min_primary_size = 0;
+    }
+
     size_t page_size = aws_system_info_page_size();
     /* TODO: if people override their allocator, this will not wrap their allocator at all. eg: mem-tracing allocator
      * will be ignored. */
@@ -248,6 +273,7 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
      * Tries to balance between how many allocations use buffer and buffer space
      * being wasted. */
     buffer_pool->primary_size_cutoff = chunk_size * 4;
+    buffer_pool->primary_size_min_cutoff = min_primary_size;
     buffer_pool->mem_limit = adjusted_mem_lim;
 
     int mutex_error = aws_mutex_init(&buffer_pool->mutex);
@@ -395,16 +421,18 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
         if (ticket->ptr == NULL) {
             /* Ticket was never used, make sure to clean up reserved count. */
-            if (ticket->is_special_block) {
+            if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
                 buffer_pool->special_blocks_reserved -= ticket->size;
-            } else if (ticket->size <= buffer_pool->primary_size_cutoff) {
+            } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY) {
                 buffer_pool->primary_reserved -= ticket->size;
-            } else {
+            } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY) {
                 buffer_pool->secondary_reserved -= ticket->size;
+            } else {
+                AWS_ASSERT(false); /* someone forgot to update this after adding new member. */
             }
         } else {
             /* Handle special block returns */
-            if (ticket->is_special_block) {
+            if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
                 struct aws_hash_element *elem = NULL;
                 aws_hash_table_find(&buffer_pool->special_blocks, (void *)ticket->size, &elem);
                 /* TODO: the lifetime between the ticket and the special block, let's assume the block will always be
@@ -427,7 +455,7 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
                 /* Make sure we do find where the ticket buffer from the list. */
                 AWS_FATAL_ASSERT(found);
                 buffer_pool->special_blocks_used -= ticket->size;
-            } else if (ticket->size <= buffer_pool->primary_size_cutoff) {
+            } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY) {
 
                 size_t chunks_used = ticket->size / buffer_pool->chunk_size;
                 if (ticket->size % buffer_pool->chunk_size != 0) {
@@ -455,13 +483,15 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
                 if (ticket->forced) {
                     buffer_pool->forced_used -= ticket->size;
                 }
-            } else {
+            } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY) {
                 aws_mem_release(buffer_pool->base_allocator, ticket->ptr);
                 buffer_pool->secondary_used -= ticket->size;
 
                 if (ticket->forced) {
                     buffer_pool->forced_used -= ticket->size;
                 }
+            } else {
+                AWS_ASSERT(false); /* someone forgot to update this after adding new member. */
             }
         }
         aws_mem_release(buffer_pool->base_allocator, ticket);
@@ -609,10 +639,18 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
         /* Check if this is a special-sized allocation */
         if (from_special) {
             ticket->is_special_block = true;
+            ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL;
             buffer_pool->special_blocks_reserved += meta.size;
-        } else if (meta.size <= buffer_pool->primary_size_cutoff) {
-            buffer_pool->primary_reserved += meta.size;
+        } else if (meta.size <= buffer_pool->primary_size_cutoff) { /* TODO: this needs to be smarter. what if block size more than mem_lim*/
+            if (meta.size <= buffer_pool->primary_size_min_cutoff) {
+                ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY;
+                buffer_pool->secondary_reserved += meta.size;
+            } else {
+                ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY;
+                buffer_pool->primary_reserved += meta.size;
+            }
         } else {
+            ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY;
             buffer_pool->secondary_reserved += meta.size;
         }
     }

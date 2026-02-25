@@ -91,6 +91,9 @@ struct aws_s3_default_buffer_pool {
     /* size at which allocations should go to secondary */
     size_t primary_size_cutoff;
 
+    /* size below which allocations should go to secondary */
+    size_t primary_size_min_cutoff;
+
     /* NOTE: See aws_s3_buffer_pool_usage_stats for descriptions of most fields */
 
     size_t mem_limit;
