@@ -14,11 +14,15 @@ struct aws_s3_upload_request_checksum_context;
 
 /* List to check the checksum algorithm to use based on the priority. */
 static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
+    AWS_SCA_XXHASH3_128,
+    AWS_SCA_XXHASH3_64,
     AWS_SCA_CRC64NVME,
     AWS_SCA_CRC32C,
     AWS_SCA_CRC32,
-    AWS_SCA_SHA1,
+    AWS_SCA_XXHASH64,
+    AWS_SCA_SHA512,
     AWS_SCA_SHA256,
+    AWS_SCA_SHA1,
 };
 AWS_STATIC_ASSERT(AWS_ARRAY_SIZE(s_checksum_algo_priority_list) == (AWS_SCA_END - AWS_SCA_INIT + 1));
 
@@ -36,6 +40,7 @@ struct aws_s3_checksum {
     bool good;
     union {
         struct aws_hash *hash;
+        struct aws_xxhash *xxhash;
         uint32_t crc_val_32bit;
         uint64_t crc_val_64bit;
     } impl;
@@ -58,6 +63,10 @@ struct aws_s3_meta_request_checksum_config_storage {
         bool crc32;
         bool sha1;
         bool sha256;
+        bool sha512;
+        bool xxhash64;
+        bool xxhash3_64;
+        bool xxhash3_128;
     } response_checksum_algorithms;
 };
 

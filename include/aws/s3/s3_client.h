@@ -283,7 +283,11 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
     AWS_SCA_CRC64NVME,
-    AWS_SCA_END = AWS_SCA_CRC64NVME,
+    AWS_SCA_SHA512,
+    AWS_SCA_XXHASH64,
+    AWS_SCA_XXHASH3_64,
+    AWS_SCA_XXHASH3_128,
+    AWS_SCA_END = AWS_SCA_XXHASH3_128,
 };
 
 enum aws_s3_checksum_location {

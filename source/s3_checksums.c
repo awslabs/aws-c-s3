@@ -2,17 +2,29 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/cal/hash.h>
 #include <aws/checksums/crc.h>
+#include <aws/checksums/xxhash.h>
 #include <aws/http/request_response.h>
 
 #define AWS_CRC32_LEN sizeof(uint32_t)
 #define AWS_CRC32C_LEN sizeof(uint32_t)
 #define AWS_CRC64_LEN sizeof(uint64_t)
 
+enum {
+    AWS_XXHASH64_LEN = 64,
+    AWS_XXHASH3_64_LEN = 64,
+    AWS_XXHASH3_128_LEN = 128,
+};
+
 static const struct aws_byte_cursor s_crc64nvme_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC64NVME");
 static const struct aws_byte_cursor s_crc32c_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32C");
 static const struct aws_byte_cursor s_crc32_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC32");
 static const struct aws_byte_cursor s_sha1_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA1");
 static const struct aws_byte_cursor s_sha256_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA256");
+static const struct aws_byte_cursor s_sha512_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA512");
+static const struct aws_byte_cursor s_xxhash64_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH64");
+static const struct aws_byte_cursor s_xxhash3_64_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH3_64");
+static const struct aws_byte_cursor s_xxhash3_128_algorithm_value =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH3_128");
 
 static const struct aws_byte_cursor s_crc64nvme_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc64nvme");
@@ -22,6 +34,14 @@ static const struct aws_byte_cursor s_crc32_header_name = AWS_BYTE_CUR_INIT_FROM
 static const struct aws_byte_cursor s_sha1_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1");
 static const struct aws_byte_cursor s_sha256_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256");
+static const struct aws_byte_cursor s_sha512_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha512");
+static const struct aws_byte_cursor s_xxhash64_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-xxhash64");
+static const struct aws_byte_cursor s_xxhash3_64_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-xxhash3");
+static const struct aws_byte_cursor s_xxhash3_128_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-xxhash128");
 
 static const struct aws_byte_cursor s_crc64nvme_completed_part_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumCRC64NVME");
@@ -32,6 +52,14 @@ static const struct aws_byte_cursor s_crc32_completed_part_name =
 static const struct aws_byte_cursor s_sha1_completed_part_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA1");
 static const struct aws_byte_cursor s_sha256_completed_part_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA256");
+static const struct aws_byte_cursor s_sha512_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumSHA512");
+static const struct aws_byte_cursor s_xxhash64_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumXXHASH64");
+static const struct aws_byte_cursor s_xxhash3_64_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumXXHASH3");
+static const struct aws_byte_cursor s_xxhash3_128_completed_part_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("ChecksumXXHASH128");
 static const struct aws_byte_cursor s_empty_cursor = {
     .len = 0,
     .ptr = NULL,
@@ -49,6 +77,14 @@ size_t aws_get_digest_size_from_checksum_algorithm(enum aws_s3_checksum_algorith
             return AWS_SHA1_LEN;
         case AWS_SCA_SHA256:
             return AWS_SHA256_LEN;
+        case AWS_SCA_SHA512:
+            return AWS_SHA512_LEN;
+        case AWS_SCA_XXHASH64:
+            return AWS_XXHASH64_LEN;
+        case AWS_SCA_XXHASH3_64:
+            return AWS_XXHASH3_64_LEN;
+        case AWS_SCA_XXHASH3_128:
+            return AWS_XXHASH3_128_LEN;
         default:
             return 0;
     }
@@ -66,6 +102,14 @@ struct aws_byte_cursor aws_get_http_header_name_from_checksum_algorithm(enum aws
             return s_sha1_header_name;
         case AWS_SCA_SHA256:
             return s_sha256_header_name;
+        case AWS_SCA_SHA512:
+            return s_sha512_header_name;
+        case AWS_SCA_XXHASH64:
+            return s_xxhash64_header_name;
+        case AWS_SCA_XXHASH3_64:
+            return s_xxhash3_64_header_name;
+        case AWS_SCA_XXHASH3_128:
+            return s_xxhash3_128_header_name;
         default:
             return s_empty_cursor;
     }
@@ -83,6 +127,14 @@ struct aws_byte_cursor aws_get_checksum_algorithm_name(enum aws_s3_checksum_algo
             return s_sha1_algorithm_value;
         case AWS_SCA_SHA256:
             return s_sha256_algorithm_value;
+        case AWS_SCA_SHA512:
+            return s_sha512_algorithm_value;
+        case AWS_SCA_XXHASH64:
+            return s_xxhash64_algorithm_value;
+        case AWS_SCA_XXHASH3_64:
+            return s_xxhash3_64_algorithm_value;
+        case AWS_SCA_XXHASH3_128:
+            return s_xxhash3_128_algorithm_value;
         default:
             return s_empty_cursor;
     }
@@ -100,6 +152,14 @@ struct aws_byte_cursor aws_get_completed_part_name_from_checksum_algorithm(enum 
             return s_sha1_completed_part_name;
         case AWS_SCA_SHA256:
             return s_sha256_completed_part_name;
+        case AWS_SCA_SHA512:
+            return s_sha512_completed_part_name;
+        case AWS_SCA_XXHASH64:
+            return s_xxhash64_completed_part_name;
+        case AWS_SCA_XXHASH3_64:
+            return s_xxhash3_64_completed_part_name;
+        case AWS_SCA_XXHASH3_128:
+            return s_xxhash3_128_completed_part_name;
         default:
             return s_empty_cursor;
     }
@@ -118,6 +178,20 @@ int s3_hash_update(struct aws_s3_checksum *checksum, const struct aws_byte_curso
 int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
     checksum->good = false;
     return aws_hash_finalize(checksum->impl.hash, output, 0);
+}
+
+void s_xxhash_destroy(struct aws_s3_checksum *checksum) {
+    struct aws_xxhash *hash = checksum->impl.xxhash;
+    aws_xxhash_destroy(hash);
+}
+
+int s_xxhash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
+    return aws_xxhash_update(checksum->impl.xxhash, *to_checksum);
+}
+
+int s_xxhash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
+    checksum->good = false;
+    return aws_xxhash_finalize(checksum->impl.xxhash, output);
 }
 
 static int s_crc_finalize_helper(struct aws_s3_checksum *checksum, struct aws_byte_buf *out) {
@@ -185,6 +259,12 @@ static struct aws_checksum_vtable hash_vtable = {
     .destroy = s3_hash_destroy,
 };
 
+static struct aws_checksum_vtable s_xxhash_vtable = {
+    .update = s_xxhash_update,
+    .finalize = s_xxhash_finalize,
+    .destroy = s_xxhash_destroy,
+};
+
 static struct aws_checksum_vtable crc32_vtable = {
     .update = s_crc32_checksum_update,
     .finalize = s_crc32_finalize,
@@ -214,6 +294,27 @@ struct aws_s3_checksum *aws_hash_new(struct aws_allocator *allocator, aws_hash_n
     checksum->vtable = &hash_vtable;
     checksum->good = true;
     checksum->digest_size = hash->digest_size;
+    return checksum;
+}
+
+typedef struct aws_xxhash *(aws_xxhash_new_fn)(struct aws_allocator *allocator, uint64_t seed);
+
+struct aws_s3_checksum *s_aws_xxhash_new(
+    struct aws_allocator *allocator,
+    aws_xxhash_new_fn hash_fn,
+    size_t digest_size) {
+    struct aws_s3_checksum *checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_checksum));
+    struct aws_xxhash *hash = hash_fn(allocator, 0);
+    if (!hash) {
+        aws_mem_release(allocator, checksum);
+        aws_raise_error(aws_last_error_or_unknown());
+        return NULL;
+    }
+    checksum->impl.xxhash = hash;
+    checksum->allocator = allocator;
+    checksum->vtable = &s_xxhash_vtable;
+    checksum->good = true;
+    checksum->digest_size = digest_size;
     return checksum;
 }
 
@@ -265,6 +366,18 @@ struct aws_s3_checksum *aws_checksum_new(struct aws_allocator *allocator, enum a
             break;
         case AWS_SCA_SHA256:
             checksum = aws_hash_new(allocator, aws_sha256_new);
+            break;
+        case AWS_SCA_SHA512:
+            checksum = aws_hash_new(allocator, aws_sha512_new);
+            break;
+        case AWS_SCA_XXHASH64:
+            checksum = s_aws_xxhash_new(allocator, aws_xxhash64_new, 64);
+            break;
+        case AWS_SCA_XXHASH3_64:
+            checksum = s_aws_xxhash_new(allocator, aws_xxhash3_64_new, 64);
+            break;
+        case AWS_SCA_XXHASH3_128:
+            checksum = s_aws_xxhash_new(allocator, aws_xxhash3_128_new, 128);
             break;
         default:
             return NULL;
@@ -320,6 +433,14 @@ int aws_checksum_compute(
             return aws_sha1_compute(allocator, input, output, 0);
         case AWS_SCA_SHA256:
             return aws_sha256_compute(allocator, input, output, 0);
+        case AWS_SCA_SHA512:
+            return aws_sha512_compute(allocator, input, output, 0);
+        case AWS_SCA_XXHASH64:
+            return aws_xxhash64_compute(0, *input, output);
+        case AWS_SCA_XXHASH3_64:
+            return aws_xxhash3_64_compute(0, *input, output);
+        case AWS_SCA_XXHASH3_128:
+            return aws_xxhash3_128_compute(0, *input, output);
         case AWS_SCA_CRC64NVME:
             return s_checksum_compute_fn(allocator, input, output, s_crc64nvme_checksum_new);
         case AWS_SCA_CRC32:
@@ -466,6 +587,18 @@ int aws_s3_meta_request_checksum_config_storage_init(
                 case AWS_SCA_SHA256:
                     internal_config->response_checksum_algorithms.sha256 = true;
                     break;
+                case AWS_SCA_SHA512:
+                    internal_config->response_checksum_algorithms.sha512 = true;
+                    break;
+                case AWS_SCA_XXHASH64:
+                    internal_config->response_checksum_algorithms.xxhash64 = true;
+                    break;
+                case AWS_SCA_XXHASH3_64:
+                    internal_config->response_checksum_algorithms.xxhash3_64 = true;
+                    break;
+                case AWS_SCA_XXHASH3_128:
+                    internal_config->response_checksum_algorithms.xxhash3_128 = true;
+                    break;
                 default:
                     break;
             }
@@ -477,6 +610,10 @@ int aws_s3_meta_request_checksum_config_storage_init(
         internal_config->response_checksum_algorithms.crc32c = true;
         internal_config->response_checksum_algorithms.sha1 = true;
         internal_config->response_checksum_algorithms.sha256 = true;
+        internal_config->response_checksum_algorithms.sha512 = true;
+        internal_config->response_checksum_algorithms.xxhash64 = true;
+        internal_config->response_checksum_algorithms.xxhash3_64 = true;
+        internal_config->response_checksum_algorithms.xxhash3_128 = true;
     }
 
     /* After applying settings from config, check the message header to override the corresponding settings. */
