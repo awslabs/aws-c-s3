@@ -165,31 +165,32 @@ struct aws_byte_cursor aws_get_completed_part_name_from_checksum_algorithm(enum 
     }
 }
 
-void s3_hash_destroy(struct aws_s3_checksum *checksum) {
+static void s_hash_destroy(struct aws_s3_checksum *checksum) {
     struct aws_hash *hash = checksum->impl.hash;
     aws_hash_destroy(hash);
     aws_mem_release(checksum->allocator, checksum);
 }
 
-int s3_hash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
+static int s_hash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
     return aws_hash_update(checksum->impl.hash, to_checksum);
 }
 
-int s3_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
+static int s_hash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
     checksum->good = false;
     return aws_hash_finalize(checksum->impl.hash, output, 0);
 }
 
-void s_xxhash_destroy(struct aws_s3_checksum *checksum) {
+static void s_xxhash_destroy(struct aws_s3_checksum *checksum) {
     struct aws_xxhash *hash = checksum->impl.xxhash;
     aws_xxhash_destroy(hash);
+    aws_mem_release(checksum->allocator, checksum);
 }
 
-int s_xxhash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
+static int s_xxhash_update(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *to_checksum) {
     return aws_xxhash_update(checksum->impl.xxhash, *to_checksum);
 }
 
-int s_xxhash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
+static int s_xxhash_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
     checksum->good = false;
     return aws_xxhash_finalize(checksum->impl.xxhash, output);
 }
@@ -254,9 +255,9 @@ static void s_crc_destroy(struct aws_s3_checksum *checksum) {
 }
 
 static struct aws_checksum_vtable hash_vtable = {
-    .update = s3_hash_update,
-    .finalize = s3_hash_finalize,
-    .destroy = s3_hash_destroy,
+    .update = s_hash_update,
+    .finalize = s_hash_finalize,
+    .destroy = s_hash_destroy,
 };
 
 static struct aws_checksum_vtable s_xxhash_vtable = {
