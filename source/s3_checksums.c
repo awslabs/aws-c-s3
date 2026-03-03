@@ -10,9 +10,9 @@
 #define AWS_CRC64_LEN sizeof(uint64_t)
 
 enum {
-    AWS_XXHASH64_LEN = 64,
-    AWS_XXHASH3_64_LEN = 64,
-    AWS_XXHASH3_128_LEN = 128,
+    AWS_XXHASH64_LEN = 8,
+    AWS_XXHASH3_64_LEN = 8,
+    AWS_XXHASH3_128_LEN = 16,
 };
 
 static const struct aws_byte_cursor s_crc64nvme_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRC64NVME");
@@ -372,17 +372,18 @@ struct aws_s3_checksum *aws_checksum_new(struct aws_allocator *allocator, enum a
             checksum = aws_hash_new(allocator, aws_sha512_new);
             break;
         case AWS_SCA_XXHASH64:
-            checksum = s_aws_xxhash_new(allocator, aws_xxhash64_new, 64);
+            checksum = s_aws_xxhash_new(allocator, aws_xxhash64_new, AWS_XXHASH64_LEN);
             break;
         case AWS_SCA_XXHASH3_64:
-            checksum = s_aws_xxhash_new(allocator, aws_xxhash3_64_new, 64);
+            checksum = s_aws_xxhash_new(allocator, aws_xxhash3_64_new, AWS_XXHASH3_64_LEN);
             break;
         case AWS_SCA_XXHASH3_128:
-            checksum = s_aws_xxhash_new(allocator, aws_xxhash3_128_new, 128);
+            checksum = s_aws_xxhash_new(allocator, aws_xxhash3_128_new, AWS_XXHASH3_128_LEN);
             break;
         default:
             return NULL;
     }
+
     if (checksum != NULL) {
         checksum->algorithm = algorithm;
     }
