@@ -4139,7 +4139,6 @@ static int s_test_s3_round_trip_default_get_fc_helper(
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
-
         /*** GET FILE ***/
 
         struct aws_s3_tester_meta_request_options get_options = {

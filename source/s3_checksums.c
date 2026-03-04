@@ -23,8 +23,7 @@ static const struct aws_byte_cursor s_sha256_algorithm_value = AWS_BYTE_CUR_INIT
 static const struct aws_byte_cursor s_sha512_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("SHA512");
 static const struct aws_byte_cursor s_xxhash64_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH64");
 static const struct aws_byte_cursor s_xxhash3_64_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH3");
-static const struct aws_byte_cursor s_xxhash3_128_algorithm_value =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH128");
+static const struct aws_byte_cursor s_xxhash3_128_algorithm_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("XXHASH128");
 
 static const struct aws_byte_cursor s_crc64nvme_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc64nvme");
