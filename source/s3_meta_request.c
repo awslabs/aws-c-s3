@@ -1425,8 +1425,13 @@ static int s_s3_meta_request_incoming_headers(
                     }
                     if (request->part_range_end != object_range_end) {
                         /* In the case where the object size is less than the range requested. It must be return the
-                         * last part to the end of the object. */
-                        if (object_size != object_range_end + 1 || request->part_range_end < object_range_end) {
+                         * last part to the end of the object. 
+                         * Note: that when get with part 1 is used we dont know how big the buffer will be. We optimistically allocate
+                         * part sized buffer, and see if its enough. If its over, the req will get canceled. So in that case skip validation
+                         * on expected size.
+                         */
+                        if (request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1 && 
+                            (object_size != object_range_end + 1 || request->part_range_end < object_range_end)) {
                             /* Something went wrong if it's matching. Log the error. */
                             AWS_LOGF_ERROR(
                                 AWS_LS_S3_META_REQUEST,
