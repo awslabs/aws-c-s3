@@ -58,7 +58,7 @@ struct aws_s3_default_buffer_ticket {
     bool forced;
     struct aws_s3_buffer_pool *pool;
     bool is_special_block; /* True if this ticket is from a special-sized block */
-    enum aws_s3_default_buffer_pool_reserved_from reserved_from /* which area ticket was reserved from */
+    enum aws_s3_default_buffer_pool_reserved_from reserved_from; /* which area ticket was reserved from */
 };
 
 /* Default size for blocks array. Note: this is just for meta info, blocks
