@@ -601,9 +601,10 @@ static bool s_should_trim_for_reserve_synced(
 static int s_align_up_to_block_size(size_t size, size_t block_size, size_t *out) {
     AWS_FATAL_ASSERT(block_size > 0);
     size_t remainder = size % block_size;
-    if (remainder == 0)
+    if (remainder == 0) {
         *out = size;
         return AWS_OP_SUCCESS;
+    }
 
     size_t sub = 0;
     if (!aws_sub_size_checked(block_size, remainder, &sub)) {
