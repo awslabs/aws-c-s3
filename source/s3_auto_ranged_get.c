@@ -301,8 +301,7 @@ static bool s_s3_auto_ranged_get_update(
                         AWS_LOGF_INFO(
                             AWS_LS_S3_META_REQUEST,
                             "id=%p: Doing a ranged get to discover the size of the object and get the first part",
-                            (void *)meta_request
-                        );
+                            (void *)meta_request);
 
                         request = aws_s3_request_new(
                             meta_request,
