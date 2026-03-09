@@ -712,8 +712,7 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
         ticket->forced = true;
         ticket->pool = buffer_pool_wrapper;
 
-        if (meta.size <= buffer_pool->primary_size_cutoff && 
-            meta.size >= buffer_pool->primary_size_min_cutoff) {
+        if (meta.size <= buffer_pool->primary_size_cutoff && meta.size >= buffer_pool->primary_size_min_cutoff) {
             ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY;
         } else {
             ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY;

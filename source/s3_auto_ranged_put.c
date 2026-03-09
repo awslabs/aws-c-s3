@@ -637,8 +637,8 @@ static bool s_s3_auto_ranged_put_update(
 
                 s_compute_request_body_size(meta_request, request);
 
-                AWS_LOGF_DEBUG(0, "foo %zu %zu %zu", request->content_length, 
-                    request->part_range_start, request->part_range_end);
+                AWS_LOGF_DEBUG(
+                    0, "foo %zu %zu %zu", request->content_length, request->part_range_start, request->part_range_end);
 
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
                  * but ultimately it gets marked no-op and we don't send it */
