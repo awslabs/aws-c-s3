@@ -93,7 +93,7 @@ static const size_t s_max_impact_of_forced_buffers_on_memory_limit_as_percentage
  * primary min cut off. below this number buffers are not allocated from primary and instead use
  * secondary.
  */
-static const size_t s_primary_min_cutoff = KB_TO_BYTES(128);
+static const size_t s_primary_min_cutoff = KB_TO_BYTES(512);
 
 /*
  * Sets n bits at position starting with LSB.

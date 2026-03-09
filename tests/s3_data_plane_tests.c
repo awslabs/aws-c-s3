@@ -4131,7 +4131,7 @@ static int s_test_s3_round_trip_default_get_fc_helper(
                     .object_path_override = object_path,
                 },
         };
-        if (algorithm == AWS_SCA_CRC32 && algorithm == AWS_SCA_CRC32C && algorithm == AWS_SCA_CRC64NVME) {
+        if (algorithm == AWS_SCA_CRC32 || algorithm == AWS_SCA_CRC32C || algorithm == AWS_SCA_CRC64NVME) {
             /* Full object checksums doesn't support SHA or XXHASH. */
             put_options.put_options.full_object_checksum = full_object_checksum;
         }

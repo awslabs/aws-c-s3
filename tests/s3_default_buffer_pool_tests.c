@@ -644,7 +644,7 @@ AWS_TEST_CASE(
 static int s_test_s3_buffer_pool_reserve_tiny_chunks(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     const size_t chunk_size = MB_TO_BYTES(8);
-    const size_t small_size = KB_TO_BYTES(1);
+    const size_t small_size = KB_TO_BYTES(128);
     const size_t mem_limit = GB_TO_BYTES(1);
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
         allocator, (struct aws_s3_buffer_pool_config){.part_size = chunk_size, .memory_limit = mem_limit});
