@@ -862,7 +862,7 @@ static struct aws_byte_buf s_acquire_buffer_synced(
     } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY) {
         ticket->ptr = s_primary_acquire_synced(buffer_pool, ticket);
     } else {
-        AWS_ASSERT(ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY)
+        AWS_ASSERT(ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY);
         ticket->ptr = aws_mem_acquire(buffer_pool->base_allocator, ticket->size);
         buffer_pool->secondary_used += ticket->size;
 
