@@ -598,11 +598,12 @@ static bool s_should_trim_for_reserve_synced(
     return true;
 }
 
-static size_t s_align_up_to_block_size(size_t size, size_t block_size, size_t *out) {
+static int s_align_up_to_block_size(size_t size, size_t block_size, size_t *out) {
     AWS_FATAL_ASSERT(block_size > 0);
     size_t remainder = size % block_size;
     if (remainder == 0)
-        return size;
+        *out = size;
+        return AWS_OP_SUCCESS;
 
     size_t sub = 0;
     if (!aws_sub_size_checked(block_size, remainder, &sub)) {
@@ -647,6 +648,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
         overall_taken -= buffer_pool->forced_used - max_impact_of_forced_on_limit;
     }
 
+    AWS_LOGF_DEBUG(0, "foo");
     if ((meta.size + overall_taken) <= buffer_pool->mem_limit) {
         ticket = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_default_buffer_ticket));
         ticket->size = meta.size;
@@ -660,6 +662,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
         } else if (meta.size <= buffer_pool->primary_size_cutoff) {
             /* This needs to be smarter. Currently if primary req size is below limit, it will allocate full block,
                 which can be above limit. */
+            AWS_LOGF_DEBUG(0, "foo1");
             if (meta.size <= buffer_pool->primary_size_min_cutoff) {
                 ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY;
                 buffer_pool->secondary_reserved += meta.size;
@@ -683,6 +686,7 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
                 }
             }
         } else {
+            AWS_LOGF_DEBUG(0, "foo2");
             ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY;
             buffer_pool->secondary_reserved += meta.size;
         }
@@ -709,6 +713,13 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
         ticket->size = meta.size;
         ticket->forced = true;
         ticket->pool = buffer_pool_wrapper;
+
+        if (meta.size <= buffer_pool->primary_size_cutoff && 
+            meta.size >= buffer_pool->primary_size_min_cutoff) {
+            ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY;
+        } else {
+            ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY;
+        }
 
     } else {
         ticket = s_try_reserve_synced(buffer_pool_wrapper, meta);
