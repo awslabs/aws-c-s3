@@ -44,6 +44,9 @@ struct aws_s3_default_buffer_pool_usage_stats {
     /* Max size of buffer to be allocated from primary. */
     size_t primary_cutoff;
 
+    /* Min size of buffer to be allocated from primary. */
+    size_t primary_min_cutoff;
+
     /* Overall memory allocated for blocks. */
     size_t primary_allocated;
     /* Number of blocks allocated in primary. */

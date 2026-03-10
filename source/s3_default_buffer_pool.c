@@ -896,6 +896,7 @@ struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usa
     struct aws_s3_default_buffer_pool_usage_stats ret = (struct aws_s3_default_buffer_pool_usage_stats){
         .mem_limit = buffer_pool->mem_limit,
         .primary_cutoff = buffer_pool->primary_size_cutoff,
+        .primary_min_cutoff = buffer_pool->primary_size_min_cutoff,
         .primary_allocated = buffer_pool->primary_allocated,
         .primary_used = buffer_pool->primary_used,
         .primary_reserved = buffer_pool->primary_reserved,

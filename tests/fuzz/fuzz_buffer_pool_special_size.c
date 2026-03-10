@@ -84,6 +84,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* Get initial stats */
     struct aws_s3_default_buffer_pool_usage_stats initial_stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
     size_t primary_cutoff = initial_stats.primary_cutoff;
+    size_t primary_min_cutoff = initial_stats.primary_min_cutoff;
 
     /* Add special sizes - consume as much input as available */
     size_t special_sizes[MAX_SPECIAL_SIZES] = {0};
@@ -179,7 +180,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         } else if (size_type == 1) {
             /* Primary storage allocation (below primary_cutoff) */
             reservation_size = 1024 + (size_value % (primary_cutoff - 1024));
-            is_primary = true;
+            if (reservation_size < primary_min_cutoff) {
+                is_secondary = true;
+            } else {
+                is_primary = true;
+            }
         } else {
             /* Secondary storage allocation (above primary_cutoff, below smallest special size) */
             size_t secondary_range = special_sizes[0] - primary_cutoff - 1;

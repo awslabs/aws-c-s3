@@ -1430,7 +1430,11 @@ static int s_s3_meta_request_incoming_headers(
                          * optimistically allocate part sized buffer, and see if its enough. If its over, the req will
                          * get canceled. So in that case skip validation on expected size.
                          */
-                        if (request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1 &&
+                        bool is_unknown_len_part_req = 
+                            request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
+                            request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+
+                        if ( !is_unknown_len_part_req &&
                             (object_size != object_range_end + 1 || request->part_range_end < object_range_end)) {
                             /* Something went wrong if it's matching. Log the error. */
                             AWS_LOGF_ERROR(
