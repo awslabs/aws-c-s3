@@ -1432,7 +1432,7 @@ static int s_s3_meta_request_incoming_headers(
                          */
                         bool is_unknown_len_part_req = 
                             request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
-                            request->request_tag != AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+                            request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
 
                         if ( !is_unknown_len_part_req &&
                             (object_size != object_range_end + 1 || request->part_range_end < object_range_end)) {
