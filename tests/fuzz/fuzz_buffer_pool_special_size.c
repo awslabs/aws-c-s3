@@ -180,22 +180,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         } else if (size_type == 1) {
             /* Primary storage allocation (below primary_cutoff) */
             reservation_size = 1024 + (size_value % (primary_cutoff - 1024));
-            if (reservation_size < primary_min_cutoff) {
-                is_secondary = true;
-            } else {
-                is_primary = true;
-            }
         } else {
             /* Secondary storage allocation (above primary_cutoff, below smallest special size) */
             size_t secondary_range = special_sizes[0] - primary_cutoff - 1;
-            if (secondary_range > 0) {
-                reservation_size = primary_cutoff + 1 + (size_value % secondary_range);
-                is_secondary = true;
-            } else {
-                /* Not enough space for secondary, use primary instead */
-                reservation_size = 1024 + (size_value % (primary_cutoff - 1024));
-                is_primary = true;
-            }
+            reservation_size = primary_cutoff + 1 + (size_value % secondary_range);
         }
 
         /*
@@ -232,6 +220,25 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         int error = aws_future_s3_buffer_ticket_get_error(future);
         AWS_FATAL_ASSERT(error == AWS_OP_SUCCESS);
 
+        /* Acquire the ticket */
+        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+        AWS_FATAL_ASSERT(ticket != NULL);
+
+        enum aws_s3_default_buffer_pool_reserved_from reserved_from =
+            aws_s3_default_buffer_pool_reserved_from(ticket->impl);
+
+        if (reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
+            AWS_FATAL_ASSERT(is_special); /* we know in advance all special blocks that must be reserved.*/
+            is_special = true;
+        } else if (reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY) {
+            is_primary = true; /* for primary and secondary there is a lot more rules so rely on pool for where its
+                                  allocated from*/
+        } else if (reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY) {
+            is_secondary = true;
+        } else {
+            AWS_FATAL_ASSERT(false);
+        }
+
         /* Update expected reserved based on type we determined earlier (including accidental special size check) */
         if (is_special) {
             expected_special_reserved += reservation_size;
@@ -252,10 +259,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         } else if (is_secondary) {
             AWS_FATAL_ASSERT(after_reserve_stats.secondary_reserved == expected_secondary_reserved);
         }
-
-        /* Acquire the ticket */
-        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
-        AWS_FATAL_ASSERT(ticket != NULL);
 
         /* Claim the buffer to verify it works */
         struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);

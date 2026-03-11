@@ -45,12 +45,6 @@
 
 struct aws_s3_default_buffer_pool;
 
-enum aws_s3_default_buffer_pool_reserved_from {
-    AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY,
-    AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY,
-    AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL,
-};
-
 struct aws_s3_default_buffer_ticket {
     size_t size;
     uint8_t *ptr;
@@ -996,4 +990,10 @@ static uint64_t s_default_pool_derive_aligned_buffer_size(
     }
     /* Return the aligned size */
     return chunks_needed * buffer_pool->chunk_size;
+}
+
+enum aws_s3_default_buffer_pool_reserved_from aws_s3_default_buffer_pool_get_ticket_reserved_from(
+    struct aws_s3_default_buffer_ticket *ticket) {
+    AWS_FATAL_ASSERT(ticket);
+    return ticket->reserved_from;
 }

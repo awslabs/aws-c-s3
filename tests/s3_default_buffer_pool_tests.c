@@ -262,6 +262,9 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
     }
 
     ASSERT_NOT_NULL(state.ticket);
+    ASSERT_INT_EQUALS(
+        aws_s3_default_buffer_pool_get_ticket_reserved_from(state.ticket->impl),
+        AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY);
 
     aws_s3_buffer_ticket_release(state.ticket);
     aws_future_s3_buffer_ticket_release(over_future);
