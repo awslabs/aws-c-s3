@@ -84,7 +84,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* Get initial stats */
     struct aws_s3_default_buffer_pool_usage_stats initial_stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
     size_t primary_cutoff = initial_stats.primary_cutoff;
-    size_t primary_min_cutoff = initial_stats.primary_min_cutoff;
 
     /* Add special sizes - consume as much input as available */
     size_t special_sizes[MAX_SPECIAL_SIZES] = {0};
@@ -225,7 +224,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         AWS_FATAL_ASSERT(ticket != NULL);
 
         enum aws_s3_default_buffer_pool_reserved_from reserved_from =
-            aws_s3_default_buffer_pool_reserved_from(ticket->impl);
+            aws_s3_default_buffer_pool_get_ticket_reserved_from(ticket->impl);
 
         if (reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
             AWS_FATAL_ASSERT(is_special); /* we know in advance all special blocks that must be reserved.*/
