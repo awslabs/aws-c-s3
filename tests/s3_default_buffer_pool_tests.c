@@ -238,11 +238,15 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
     struct aws_s3_buffer_ticket *tickets[112];
     struct aws_future_s3_buffer_ticket *ticket_futures[112];
     for (size_t i = 0; i < 112; ++i) {
+        AWS_LOGF_DEBUG(0, "reserving buffer %zu", i + 1);
         ticket_futures[i] = aws_s3_default_buffer_pool_reserve(
             buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
         tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
+        ASSERT_INT_EQUALS(
+            aws_s3_default_buffer_pool_get_ticket_reserved_from(tickets[i]->impl),
+            AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY);
         struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(tickets[i]);
         ASSERT_NOT_NULL(buf.buffer);
     }
