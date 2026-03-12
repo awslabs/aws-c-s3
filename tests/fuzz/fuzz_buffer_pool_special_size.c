@@ -182,7 +182,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         } else {
             /* Secondary storage allocation (above primary_cutoff, below smallest special size) */
             size_t secondary_range = special_sizes[0] - primary_cutoff - 1;
-            reservation_size = primary_cutoff + 1 + (size_value % secondary_range);
+            if (secondary_range > 0) {
+                reservation_size = primary_cutoff + 1 + (size_value % secondary_range);
+            } else {
+                /* Not enough space for secondary, use primary instead */
+                reservation_size = 1024 + (size_value % (primary_cutoff - 1024));
+            }
         }
 
         /*
