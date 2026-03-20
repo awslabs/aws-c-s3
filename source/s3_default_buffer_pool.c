@@ -416,14 +416,18 @@ static void s_aws_ticket_wrapper_destroy(void *data) {
 
         if (ticket->ptr == NULL) {
             /* Ticket was never used, make sure to clean up reserved count. */
-            if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
-                buffer_pool->special_blocks_reserved -= ticket->size;
-            } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY) {
-                buffer_pool->primary_reserved -= ticket->size;
-            } else if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY) {
-                buffer_pool->secondary_reserved -= ticket->size;
-            } else {
-                AWS_ASSERT(false); /* someone forgot to update this after adding new member. */
+            switch (ticket->reserved_from) {
+                case AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL:
+                    buffer_pool->special_blocks_reserved -= ticket->size;
+                    break;
+                case AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY:
+                    buffer_pool->primary_reserved -= ticket->size;
+                    break;
+                case AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY:
+                    buffer_pool->secondary_reserved -= ticket->size;
+                    break;
+                default:
+                    AWS_ASSERT(false); /* someone forgot to update this after adding new member. */
             }
         } else {
             /* Handle special block returns */
