@@ -797,7 +797,7 @@ static struct aws_byte_buf s_acquire_buffer_synced(
     AWS_PRECONDITION(ticket->ptr == NULL);
 
     AWS_LOGF_INFO(
-        AWS_LS_S3_CLIENT, "s_acquire_buffer_synced: size=%zu, reserved_from=%zu", ticket->size, ticket->reserved_from);
+        AWS_LS_S3_CLIENT, "s_acquire_buffer_synced: size=%zu, reserved_from=%u", ticket->size, ticket->reserved_from);
 
     /* Check if this is a special-sized allocation */
     if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
