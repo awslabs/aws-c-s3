@@ -192,13 +192,13 @@ AWS_S3_API struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_p
     struct aws_s3_buffer_pool *buffer_pool);
 
 enum aws_s3_default_buffer_pool_reserved_from {
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY = 0,
     AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY,
-    AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY,
     AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL,
 };
 
 /*
- * Helper to determine which are of default buffer pool ticket was reserved from.
+ * Helper to determine which area of default buffer pool ticket was reserved from.
  */
 AWS_S3_API enum aws_s3_default_buffer_pool_reserved_from aws_s3_default_buffer_pool_get_ticket_reserved_from(
     struct aws_s3_default_buffer_ticket *ticket);

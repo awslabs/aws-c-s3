@@ -51,7 +51,6 @@ struct aws_s3_default_buffer_ticket {
     size_t chunks_used;
     bool forced;
     struct aws_s3_buffer_pool *pool;
-    bool is_special_block;                                       /* True if this ticket is from a special-sized block */
     enum aws_s3_default_buffer_pool_reserved_from reserved_from; /* which area ticket was reserved from */
 };
 
@@ -240,7 +239,9 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     }
 
     /*
-     * This is fairly arbitrary. System allocator tends to be a bit better on tiny allocations.
+     * Determine the min cutoff. At high level this tries to avoid using buffer pool if requests
+     * are small compared to primary (ex. 512 req buffer compared to 8mb buffer size).
+     * How that is done is fairly arbitrary. System allocator tends to be a bit better on tiny allocations.
      * And we want to avoid wasting mem in that case.
      * Note this is not the answer for wasting mem, but it does improve some corner cases.
      */
@@ -632,7 +633,6 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
 
         /* Check if this is a special-sized allocation */
         if (from_special) {
-            ticket->is_special_block = true;
             ticket->reserved_from = AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL;
             buffer_pool->special_blocks_reserved += meta.size;
         } else if (meta.size <= buffer_pool->primary_size_cutoff) {
@@ -733,6 +733,7 @@ static uint8_t *s_primary_acquire_synced(
             if (!s_check_bits(block->alloc_bit_mask, chunk_i, chunks_needed)) {
                 alloc_ptr = block->block_ptr + chunk_i * buffer_pool->chunk_size;
                 block->alloc_bit_mask = s_set_bits(block->alloc_bit_mask, chunk_i, chunks_needed);
+                AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Reusing existing primary block %zu", i);
                 goto on_allocated;
             }
         }
@@ -745,6 +746,12 @@ static uint8_t *s_primary_acquire_synced(
     block.block_size = buffer_pool->block_size;
     aws_array_list_push_back(&buffer_pool->blocks, &block);
     alloc_ptr = block.block_ptr;
+
+    AWS_LOGF_INFO(
+        AWS_LS_S3_CLIENT,
+        "Allocated primary block: size=%zu, total_allocated=%zu",
+        buffer_pool->block_size,
+        buffer_pool->primary_allocated);
 
     buffer_pool->primary_allocated += buffer_pool->block_size;
 
@@ -790,10 +797,7 @@ static struct aws_byte_buf s_acquire_buffer_synced(
     AWS_PRECONDITION(ticket->ptr == NULL);
 
     AWS_LOGF_INFO(
-        AWS_LS_S3_CLIENT,
-        "s_acquire_buffer_synced: size=%zu, is_special_block=%d",
-        ticket->size,
-        ticket->is_special_block);
+        AWS_LS_S3_CLIENT, "s_acquire_buffer_synced: size=%zu, reserved_from=%zu", ticket->size, ticket->reserved_from);
 
     /* Check if this is a special-sized allocation */
     if (ticket->reserved_from == AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL) {
@@ -810,13 +814,13 @@ static struct aws_byte_buf s_acquire_buffer_synced(
         for (size_t i = 0; i < aws_array_list_length(&special_list->blocks); ++i) {
             struct s3_buffer_pool_block *block;
             aws_array_list_get_at_ptr(&special_list->blocks, (void **)&block, i);
-            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Checking block %zu: alloc_bit_mask=%u", i, block->alloc_bit_mask);
+            AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Checking special block %zu: alloc_bit_mask=%u", i, block->alloc_bit_mask);
             /* Try to find if any block in the list is not used. */
             if (block->alloc_bit_mask == 0) {
                 block->alloc_bit_mask = UINT16_MAX;
                 ticket->ptr = block->block_ptr;
                 AWS_ASSERT(ticket->size == block->block_size);
-                AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Reusing existing block %zu", i);
+                AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "Reusing existing special block %zu", i);
                 break;
             }
         }

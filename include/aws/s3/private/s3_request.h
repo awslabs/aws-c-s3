@@ -369,7 +369,7 @@ struct aws_s3_request *aws_s3_request_new(
 /* Gets the size of the part payload.
  * Range is inclusive (i.e. 0-0 range has 1 byte size). In case of misconfigured range returns 0. */
 AWS_S3_API
-uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request);
+uint64_t aws_s3_request_get_payload_size(struct aws_s3_request *request);
 
 /* Set up the request to be sent. Called each time before the request is sent. Will initially call
  * aws_s3_request_clean_up_send_data to clear out anything previously existing in send_data. */

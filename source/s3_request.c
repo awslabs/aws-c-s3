@@ -55,7 +55,7 @@ struct aws_s3_request *aws_s3_request_new(
     return request;
 }
 
-uint64_t aws_s3_request_get_part_size(struct aws_s3_request *request) {
+uint64_t aws_s3_request_get_payload_size(struct aws_s3_request *request) {
     uint64_t result = 0;
     if (aws_sub_u64_checked(request->part_range_end, request->part_range_start, &result) != AWS_OP_SUCCESS) {
         return 0;
