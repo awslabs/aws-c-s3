@@ -1425,8 +1425,17 @@ static int s_s3_meta_request_incoming_headers(
                     }
                     if (request->part_range_end != object_range_end) {
                         /* In the case where the object size is less than the range requested. It must be return the
-                         * last part to the end of the object. */
-                        if (object_size != object_range_end + 1 || request->part_range_end < object_range_end) {
+                         * last part to the end of the object.
+                         * Note: that when get with part 1 is used we dont know how big the buffer will be. We
+                         * optimistically allocate part sized buffer, and see if its enough. If its over, the req will
+                         * get canceled. So in that case skip validation on expected size.
+                         */
+                        bool is_unknown_len_part_req =
+                            request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
+                            request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+
+                        if (!is_unknown_len_part_req &&
+                            (object_size != object_range_end + 1 || request->part_range_end < object_range_end)) {
                             /* Something went wrong if it's matching. Log the error. */
                             AWS_LOGF_ERROR(
                                 AWS_LS_S3_META_REQUEST,
@@ -1536,7 +1545,7 @@ static int s_s3_meta_request_incoming_body(
 
     if (request->send_data.response_body.capacity == 0) {
         /* Make sure that request is get, since puts can also have ticket allocated, which is used for request body. */
-        if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->ticket != NULL) {
+        if (successful_response && request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->ticket != NULL) {
             request->send_data.response_body = aws_s3_buffer_ticket_claim(request->ticket);
         } else {
             size_t buffer_size = s_dynamic_body_initial_buf_size;

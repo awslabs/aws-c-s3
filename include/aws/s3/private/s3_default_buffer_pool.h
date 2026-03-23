@@ -44,6 +44,9 @@ struct aws_s3_default_buffer_pool_usage_stats {
     /* Max size of buffer to be allocated from primary. */
     size_t primary_cutoff;
 
+    /* Min size of buffer to be allocated from primary. */
+    size_t primary_min_cutoff;
+
     /* Overall memory allocated for blocks. */
     size_t primary_allocated;
     /* Number of blocks allocated in primary. */
@@ -90,6 +93,9 @@ struct aws_s3_default_buffer_pool {
     size_t chunk_size;
     /* size at which allocations should go to secondary */
     size_t primary_size_cutoff;
+
+    /* size below which allocations should go to secondary */
+    size_t primary_size_min_cutoff;
 
     /* NOTE: See aws_s3_buffer_pool_usage_stats for descriptions of most fields */
 
@@ -184,6 +190,18 @@ AWS_S3_API struct aws_byte_buf aws_s3_default_buffer_pool_acquire_buffer(
  */
 AWS_S3_API struct aws_s3_default_buffer_pool_usage_stats aws_s3_default_buffer_pool_get_usage(
     struct aws_s3_buffer_pool *buffer_pool);
+
+enum aws_s3_default_buffer_pool_reserved_from {
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_SECONDARY = 0,
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY,
+    AWS_S3_BUFFER_POOL_RESERVED_FROM_SPECIAL,
+};
+
+/*
+ * Helper to determine which area of default buffer pool ticket was reserved from.
+ */
+AWS_S3_API enum aws_s3_default_buffer_pool_reserved_from aws_s3_default_buffer_pool_get_ticket_reserved_from(
+    struct aws_s3_default_buffer_ticket *ticket);
 
 /*
  * Trims all unused mem from the pool.
