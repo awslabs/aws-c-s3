@@ -3448,6 +3448,10 @@ void s_failing_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_wrapper) {
     aws_mem_release((struct aws_allocator *)buffer_pool_wrapper->impl, buffer_pool_wrapper);
 }
 
+static void s_failing_pool_destroy_wrap(void *user_data) {
+    s_failing_pool_destroy(user_data);
+}
+
 struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     struct aws_allocator *allocator,
     struct aws_s3_buffer_pool_config config,
@@ -3457,7 +3461,7 @@ struct aws_s3_buffer_pool *s_always_error_buffer_pool_fn(
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = allocator;
     pool->vtable = &s_failing_pool_vtable;
-    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)s_failing_pool_destroy);
+    aws_ref_count_init(&pool->ref_count, pool, s_failing_pool_destroy_wrap);
 
     return pool;
 }
