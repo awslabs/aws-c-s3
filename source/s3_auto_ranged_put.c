@@ -1732,6 +1732,50 @@ static void s_s3_auto_ranged_put_request_finished(
         } break;
 
         case AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_COMPLETE_MULTIPART_UPLOAD: {
+            /*
+             * cloud4t0r fix: defense-in-depth check for <Error> in CompleteMultipartUpload response body.
+             *
+             * The generic mechanism in s3_meta_request.c (s_s3_meta_request_error_code_from_response)
+             * already detects <Error><Code> in HTTP 200 responses and sets error_code accordingly
+             * BEFORE we reach this point. So normally, if S3 returns an error-in-200, error_code
+             * will NOT be AWS_ERROR_SUCCESS here.
+             *
+             * However, as an extra safety net, we also verify that the response body contains
+             * a valid <CompleteMultipartUploadResult> with an ETag. If the body is empty, truncated,
+             * or contains unexpected content, we treat it as a failure.
+             *
+             * See: https://repost.aws/knowledge-center/s3-resolve-200-internalerror
+             * See: https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html
+             */
+            if (error_code == AWS_ERROR_SUCCESS) {
+                /* Double-check: look for <Error><Code> in the body, in case the generic
+                 * mechanism missed it (e.g. body arrived after send_request_finish). */
+                struct aws_byte_cursor xml_doc_check = aws_byte_cursor_from_buf(&request->send_data.response_body);
+                if (xml_doc_check.len > 0) {
+                    struct aws_byte_cursor error_code_string = {0};
+                    const char *error_xml_path[] = {"Error", "Code", NULL};
+                    if (aws_xml_get_body_at_path(
+                            meta_request->allocator, xml_doc_check, error_xml_path, &error_code_string) ==
+                        AWS_OP_SUCCESS) {
+                        /* Found <Error><Code> in a 200 response - this is the documented S3 edge case */
+                        int mapped_error =
+                            aws_s3_crt_error_code_from_recoverable_server_error_code_string(error_code_string);
+                        if (mapped_error == AWS_ERROR_UNKNOWN) {
+                            error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
+                        } else {
+                            error_code = mapped_error;
+                        }
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: CompleteMultipartUpload returned 200 OK but body contains <Error>. "
+                            "Mapped to error_code %d (%s).",
+                            (void *)meta_request,
+                            error_code,
+                            aws_error_debug_str(error_code));
+                    }
+                }
+            }
+
             if (error_code == AWS_ERROR_SUCCESS && meta_request->headers_callback != NULL) {
                 /* Copy over any response headers that we've previously determined are needed for this final
                  * response.
@@ -1740,13 +1784,6 @@ static void s_s3_auto_ranged_put_request_finished(
                     auto_ranged_put->synced_data.needed_response_headers, request->send_data.response_headers);
 
                 struct aws_byte_cursor xml_doc = aws_byte_cursor_from_buf(&request->send_data.response_body);
-
-                /**
-                 * TODO: The body of the response can be ERROR, check Error specified in body part from
-                 * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#AmazonS3-CompleteMultipartUpload-response-CompleteMultipartUploadOutput
-                 * We need to handle this case.
-                 * TODO: the checksum returned within the response of complete multipart upload need to be exposed?
-                 */
 
                 /* Grab the ETag for the entire object, and set it as a header. */
                 struct aws_byte_cursor etag_header_value = {0};
@@ -1763,22 +1800,35 @@ static void s_s3_auto_ranged_put_request_finished(
                         aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
 
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
+                } else {
+                    /* cloud4t0r fix: if we got 200 OK but no ETag in the response, something is wrong.
+                     * The CompleteMultipartUpload response MUST contain an ETag on success. */
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: CompleteMultipartUpload returned 200 OK but response body "
+                        "does not contain a valid CompleteMultipartUploadResult with ETag. "
+                        "Body length: %zu bytes.",
+                        (void *)meta_request,
+                        request->send_data.response_body.len);
+                    error_code = AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR;
                 }
 
-                /* Invoke the callback without lock */
-                aws_s3_meta_request_unlock_synced_data(meta_request);
-                /* Notify the user of the headers. */
-                if (meta_request->headers_callback(
-                        meta_request,
-                        request->send_data.response_headers,
-                        request->send_data.response_status,
-                        meta_request->user_data)) {
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    /* Invoke the callback without lock */
+                    aws_s3_meta_request_unlock_synced_data(meta_request);
+                    /* Notify the user of the headers. */
+                    if (meta_request->headers_callback(
+                            meta_request,
+                            request->send_data.response_headers,
+                            request->send_data.response_status,
+                            meta_request->user_data)) {
 
-                    error_code = aws_last_error_or_unknown();
+                        error_code = aws_last_error_or_unknown();
+                    }
+                    meta_request->headers_callback = NULL;
+                    /* Grab the lock again after the callback */
+                    aws_s3_meta_request_lock_synced_data(meta_request);
                 }
-                meta_request->headers_callback = NULL;
-                /* Grab the lock again after the callback */
-                aws_s3_meta_request_lock_synced_data(meta_request);
             }
 
             auto_ranged_put->synced_data.complete_multipart_upload_completed = true;
