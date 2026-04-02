@@ -2863,6 +2863,14 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
             return meta_request->checksum_config.response_checksum_algorithms.sha1;
         case AWS_SCA_SHA256:
             return meta_request->checksum_config.response_checksum_algorithms.sha256;
+        case AWS_SCA_SHA512:
+            return meta_request->checksum_config.response_checksum_algorithms.sha512;
+        case AWS_SCA_XXHASH64:
+            return meta_request->checksum_config.response_checksum_algorithms.xxhash64;
+        case AWS_SCA_XXHASH3_64:
+            return meta_request->checksum_config.response_checksum_algorithms.xxhash3_64;
+        case AWS_SCA_XXHASH3_128:
+            return meta_request->checksum_config.response_checksum_algorithms.xxhash3_128;
         default:
             return false;
     }

@@ -283,7 +283,11 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_SHA1,
     AWS_SCA_SHA256,
     AWS_SCA_CRC64NVME,
-    AWS_SCA_END = AWS_SCA_CRC64NVME,
+    AWS_SCA_SHA512,
+    AWS_SCA_XXHASH64,
+    AWS_SCA_XXHASH3_64,
+    AWS_SCA_XXHASH3_128,
+    AWS_SCA_END = AWS_SCA_XXHASH3_128,
 };
 
 enum aws_s3_checksum_location {
@@ -724,7 +728,7 @@ struct aws_s3_checksum_config {
      *
      * The list of algorithms for user to pick up when validate the checksum. Client will pick up the algorithm from the
      * list with the priority based on performance, and the algorithm sent by server. The priority based on performance
-     * is [CRC64NVME, CRC32C, CRC32, SHA1, SHA256].
+     * is [XXHASH3_128, XXHASH3_64, CRC64NVME, CRC32C, CRC32, XXHASH64, SHA512, SHA256, SHA1].
      *
      * If the response checksum was validated by client, the result will indicate which algorithm was picked.
      */
