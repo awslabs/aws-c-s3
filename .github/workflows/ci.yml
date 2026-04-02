@@ -37,7 +37,7 @@ jobs:
           - manylinux2014-x86
           - al2-x64
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -88,7 +88,7 @@ jobs:
           # our base Linux image to Ubuntu 22.
             extra-build-flag: --cmake-extra=-DCMAKE_EXE_LINKER_FLAGS="-lresolv"
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -104,7 +104,7 @@ jobs:
       matrix:
         sanitizers: [",thread", ",address,undefined"]
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -117,7 +117,7 @@ jobs:
   linux-shared-libs:
     runs-on: ubuntu-24.04 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -130,7 +130,7 @@ jobs:
   byo-crypto:
     runs-on: ubuntu-24.04 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -143,7 +143,7 @@ jobs:
   windows:
     runs-on: windows-2025 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -159,7 +159,7 @@ jobs:
       matrix:
         arch: [x86, x64]
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -171,7 +171,7 @@ jobs:
   windows-shared-libs:
     runs-on: windows-2025 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -183,7 +183,7 @@ jobs:
   windows-app-verifier:
     runs-on: windows-2025 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -198,7 +198,7 @@ jobs:
   macos:
     runs-on: macos-14 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -215,7 +215,7 @@ jobs:
   macos-x64:
     runs-on: macos-14-large # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -234,7 +234,7 @@ jobs:
   downstream:
     runs-on: ubuntu-24.04 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
@@ -247,7 +247,7 @@ jobs:
   linux-debug:
     runs-on: ubuntu-24.04 # latest
     steps:
-    - uses: aws-actions/configure-aws-credentials@v4
+    - uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}

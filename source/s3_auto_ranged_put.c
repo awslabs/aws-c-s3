@@ -323,6 +323,36 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .pause = s_s3_auto_ranged_put_pause,
 };
 
+/**
+ * Helper to initialize the request ranges and content-length
+ * based on the request->part_number and meta_request->part_size
+ */
+static int s_compute_request_body_size(const struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(request);
+
+    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    size_t request_body_size = meta_request->part_size;
+    /* Last part--adjust size to match remaining content length. */
+    if (auto_ranged_put->has_content_length &&
+        request->part_number == auto_ranged_put->total_num_parts_from_content_length) {
+        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
+
+        if (content_remainder > 0) {
+            request_body_size = content_remainder;
+        }
+    }
+    if (aws_mul_u64_checked(request->part_number - 1, meta_request->part_size, &request->part_range_start)) {
+        return AWS_OP_ERR;
+    }
+    if (aws_add_u64_checked(request->part_range_start, request_body_size - 1, &request->part_range_end)) {
+        return AWS_OP_ERR;
+    }
+    request->content_length = request_body_size;
+    return AWS_OP_SUCCESS;
+}
+
 /* Allocate a new auto-ranged put meta request */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     struct aws_allocator *allocator,
@@ -605,6 +635,8 @@ static bool s_s3_auto_ranged_put_update(
 
                 request->part_number = auto_ranged_put->threaded_update_data.next_part_number;
 
+                s_compute_request_body_size(meta_request, request);
+
                 /* If request was previously uploaded, we prepare it to ensure checksums still match,
                  * but ultimately it gets marked no-op and we don't send it */
                 request->was_previously_uploaded = request_previously_uploaded;
@@ -759,36 +791,6 @@ static bool s_s3_auto_ranged_put_update(
     }
 
     return work_remaining;
-}
-
-/**
- * Helper to initialize the request ranges and content-length
- * based on the request->part_number and meta_request->part_size
- */
-static int s_compute_request_body_size(const struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
-    AWS_ERROR_PRECONDITION(meta_request);
-    AWS_ERROR_PRECONDITION(request);
-
-    const struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
-
-    size_t request_body_size = meta_request->part_size;
-    /* Last part--adjust size to match remaining content length. */
-    if (auto_ranged_put->has_content_length &&
-        request->part_number == auto_ranged_put->total_num_parts_from_content_length) {
-        size_t content_remainder = (size_t)(auto_ranged_put->content_length % (uint64_t)meta_request->part_size);
-
-        if (content_remainder > 0) {
-            request_body_size = content_remainder;
-        }
-    }
-    if (aws_mul_u64_checked(request->part_number - 1, meta_request->part_size, &request->part_range_start)) {
-        return AWS_OP_ERR;
-    }
-    if (aws_add_u64_checked(request->part_range_start, request_body_size - 1, &request->part_range_end)) {
-        return AWS_OP_ERR;
-    }
-    request->content_length = request_body_size;
-    return AWS_OP_SUCCESS;
 }
 
 static int s_verify_part_matches_checksum(

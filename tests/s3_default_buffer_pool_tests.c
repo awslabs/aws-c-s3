@@ -139,6 +139,7 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
 
     struct aws_future_s3_buffer_ticket *future2 = aws_s3_default_buffer_pool_reserve(
         buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(32)});
+
     ASSERT_NOT_NULL(future2);
     ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future2));
     ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(future2), AWS_OP_SUCCESS);
@@ -146,6 +147,9 @@ static int s_test_s3_buffer_pool_limits(struct aws_allocator *allocator, void *c
     ASSERT_NOT_NULL(ticket2);
     struct aws_byte_buf buf2 = aws_s3_buffer_ticket_claim(ticket2);
     ASSERT_NOT_NULL(buf2.buffer);
+
+    struct aws_s3_default_buffer_pool_usage_stats stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
+    ASSERT_UINT_EQUALS(0, stats.primary_allocated);
 
     for (size_t i = 0; i < 6; ++i) {
         aws_s3_buffer_ticket_release(tickets[i]);
@@ -234,11 +238,15 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
     struct aws_s3_buffer_ticket *tickets[112];
     struct aws_future_s3_buffer_ticket *ticket_futures[112];
     for (size_t i = 0; i < 112; ++i) {
+        AWS_LOGF_DEBUG(0, "reserving buffer %zu", i + 1);
         ticket_futures[i] = aws_s3_default_buffer_pool_reserve(
             buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = MB_TO_BYTES(8)});
         ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(ticket_futures[i]));
         ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(ticket_futures[i]), AWS_OP_SUCCESS);
         tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(ticket_futures[i]);
+        ASSERT_INT_EQUALS(
+            aws_s3_default_buffer_pool_get_ticket_reserved_from(tickets[i]->impl),
+            AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY);
         struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(tickets[i]);
         ASSERT_NOT_NULL(buf.buffer);
     }
@@ -258,6 +266,9 @@ static int s_test_s3_buffer_pool_reserve_over_limit(struct aws_allocator *alloca
     }
 
     ASSERT_NOT_NULL(state.ticket);
+    ASSERT_INT_EQUALS(
+        aws_s3_default_buffer_pool_get_ticket_reserved_from(state.ticket->impl),
+        AWS_S3_BUFFER_POOL_RESERVED_FROM_PRIMARY);
 
     aws_s3_buffer_ticket_release(state.ticket);
     aws_future_s3_buffer_ticket_release(over_future);
@@ -635,3 +646,105 @@ static int s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations(struct aws
 AWS_TEST_CASE(
     test_s3_buffer_pool_forced_buffer_wont_stop_reservations,
     s_test_s3_buffer_pool_forced_buffer_wont_stop_reservations)
+
+/* Test small requests reserve expected amount of mem without rounding up to part size. */
+static int s_test_s3_buffer_pool_reserve_tiny_chunks(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    const size_t chunk_size = MB_TO_BYTES(8);
+    const size_t small_size = KB_TO_BYTES(128);
+    const size_t mem_limit = GB_TO_BYTES(1);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = chunk_size, .memory_limit = mem_limit});
+
+    struct aws_s3_buffer_ticket *ticket = NULL;
+    struct aws_future_s3_buffer_ticket *future =
+        aws_s3_default_buffer_pool_reserve(buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = small_size});
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+    ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(future), AWS_OP_SUCCESS);
+    ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+    struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
+    ASSERT_UINT_EQUALS(small_size, buf.capacity);
+
+    struct aws_s3_default_buffer_pool_usage_stats stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
+    ASSERT_INT_EQUALS(small_size, stats.secondary_used);
+
+    aws_s3_buffer_ticket_release(ticket);
+    aws_future_s3_buffer_ticket_release(future);
+
+    stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
+    ASSERT_INT_EQUALS(0, stats.secondary_used);
+
+    /* Cleanup */
+    aws_s3_default_buffer_pool_destroy(buffer_pool);
+    return 0;
+}
+AWS_TEST_CASE(test_s3_buffer_pool_reserve_tiny_chunks, s_test_s3_buffer_pool_reserve_tiny_chunks)
+
+/*
+ * Regression test for s_should_trim_for_reserve_synced when buffers are reserved but not yet claimed.
+ *
+ * When tickets are reserved but never claimed, primary_allocated stays 0 while primary_reserved > 0.
+ * The overallocation calculation (primary_allocated - primary_used - primary_reserved) must not
+ * underflow -- it should saturate to 0. This also verifies that a subsequent secondary reserve
+ * still succeeds (i.e. the function correctly returns false / no crash).
+ */
+static int s_test_s3_buffer_pool_trim_reserved_but_unallocated(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    const size_t chunk_size = MB_TO_BYTES(8);
+    const size_t mem_limit = GB_TO_BYTES(1);
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator,
+        (struct aws_s3_buffer_pool_config){
+            .part_size = chunk_size,
+            .memory_limit = mem_limit,
+        });
+    ASSERT_NOT_NULL(buffer_pool);
+
+    /* Reserve primary-sized tickets WITHOUT claiming them.
+     * This leaves primary_reserved > 0 but primary_allocated == 0. */
+    const size_t num_reserved = 50;
+    struct aws_future_s3_buffer_ticket *reserved_futures[50];
+    struct aws_s3_buffer_ticket *reserved_tickets[50];
+    for (size_t i = 0; i < num_reserved; ++i) {
+        reserved_futures[i] = aws_s3_default_buffer_pool_reserve(
+            buffer_pool, (struct aws_s3_buffer_pool_reserve_meta){.size = chunk_size});
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(reserved_futures[i]));
+        ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(reserved_futures[i]), AWS_OP_SUCCESS);
+        reserved_tickets[i] = aws_future_s3_buffer_ticket_get_result_by_move(reserved_futures[i]);
+        ASSERT_NOT_NULL(reserved_tickets[i]);
+        /* Intentionally do NOT call aws_s3_buffer_ticket_claim() -- ticket stays in reserve stage. */
+    }
+
+    /* Sanity check: reserved > 0, allocated == 0 */
+    struct aws_s3_default_buffer_pool_usage_stats stats = aws_s3_default_buffer_pool_get_usage(buffer_pool);
+    ASSERT_TRUE(stats.primary_reserved > 0);
+    ASSERT_UINT_EQUALS(0, stats.primary_allocated);
+
+    /* Now reserve a large secondary buffer. This triggers s_should_trim_for_reserve_synced.
+     * The overallocation calculation must saturate to 0 (not crash/underflow).
+     * The reserve must succeed since mem_limit is not exhausted. */
+    struct aws_future_s3_buffer_ticket *secondary_future = aws_s3_default_buffer_pool_reserve(
+        buffer_pool,
+        (struct aws_s3_buffer_pool_reserve_meta){
+            .size = MB_TO_BYTES(800),
+        });
+    ASSERT_NOT_NULL(secondary_future);
+    /* Release all the reserved ones. */
+    for (size_t i = 0; i < num_reserved; ++i) {
+        aws_s3_buffer_ticket_release(reserved_tickets[i]);
+        aws_future_s3_buffer_ticket_release(reserved_futures[i]);
+    }
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(secondary_future));
+    ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(secondary_future), AWS_OP_SUCCESS);
+    struct aws_s3_buffer_ticket *secondary_ticket = aws_future_s3_buffer_ticket_get_result_by_move(secondary_future);
+    ASSERT_NOT_NULL(secondary_ticket);
+    struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(secondary_ticket);
+    ASSERT_NOT_NULL(buf.buffer);
+
+    /* Cleanup */
+    aws_s3_buffer_ticket_release(secondary_ticket);
+    aws_future_s3_buffer_ticket_release(secondary_future);
+    aws_s3_default_buffer_pool_destroy(buffer_pool);
+    return 0;
+}
+AWS_TEST_CASE(test_s3_buffer_pool_trim_reserved_but_unallocated, s_test_s3_buffer_pool_trim_reserved_but_unallocated)
