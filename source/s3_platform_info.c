@@ -152,6 +152,10 @@ static void s_destroy_loader(void *arg) {
     aws_mem_release(loader->allocator, loader);
 }
 
+static bool s_byte_cursor_eq_ignore_case(const void *a, const void *b) {
+    return aws_byte_cursor_eq_ignore_case(a, b);
+}
+
 struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_allocator *allocator) {
     struct aws_s3_platform_info_loader *loader =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_platform_info_loader));
@@ -175,7 +179,7 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
             allocator,
             32,
             aws_hash_byte_cursor_ptr_ignore_case,
-            (aws_hash_callback_eq_fn *)aws_byte_cursor_eq_ignore_case,
+            s_byte_cursor_eq_ignore_case,
             NULL,
             NULL) &&
         "Hash table init failed!");

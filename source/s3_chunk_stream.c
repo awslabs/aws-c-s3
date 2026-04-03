@@ -167,6 +167,10 @@ static void s_aws_input_chunk_stream_destroy(struct aws_chunk_stream *impl) {
     }
 }
 
+static void s_aws_input_chunk_stream_destroy_wrap(void *user_data) {
+    s_aws_input_chunk_stream_destroy(user_data);
+}
+
 static struct aws_input_stream_vtable s_aws_input_chunk_stream_vtable = {
     .seek = s_aws_input_chunk_stream_seek,
     .read = s_aws_input_chunk_stream_read,
@@ -257,7 +261,7 @@ struct aws_input_stream *aws_chunk_stream_new(
                    checksum_context->encoded_checksum_size + post_trailer_len;
 
     AWS_ASSERT(impl->current_stream);
-    aws_ref_count_init(&impl->base.ref_count, impl, (aws_simple_completion_callback *)s_aws_input_chunk_stream_destroy);
+    aws_ref_count_init(&impl->base.ref_count, impl, s_aws_input_chunk_stream_destroy_wrap);
     return &impl->base;
 
 error:

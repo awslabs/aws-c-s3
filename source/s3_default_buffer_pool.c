@@ -185,6 +185,10 @@ static void s_destroy_special_block_list(void *val) {
     aws_mem_release(special_list->allocator, special_list);
 }
 
+static void s_aws_s3_default_buffer_pool_destroy_wrap(void *user_data) {
+    aws_s3_default_buffer_pool_destroy(user_data);
+}
+
 struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_allocator *allocator,
     struct aws_s3_buffer_pool_config config) {
@@ -295,7 +299,7 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
     pool->vtable = &s_default_pool_vtable;
-    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)aws_s3_default_buffer_pool_destroy);
+    aws_ref_count_init(&pool->ref_count, pool, s_aws_s3_default_buffer_pool_destroy_wrap);
 
     return pool;
 }

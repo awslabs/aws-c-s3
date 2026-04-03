@@ -121,13 +121,17 @@ AWS_STATIC_STRING_FROM_LITERAL(s_CopyObject_str, "CopyObject");
 AWS_STATIC_STRING_FROM_LITERAL(s_PutObject_str, "PutObject");
 AWS_STATIC_STRING_FROM_LITERAL(s_CreateSession_str, "CreateSession");
 
+static bool s_byte_cursor_eq_ignore_case(const void *a, const void *b) {
+    return aws_byte_cursor_eq_ignore_case(a, b);
+}
+
 static void s_s3_request_type_info_init(struct aws_allocator *allocator) {
     int err = aws_hash_table_init(
         &s_s3_operation_name_to_request_type_table,
         allocator,
         AWS_ARRAY_SIZE(s_s3_request_type_info_array) /*initial_size*/,
         aws_hash_byte_cursor_ptr_ignore_case,
-        (aws_hash_callback_eq_fn *)aws_byte_cursor_eq_ignore_case,
+        s_byte_cursor_eq_ignore_case,
         NULL /*destroy_key*/,
         NULL /*destroy_value*/);
     AWS_FATAL_ASSERT(!err);
