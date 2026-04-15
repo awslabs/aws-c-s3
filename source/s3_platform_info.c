@@ -73,6 +73,38 @@ struct aws_s3_platform_info s_p5_platform_info = {
 };
 /***** End p5.48xlarge *****/
 
+/***** Begin p5e/p5en/p6 instances *****/
+
+/* p5e.48xlarge: 3,200 Gbps EFA aggregate, but CPU-accessible bandwidth is much lower.
+ * TODO: fill in max_throughput_gbps after benchmarking */
+static struct aws_s3_platform_info s_p5e_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5e.48xlarge"),
+    .max_throughput_gbps = 0,
+};
+
+/* p5en.48xlarge: 3,200 Gbps EFA aggregate, similar topology to p5e.
+ * TODO: fill in max_throughput_gbps after benchmarking */
+static struct aws_s3_platform_info s_p5en_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5en.48xlarge"),
+    .max_throughput_gbps = 0,
+};
+
+/* p6-b200.48xlarge: 3,200 Gbps EFA aggregate.
+ * TODO: fill in max_throughput_gbps after benchmarking */
+static struct aws_s3_platform_info s_p6_b200_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b200.48xlarge"),
+    .max_throughput_gbps = 0,
+};
+
+/* p6-b300.48xlarge: 6,400 Gbps EFA aggregate (2x the p5e/p5en/p6-b200).
+ * TODO: fill in max_throughput_gbps after benchmarking */
+static struct aws_s3_platform_info s_p6_b300_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b300.48xlarge"),
+    .max_throughput_gbps = 0,
+};
+
+/***** End p5e/p5en/p6 instances *****/
+
 /**** Begin trn1_32_large *****/
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1n.32xlarge"),
@@ -186,6 +218,10 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     s_add_platform_info_to_table(loader, &s_p4d_platform_info);
     s_add_platform_info_to_table(loader, &s_p4de_platform_info);
     s_add_platform_info_to_table(loader, &s_p5_platform_info);
+    s_add_platform_info_to_table(loader, &s_p5e_platform_info);
+    s_add_platform_info_to_table(loader, &s_p5en_platform_info);
+    s_add_platform_info_to_table(loader, &s_p6_b200_platform_info);
+    s_add_platform_info_to_table(loader, &s_p6_b300_platform_info);
     s_add_platform_info_to_table(loader, &s_trn1_n_platform_info);
     s_add_platform_info_to_table(loader, &s_trn1_platform_info);
 
