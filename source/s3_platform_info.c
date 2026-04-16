@@ -73,37 +73,52 @@ struct aws_s3_platform_info s_p5_platform_info = {
 };
 /***** End p5.48xlarge *****/
 
-/***** Begin p5e/p5en/p6 instances *****/
+/* For all instances from p5e.48xlarge - p6-b300.48xlarge,
+ * the max_throughput_gbps values configured are based on the maximum
+ * bandwidth offered from a single NIC in these instances. CRT clients
+ * default to using a single NIC unless configured to use multiple NICs
+ * by identifying the number of NICs and providing the names in an array
+ * (refer s3_client.h - struct aws_s3_client_config). The max_throughput_gbps
+ * is only a default we set can be overridden by the user's client config.
+ * TODO: Once we are able to auto-detect NICs and add them, default values
+ * should be updated with maximum ENA network bandwidth allowed by these
+ * instances.
+ */
+/***** Begin p5e.48xlarge ******/
 
-/* p5e.48xlarge: 3,200 Gbps EFA aggregate, but CPU-accessible bandwidth is much lower.
- * TODO: fill in max_throughput_gbps after benchmarking */
 static struct aws_s3_platform_info s_p5e_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5e.48xlarge"),
-    .max_throughput_gbps = 0,
+    .max_throughput_gbps = 100,
+    .has_recommended_configuration = false,
 };
+/***** End p5e.48xlarge *****/
 
-/* p5en.48xlarge: 3,200 Gbps EFA aggregate, similar topology to p5e.
- * TODO: fill in max_throughput_gbps after benchmarking */
+/***** Begin p5en.48xlarge ******/
+
 static struct aws_s3_platform_info s_p5en_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5en.48xlarge"),
-    .max_throughput_gbps = 0,
+    .max_throughput_gbps = 100,
+    .has_recommended_configuration = false,
 };
+/***** End p5en.48xlarge *****/
 
-/* p6-b200.48xlarge: 3,200 Gbps EFA aggregate.
- * TODO: fill in max_throughput_gbps after benchmarking */
+/***** Begin p6-b200.48xlarge ******/
+
 static struct aws_s3_platform_info s_p6_b200_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b200.48xlarge"),
-    .max_throughput_gbps = 0,
+    .max_throughput_gbps = 200,
+    .has_recommended_configuration = false,
 };
+/***** End p6-b200.48xlarge *****/
 
-/* p6-b300.48xlarge: 6,400 Gbps EFA aggregate (2x the p5e/p5en/p6-b200).
- * TODO: fill in max_throughput_gbps after benchmarking */
+/***** Begin p6-b300.48xlarge ******/
+
 static struct aws_s3_platform_info s_p6_b300_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b300.48xlarge"),
-    .max_throughput_gbps = 0,
+    .max_throughput_gbps = 350,
+    .has_recommended_configuration = false,
 };
-
-/***** End p5e/p5en/p6 instances *****/
+/***** End p6-b300.48xlarge *****/
 
 /**** Begin trn1_32_large *****/
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
