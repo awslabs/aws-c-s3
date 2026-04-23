@@ -453,6 +453,8 @@ int aws_checksum_compute(
     }
 }
 
+static const struct aws_byte_cursor s_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
+
 static int s_init_and_verify_checksum_config_from_headers(
     struct aws_s3_meta_request_checksum_config_storage *checksum_config,
     const struct aws_http_message *message,
@@ -463,26 +465,46 @@ static int s_init_and_verify_checksum_config_from_headers(
     struct aws_byte_cursor header_value;
     AWS_ZERO_STRUCT(header_value);
 
-    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
-        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
-        const struct aws_byte_cursor algorithm_header_name =
-            aws_get_http_header_name_from_checksum_algorithm(algorithm);
-        if (aws_http_headers_get(headers, algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
-            if (header_algo == AWS_SCA_NONE) {
-                header_algo = algorithm;
-            } else {
-                /* If there are multiple checksum headers set, it's malformed request */
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Could not create auto-ranged-put meta request; multiple checksum headers has been set",
-                    log_id);
-                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    bool has_checksum_header = false;
+    for (size_t i = 0; i < aws_http_headers_count(headers); ++i) {
+        struct aws_http_header *header;
+        if (aws_http_headers_get_index(headers, i, &header)) {
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+
+        if (aws_byte_cursor_starts_with_ignore_case(&header->name, &s_checksum_prefix)) {
+            has_checksum_header = true;
+            break;
+        }
+    }
+
+    if (has_checksum_header) {
+        for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+            enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+            const struct aws_byte_cursor algorithm_header_name =
+                aws_get_http_header_name_from_checksum_algorithm(algorithm);
+            if (aws_http_headers_get(headers, algorithm_header_name, &header_value) == AWS_OP_SUCCESS) {
+                if (header_algo == AWS_SCA_NONE) {
+                    header_algo = algorithm;
+                } else {
+                    /* If there are multiple checksum headers set, it's malformed request */
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Could not create auto-ranged-put meta request; multiple checksum headers has been set",
+                        log_id);
+                    return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                }
             }
         }
     }
-    if (header_algo == AWS_SCA_NONE) {
+
+    if (!has_checksum_header) {
         /* No checksum header found, done */
         return AWS_OP_SUCCESS;
+    }
+
+    if (header_algo == AWS_SCA_NONE) {
+        header_algo = AWS_SCA_UNKNOWN;
     }
 
     if (checksum_config->has_full_object_checksum) {

@@ -58,11 +58,6 @@ const struct aws_byte_cursor g_s3_upload_part_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc64nvme"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
@@ -248,6 +243,7 @@ const struct aws_byte_cursor g_s3_create_session_allowed_headers[] = {
 const size_t g_s3_create_session_allowed_headers_count = AWS_ARRAY_SIZE(g_s3_create_session_allowed_headers);
 
 static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-meta-");
+static const struct aws_byte_cursor s_x_amz_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
 
 static const struct aws_byte_cursor s_checksum_type_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-type");
@@ -299,7 +295,8 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         base_message,
         g_s3_create_multipart_upload_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_create_multipart_upload_excluded_headers),
-        false /*exclude_x_amz_meta*/);
+        false /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         return NULL;
@@ -374,7 +371,8 @@ struct aws_http_message *aws_s3_upload_part_message_new_streaming(
         base_message,
         g_s3_upload_part_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         return NULL;
@@ -429,7 +427,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         base_message,
         g_s3_upload_part_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         return NULL;
@@ -477,7 +476,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
         base_message,
         g_s3_upload_part_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -706,7 +706,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             base_message,
             g_s3_complete_multipart_upload_with_checksum_excluded_headers,
             AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_with_checksum_excluded_headers),
-            true /*exclude_x_amz_meta*/);
+            true /*exclude_x_amz_meta*/,
+            false /*exclude_x_checksum_meta*/);
 
     } else {
         message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
@@ -714,7 +715,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             base_message,
             g_s3_complete_multipart_upload_excluded_headers,
             AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
-            true /*exclude_x_amz_meta*/);
+            true /*exclude_x_amz_meta*/, 
+            false /*exclude_x_checksum_meta*/);
     }
 
     struct aws_http_headers *headers = NULL;
@@ -863,7 +865,8 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
         base_message,
         g_s3_abort_multipart_upload_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, false, message)) {
         goto error_clean_up;
@@ -1141,7 +1144,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_all_heade
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
 
-    return aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false);
+    return aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false, false);
 }
 
 struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_headers(
@@ -1149,7 +1152,8 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     struct aws_http_message *base_message,
     const struct aws_byte_cursor *excluded_header_array,
     size_t excluded_header_array_size,
-    bool exclude_x_amz_meta) {
+    bool exclude_x_amz_meta, 
+    bool exclude_x_amz_checksum) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
@@ -1178,7 +1182,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     }
 
     aws_s3_message_util_copy_headers(
-        base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta);
+        base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta, exclude_x_amz_checksum);
 
     return message;
 
@@ -1192,7 +1196,8 @@ void aws_s3_message_util_copy_headers(
     struct aws_http_message *dest_message,
     const struct aws_byte_cursor *excluded_header_array,
     size_t excluded_header_array_size,
-    bool exclude_x_amz_meta) {
+    bool exclude_x_amz_meta,
+    bool exclude_x_amz_checksum) {
 
     size_t num_headers = aws_http_message_get_header_count(source_message);
 
@@ -1218,6 +1223,12 @@ void aws_s3_message_util_copy_headers(
 
         if (exclude_x_amz_meta) {
             if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_x_amz_meta_prefix)) {
+                continue;
+            }
+        }
+
+        if (exclude_x_amz_checksum) {
+            if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_x_amz_checksum_prefix)) {
                 continue;
             }
         }
