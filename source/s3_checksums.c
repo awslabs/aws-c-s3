@@ -467,7 +467,7 @@ static int s_init_and_verify_checksum_config_from_headers(
 
     bool has_checksum_header = false;
     for (size_t i = 0; i < aws_http_headers_count(headers); ++i) {
-        struct aws_http_header *header;
+        struct aws_http_header header;
         if (aws_http_headers_get_index(headers, i, &header)) {
             return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         }

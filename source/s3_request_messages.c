@@ -715,7 +715,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             base_message,
             g_s3_complete_multipart_upload_excluded_headers,
             AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
-            true /*exclude_x_amz_meta*/, 
+            true /*exclude_x_amz_meta*/,
             false /*exclude_x_checksum_meta*/);
     }
 
@@ -1152,7 +1152,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     struct aws_http_message *base_message,
     const struct aws_byte_cursor *excluded_header_array,
     size_t excluded_header_array_size,
-    bool exclude_x_amz_meta, 
+    bool exclude_x_amz_meta,
     bool exclude_x_amz_checksum) {
 
     AWS_PRECONDITION(allocator);
@@ -1182,7 +1182,12 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     }
 
     aws_s3_message_util_copy_headers(
-        base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta, exclude_x_amz_checksum);
+        base_message,
+        message,
+        excluded_header_array,
+        excluded_header_array_size,
+        exclude_x_amz_meta,
+        exclude_x_amz_checksum);
 
     return message;
 
