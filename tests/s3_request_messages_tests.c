@@ -483,7 +483,7 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
 
     { /* copy message, include "x-amz-meta-" */
         struct aws_http_message *copied_message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), false /*exclude_x_amz_meta*/);
+            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), false /*exclude_x_amz_meta*/, true /*exclude_x_amz_checksum*/);
         ASSERT_TRUE(copied_message != NULL);
 
         ASSERT_SUCCESS(s_test_http_messages_match(
@@ -494,7 +494,7 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
 
     { /* copy message, exclude "x-amz-meta-" */
         struct aws_http_message *copied_message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), true /*exclude_x_amz_meta*/);
+            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), true /*exclude_x_amz_meta*/, true /*exclude_x_amz_checksum*/);
         ASSERT_TRUE(copied_message != NULL);
 
         const struct aws_byte_cursor expected_excluded_headers[] = {
