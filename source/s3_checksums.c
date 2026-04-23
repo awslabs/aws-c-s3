@@ -472,7 +472,7 @@ static int s_init_and_verify_checksum_config_from_headers(
             return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         }
 
-        if (aws_byte_cursor_starts_with_ignore_case(&header->name, &s_checksum_prefix)) {
+        if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_checksum_prefix)) {
             has_checksum_header = true;
             break;
         }
