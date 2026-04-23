@@ -12,7 +12,9 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
+#include <aws/common/environment.h>
 #include <aws/common/string.h>
+#include <aws/common/thread.h>
 #include <aws/io/stream.h>
 
 /* TODO: better logging of steps */
@@ -37,8 +39,48 @@ static const uint32_t s_unknown_length_default_num_parts = 32;
  * (1st meta-request as queue of 100 "work tokens" that it needs to read
  * the stream for, while later meta-requests are doing nothing waiting for work tokens)
  *
+ * Can be overridden via env var AWS_CRT_S3_MAX_PARTS_PENDING_READ.
+ *
  * TODO: this value needs further benchmarking. */
-static const uint32_t s_max_parts_pending_read = 5;
+static const uint32_t s_max_parts_pending_read_default = 5;
+static const char *s_max_parts_pending_read_env_var = "AWS_CRT_S3_MAX_PARTS_PENDING_READ";
+static uint32_t s_max_parts_pending_read = 0;
+static aws_thread_once s_max_parts_pending_read_once = AWS_THREAD_ONCE_STATIC_INIT;
+
+static void s_max_parts_pending_read_init(void *user_data) {
+    struct aws_allocator *allocator = user_data;
+    s_max_parts_pending_read = s_max_parts_pending_read_default;
+    struct aws_string *from_env = aws_get_env_nonempty(allocator, s_max_parts_pending_read_env_var);
+    if (from_env) {
+        uint64_t parsed = 0;
+        if (!aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(from_env), &parsed) && parsed > 0 &&
+            parsed <= UINT32_MAX) {
+            s_max_parts_pending_read = (uint32_t)parsed;
+            AWS_LOGF_INFO(
+                AWS_LS_S3_META_REQUEST,
+                "Using %s=%" PRIu32 " from environment.",
+                s_max_parts_pending_read_env_var,
+                s_max_parts_pending_read);
+        } else {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "Ignoring invalid value for env var %s; using default %" PRIu32 ".",
+                s_max_parts_pending_read_env_var,
+                s_max_parts_pending_read_default);
+        }
+        aws_string_destroy(from_env);
+    } else {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_META_REQUEST,
+            "Using %" PRIu32 " because no value was set from environment.",
+            s_max_parts_pending_read);
+    }
+}
+
+static uint32_t s_get_max_parts_pending_read(struct aws_allocator *allocator) {
+    aws_thread_call_once(&s_max_parts_pending_read_once, s_max_parts_pending_read_init, allocator);
+    return s_max_parts_pending_read;
+}
 
 static const struct aws_byte_cursor s_create_multipart_upload_copy_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-algorithm"),
@@ -486,7 +528,8 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     }
 
     /* In all other cases, cap the number of pending-reads to something reasonable */
-    return auto_ranged_put->synced_data.num_parts_pending_read >= s_max_parts_pending_read;
+    return auto_ranged_put->synced_data.num_parts_pending_read >=
+           s_get_max_parts_pending_read(auto_ranged_put->base.allocator);
 }
 
 static void s_s3_auto_ranged_put_send_request_finish(
