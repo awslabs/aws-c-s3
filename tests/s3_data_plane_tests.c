@@ -2395,6 +2395,7 @@ static int s_test_s3_put_object_with_checksum_header_helper(struct aws_allocator
     };
 
     options.checksum_config = &checksum_config;
+    
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_result));
 
     meta_request = aws_s3_client_make_meta_request(client, &options);

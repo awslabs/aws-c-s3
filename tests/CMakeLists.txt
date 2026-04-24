@@ -25,7 +25,7 @@ add_test_case(test_s3_upload_part_message_fail)
 add_test_case(test_s3_complete_multipart_message_new)
 add_test_case(test_s3_abort_multipart_upload_message_new)
 
-add_test_case(test_s3_put_object_custom_md5)
+add_net_test_case(test_s3_put_object_custom_md5)
 
 add_net_test_case(test_s3_client_create_destroy)
 add_net_test_case(test_s3_client_create_error)
