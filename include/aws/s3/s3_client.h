@@ -288,6 +288,7 @@ enum aws_s3_checksum_algorithm {
     AWS_SCA_XXHASH3_64,
     AWS_SCA_XXHASH3_128,
     AWS_SCA_END = AWS_SCA_XXHASH3_128,
+    AWS_SCA_UNKNOWN, /* special value for forwards compat to indicate checksum type that crt is not aware of */
 };
 
 enum aws_s3_checksum_location {
