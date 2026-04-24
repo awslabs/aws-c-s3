@@ -24,6 +24,8 @@ class MockServerSetup(Builder.Action):
 
         self.env = env
         python_path = sys.executable
+        # ensure pip is available
+        self.env.shell.exec(python_path, '-m', 'ensurepip', '--upgrade', check=False)
         # install dependency for mock server
         self.env.shell.exec(python_path,
                             '-m', 'pip', 'install', 'h11', 'trio', 'proxy.py', check=True)
