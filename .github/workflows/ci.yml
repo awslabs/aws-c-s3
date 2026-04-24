@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILDER_VERSION: v0.9.74
+  BUILDER_VERSION: v0.9.91
   BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
@@ -62,6 +62,7 @@ jobs:
           - name: clang-11
           - name: clang-15
           - name: clang-17
+          - name: clang-latest
           - name: gcc-4.8
           - name: gcc-5
           - name: gcc-6
