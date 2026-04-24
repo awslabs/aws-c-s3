@@ -455,7 +455,7 @@ int aws_checksum_compute(
 
 static const struct aws_byte_cursor s_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
 
-void s_byte_buf_to_upper(struct aws_byte_buf *buf) {
+static void s_byte_buf_to_upper(struct aws_byte_buf *buf) {
     AWS_PRECONDITION(buf);
 
     for (size_t i = 0; i < buf->len; ++i) {
@@ -475,7 +475,7 @@ static int s_init_and_verify_checksum_config_from_headers(
     struct aws_byte_cursor header_value;
     AWS_ZERO_STRUCT(header_value);
 
-    bool has_checksum_header = false;
+    bool has_checksum_value_header = false;
     struct aws_byte_cursor checksum_header_name;
     for (size_t i = 0; i < aws_http_headers_count(headers); ++i) {
         struct aws_http_header header;
@@ -485,12 +485,12 @@ static int s_init_and_verify_checksum_config_from_headers(
 
         if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_checksum_prefix)) {
             checksum_header_name = header.name;
-            has_checksum_header = true;
+            has_checksum_value_header = true;
             break;
         }
     }
 
-    if (has_checksum_header) {
+    if (has_checksum_value_header) {
         for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
             enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
             const struct aws_byte_cursor algorithm_header_name =
@@ -510,7 +510,7 @@ static int s_init_and_verify_checksum_config_from_headers(
         }
     }
 
-    if (!has_checksum_header) {
+    if (!has_checksum_value_header) {
         /* No checksum header found, done */
         return AWS_OP_SUCCESS;
     }
