@@ -475,6 +475,12 @@ static int s_init_and_verify_checksum_config_from_headers(
     struct aws_byte_cursor header_value;
     AWS_ZERO_STRUCT(header_value);
 
+    /*
+    * We want to detect if there are any checksum headers, whether known or unknown. 
+    * Current approach first looks for any header that starts with x-amz-checksum and then 
+    * if it finds one, it checks whether it maps to any known checksum headers. 
+    * if not then we mark checksum as unknown. 
+    */
     bool has_checksum_value_header = false;
     struct aws_byte_cursor checksum_header_name;
     for (size_t i = 0; i < aws_http_headers_count(headers); ++i) {
