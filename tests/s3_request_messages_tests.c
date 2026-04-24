@@ -205,6 +205,8 @@ static int s_fill_byte_buf(struct aws_byte_buf *buffer, struct aws_allocator *al
     return AWS_OP_SUCCESS;
 }
 
+static const struct aws_byte_cursor s_x_amz_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
+
 static int s_test_http_headers_match(
     struct aws_allocator *allocator,
     const struct aws_http_message *message0,
@@ -217,7 +219,8 @@ static int s_test_http_headers_match(
     /* Headers in message1 that are okay to be in message1 even if they are in the excluded list or are not in
        message0.*/
     const struct aws_byte_cursor *message1_header_exceptions,
-    size_t message1_header_exceptions_count) {
+    size_t message1_header_exceptions_count,
+    bool should_exclude_checksum) {
     ASSERT_TRUE(message0 != NULL);
     ASSERT_TRUE(message1 != NULL);
     ASSERT_TRUE(excluded_message0_headers != NULL || excluded_message0_headers_count == 0);
@@ -285,6 +288,19 @@ static int s_test_http_headers_match(
         }
     }
 
+    if (should_exclude_checksum) {
+        /* Copy any checksum headers if they were on exclude list */
+        for (size_t i = 0; i < aws_http_headers_count(message0_headers); ++i) {
+            struct aws_http_header message0_header;
+            AWS_ZERO_STRUCT(message0_header);
+            ASSERT_SUCCESS(aws_http_headers_get_index(message0_headers, i, &message0_header));
+            if (aws_byte_cursor_starts_with_ignore_case(&message0_header.name, &s_x_amz_checksum_prefix)) {
+                ASSERT_SUCCESS(
+                    aws_http_headers_add(expected_message0_headers, message0_header.name, message0_header.value));
+            }
+        }
+    }
+
     /* message0_headers should now match expected_message0_headers */
     {
         ASSERT_TRUE(aws_http_headers_count(message0_headers) == aws_http_headers_count(expected_message0_headers));
@@ -313,7 +329,8 @@ static int s_test_http_messages_match(
     const struct aws_http_message *message0,
     const struct aws_http_message *message1,
     const struct aws_byte_cursor *excluded_headers,
-    size_t excluded_headers_count) {
+    size_t excluded_headers_count,
+    bool should_exclude_checksum) {
     ASSERT_TRUE(message0 != NULL);
     ASSERT_TRUE(message1 != NULL);
     ASSERT_TRUE(excluded_headers != NULL || excluded_headers_count == 0);
@@ -338,8 +355,8 @@ static int s_test_http_messages_match(
 
     ASSERT_TRUE(aws_byte_cursor_eq(&request_method, &copied_request_method));
 
-    ASSERT_SUCCESS(
-        s_test_http_headers_match(allocator, message0, message1, excluded_headers, excluded_headers_count, NULL, 0));
+    ASSERT_SUCCESS(s_test_http_headers_match(
+        allocator, message0, message1, excluded_headers, excluded_headers_count, NULL, 0, should_exclude_checksum));
 
     return AWS_OP_SUCCESS;
 }
@@ -483,18 +500,28 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
 
     { /* copy message, include "x-amz-meta-" */
         struct aws_http_message *copied_message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), false /*exclude_x_amz_meta*/, true /*exclude_x_amz_checksum*/);
+            allocator,
+            message,
+            excluded_headers,
+            AWS_ARRAY_SIZE(excluded_headers),
+            false /*exclude_x_amz_meta*/,
+            true /*exclude_x_amz_checksum*/);
         ASSERT_TRUE(copied_message != NULL);
 
         ASSERT_SUCCESS(s_test_http_messages_match(
-            allocator, message, copied_message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers)));
+            allocator, message, copied_message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), true));
 
         aws_http_message_release(copied_message);
     }
 
     { /* copy message, exclude "x-amz-meta-" */
         struct aws_http_message *copied_message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
-            allocator, message, excluded_headers, AWS_ARRAY_SIZE(excluded_headers), true /*exclude_x_amz_meta*/, true /*exclude_x_amz_checksum*/);
+            allocator,
+            message,
+            excluded_headers,
+            AWS_ARRAY_SIZE(excluded_headers),
+            true /*exclude_x_amz_meta*/,
+            true /*exclude_x_amz_checksum*/);
         ASSERT_TRUE(copied_message != NULL);
 
         const struct aws_byte_cursor expected_excluded_headers[] = {
@@ -503,7 +530,12 @@ static int s_test_s3_copy_http_message(struct aws_allocator *allocator, void *ct
         };
 
         ASSERT_SUCCESS(s_test_http_messages_match(
-            allocator, message, copied_message, expected_excluded_headers, AWS_ARRAY_SIZE(expected_excluded_headers)));
+            allocator,
+            message,
+            copied_message,
+            expected_excluded_headers,
+            AWS_ARRAY_SIZE(expected_excluded_headers),
+            true));
 
         aws_http_message_release(copied_message);
     }
@@ -695,7 +727,8 @@ static int s_test_s3_create_multipart_upload_message_new(struct aws_allocator *a
         g_s3_create_multipart_upload_excluded_headers,
         g_s3_create_multipart_upload_excluded_headers_count,
         header_exclude_exceptions,
-        AWS_ARRAY_SIZE(header_exclude_exceptions)));
+        AWS_ARRAY_SIZE(header_exclude_exceptions),
+        true));
 
     aws_http_message_release(create_multipart_upload_message);
     aws_http_message_release(original_message);
@@ -746,7 +779,8 @@ static int s_test_s3_upload_part_message_new(struct aws_allocator *allocator, vo
         g_s3_upload_part_excluded_headers,
         g_s3_upload_part_excluded_headers_count,
         header_exclude_exceptions,
-        AWS_ARRAY_SIZE(header_exclude_exceptions)));
+        AWS_ARRAY_SIZE(header_exclude_exceptions),
+        true));
 
     ASSERT_SUCCESS(s_test_http_message_body_stream(allocator, upload_part_message, &part_buffer));
 
@@ -893,7 +927,8 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
         g_s3_complete_multipart_upload_excluded_headers,
         g_s3_complete_multipart_upload_excluded_headers_count,
         header_exclude_exceptions,
-        AWS_ARRAY_SIZE(header_exclude_exceptions)));
+        AWS_ARRAY_SIZE(header_exclude_exceptions),
+        false));
 
     {
         struct complete_multipart_upload_xml_test_data xml_user_data = {
@@ -961,7 +996,8 @@ static int s_test_s3_abort_multipart_upload_message_newt(struct aws_allocator *a
         g_s3_abort_multipart_upload_excluded_headers,
         g_s3_abort_multipart_upload_excluded_headers_count,
         NULL,
-        0));
+        0,
+        true));
 
     aws_string_destroy(upload_id);
 

@@ -2332,6 +2332,117 @@ static int s_test_s3_put_object_multiple_with_filepath_streaming(struct aws_allo
     return s_test_s3_put_object_multiple_helper(allocator, true, true);
 }
 
+/*
+ * Helper that simulates the situation where the checksum value is provided in the message on put,
+ * but also checksum config is specified.
+ */
+static int s_test_s3_put_object_with_checksum_header_helper(struct aws_allocator *allocator) {
+
+    struct aws_s3_meta_request *meta_request;
+    struct aws_s3_meta_request_test_results meta_request_test_result;
+    struct aws_http_message *message;
+    struct aws_input_stream *input_stream;
+    struct aws_byte_buf input_stream_buffer;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+
+    size_t content_length = MB_TO_BYTES(20);
+
+    aws_s3_meta_request_test_results_init(&meta_request_test_result, allocator);
+    char object_path_buffer[128] = "";
+    snprintf(
+        object_path_buffer,
+        sizeof(object_path_buffer),
+        "" PRInSTR "-20MB-custom.txt",
+        AWS_BYTE_CURSOR_PRI(g_put_object_prefix));
+    AWS_ZERO_STRUCT(input_stream_buffer);
+    aws_s3_create_test_buffer(allocator, content_length, &input_stream_buffer);
+    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&input_stream_buffer);
+    input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
+    struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
+
+    struct aws_s3_meta_request_options options;
+    AWS_ZERO_STRUCT(options);
+    options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+    message = aws_s3_test_put_object_request_new(
+        allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, 0);
+
+    struct aws_http_header checksum_header = {
+        .name = aws_byte_cursor_from_c_str("x-amz-checksum-md5"),
+        .value = aws_byte_cursor_from_c_str("9Z7oAj6JEFbH2PcvG+6V+w=="),
+    };
+
+    aws_http_message_add_header(message, checksum_header);
+
+    options.message = message;
+    struct aws_s3_checksum_config checksum_config = {
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .location = AWS_SCL_TRAILER,
+    };
+
+    options.checksum_config = &checksum_config;
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_result));
+
+    meta_request = aws_s3_client_make_meta_request(client, &options);
+
+    ASSERT_TRUE(meta_request != NULL);
+
+    /* Wait for the request to finish. */
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+
+    aws_s3_tester_lock_synced_data(&tester);
+    ASSERT_TRUE(tester.synced_data.finish_error_code != AWS_OP_SUCCESS);
+
+    aws_s3_tester_unlock_synced_data(&tester);
+
+    meta_request = aws_s3_meta_request_release(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    ASSERT_INT_EQUALS(meta_request_test_result.finished_response_status, 400);
+
+    struct aws_byte_cursor body = aws_byte_cursor_from_buf(&meta_request_test_result.error_response_body);
+    struct aws_byte_cursor to_find =
+        aws_byte_cursor_from_c_str("The FULL_OBJECT checksum type cannot be used with the md5 checksum algorithm");
+    struct aws_byte_cursor result_cur = {0};
+    ASSERT_SUCCESS(aws_byte_cursor_find_exact(&body, &to_find, &result_cur));
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_result);
+
+    aws_http_message_release(message);
+    aws_input_stream_release(input_stream);
+    aws_byte_buf_clean_up(&input_stream_buffer);
+
+    aws_string_destroy(host_name);
+    host_name = NULL;
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_put_object_custom_md5, s_test_s3_put_object_custom_md5)
+static int s_test_s3_put_object_custom_md5(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_put_object_with_checksum_header_helper(allocator);
+}
+
 AWS_TEST_CASE(test_s3_put_object_less_than_part_size, s_test_s3_put_object_less_than_part_size)
 static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

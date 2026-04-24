@@ -455,6 +455,16 @@ int aws_checksum_compute(
 
 static const struct aws_byte_cursor s_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
 
+void s_byte_buf_to_upper(struct aws_byte_buf *buf) {
+    AWS_PRECONDITION(buf);
+
+    for (size_t i = 0; i < buf->len; ++i) {
+        if (buf->buffer[i] >= 'a' && buf->buffer[i] <= 'z') {
+            buf->buffer[i] = buf->buffer[i] + ('A' - 'a');
+        }
+    }
+}
+
 static int s_init_and_verify_checksum_config_from_headers(
     struct aws_s3_meta_request_checksum_config_storage *checksum_config,
     const struct aws_http_message *message,
@@ -466,6 +476,7 @@ static int s_init_and_verify_checksum_config_from_headers(
     AWS_ZERO_STRUCT(header_value);
 
     bool has_checksum_header = false;
+    struct aws_byte_cursor checksum_header_name;
     for (size_t i = 0; i < aws_http_headers_count(headers); ++i) {
         struct aws_http_header header;
         if (aws_http_headers_get_index(headers, i, &header)) {
@@ -473,6 +484,7 @@ static int s_init_and_verify_checksum_config_from_headers(
         }
 
         if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_checksum_prefix)) {
+            checksum_header_name = header.name;
             has_checksum_header = true;
             break;
         }
@@ -513,6 +525,7 @@ static int s_init_and_verify_checksum_config_from_headers(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Could not create auto-ranged-put meta request; full object checksum is set from multiple ways.",
             log_id);
+
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
@@ -531,6 +544,13 @@ static int s_init_and_verify_checksum_config_from_headers(
      **/
     checksum_config->location = AWS_SCL_NONE;
 
+    if (header_algo == AWS_SCA_UNKNOWN) {
+        aws_byte_cursor_advance(&checksum_header_name, s_checksum_prefix.len);
+        aws_byte_buf_init_copy_from_cursor(
+            &checksum_config->unknown_checksum_algo, checksum_config->allocator, checksum_header_name);
+        s_byte_buf_to_upper(&checksum_config->unknown_checksum_algo);
+    }
+
     /* Set full object checksum from the header value. */
     aws_byte_buf_init_copy_from_cursor(
         &checksum_config->full_object_checksum, checksum_config->allocator, header_value);
@@ -548,6 +568,8 @@ int aws_s3_meta_request_checksum_config_storage_init(
     /* Zero out the struct and set the allocator regardless. */
     internal_config->allocator = allocator;
 
+    /* Potential improvement here is that right now unless you configure checksum (which sdks seem to do),
+      the checksum value in the message is not detected and does not get propagated to create/complete */
     if (!config) {
         return AWS_OP_SUCCESS;
     }
@@ -653,4 +675,5 @@ void aws_s3_meta_request_checksum_config_storage_cleanup(
     if (internal_config->has_full_object_checksum) {
         aws_byte_buf_clean_up(&internal_config->full_object_checksum);
     }
+    aws_byte_buf_clean_up(&internal_config->unknown_checksum_algo);
 }

@@ -957,7 +957,7 @@ static struct aws_future_http_message *s_s3_prepare_list_parts(struct aws_s3_req
             message,
             g_s3_list_parts_excluded_headers,
             g_s3_list_parts_excluded_headers_count,
-            true, 
+            true,
             true);
     } else {
         aws_s3_message_util_copy_headers(
