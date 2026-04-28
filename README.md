@@ -18,24 +18,26 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 ### Configuration
 
-#### Memory Limit
+#### Environment Variables
 
-The S3 client uses a buffer pool to manage memory for concurrent transfers. You can control the memory limit in two ways:
+##### Memory Limit - AWS_CRT_S3_MEMORY_LIMIT_IN_GIB
 
-1. **Via Configuration** (Recommended): Set `memory_limit_in_bytes` in `aws_s3_client_config`:
+The S3 client uses a buffer pool to manage memory for concurrent transfers. 
 
-```c
-   struct aws_s3_client_config config = {
-       .memory_limit_in_bytes = GB_TO_BYTES(4), // 4 GiB limit
-       // ... other configuration
-   };
-   ```
-
-2. **Via Environment Variable**: Set the `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB` environment variable:
+Example Usage:
 
 ```bash
    export AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=4  # 4 GiB limit
-   ```
+```
+
+> [!TIP]
+> You can also control memory limit *in bytes* using client config:
+> ```c
+>    struct aws_s3_client_config config = {
+>        .memory_limit_in_bytes = GB_TO_BYTES(4), // 4 GiB limit
+>        // ... other configuration
+>    };
+> ```
 
 **Priority**: The configuration value takes precedence over the environment variable. If `memory_limit_in_bytes` is set to a non-zero value in the config, the environment variable is ignored.
 
@@ -46,6 +48,26 @@ The S3 client uses a buffer pool to manage memory for concurrent transfers. You 
 * The environment variable value must be a valid positive integer representing gigabytes (GiB).
 * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
 * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
+
+##### Maximum Parts Pending Read - AWS_CRT_S3_MAX_PARTS_PENDING_READ
+
+Controls the maximum number of parts that can be pending read from the input stream during a multipart upload. Higher values may improve upload throughput for large files by allowing more parts to be read in parallel, at the cost of higher memory usage.
+
+Example Usage:
+
+```bash
+   export AWS_CRT_S3_MAX_PARTS_PENDING_READ=20
+```
+
+> [!NOTE]
+> This only affects multipart uploads. Small files that fit in a single part are not affected.
+
+**Default**: 5
+
+**Notes**:
+* The value must be a positive integer (1–4294967295).
+* Invalid or zero values are ignored with a warning, and the default is used.
+* The value is read once on first use and cached for the lifetime of the process.
 
 ## License
 
