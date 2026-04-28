@@ -49,7 +49,7 @@ Example Usage:
 * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
 * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
 
-#### Maximum Parts Pending Read - AWS_CRT_S3_MAX_PARTS_PENDING_READ
+#### Maximum Parts Pending Read - `AWS_CRT_S3_MAX_PARTS_PENDING_READ`
 
 Controls the maximum number of parts that can be pending read from the input stream during a multipart upload. Higher values may improve upload throughput for large files by allowing more parts to be read in parallel, at the cost of higher memory usage.
 
