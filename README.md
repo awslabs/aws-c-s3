@@ -1,8 +1,8 @@
-# AWS C S3
+## AWS C S3
 
 The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing throughput and network utilization.
 
-## Key features:
+### Key features:
 
 * **Automatic Request Splitting**: Improves throughput by automatically splitting the request into part-sized chunks and performing parallel uploads/downloads of these chunks over multiple connections. There's a cap on the throughput of single S3 connection, the only way to go faster is multiple parallel connections.
 * **Automatic Retries**: Increases resilience by retrying individual failed chunks of a file transfer, eliminating the need to restart transfers from scratch after an intermittent error.
@@ -11,16 +11,16 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 * **Thread Pools and Async I/O**: Avoids bottlenecks associated with single-thread processing.
 * **Parallel Reads**: When uploading a large file from disk, reads from multiple parts of the file in parallel. This is faster than reading the file sequentially from beginning to end.
 
-## Documentation
+### Documentation
 
 * [GetObject](docs/GetObject.md): A visual representation of the GetObject request flow.
 * [Memory Aware Requests Execution](docs/memory_aware_request_execution.md): An in-depth guide on optimizing memory usage during request executions.
 
-## Configuration
+### Configuration
 
-### Environment Variables
+#### Environment Variables
 
-#### Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB`
+##### Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB`
 
 The S3 client uses a buffer pool to manage memory for concurrent transfers. 
 
@@ -39,17 +39,15 @@ Example Usage:
 >    };
 > ```
 
-**Priority**: The configuration value takes precedence over the environment variable. If `memory_limit_in_bytes` is set to a non-zero value in the config, the environment variable is ignored.
+> [!NOTE]
+> * **Priority**: The configuration value takes precedence over the environment variable. If `memory_limit_in_bytes` is set to a non-zero value in the config, the environment variable is ignored.
+> * **Default Behavior**: If neither is set (config is 0 and environment variable is not set), the client sets a default memory limit based on the target throughput.
+> * The limit applies per client. If multiple clients created, limit will apply to each separately.
+> * The environment variable value must be a valid positive integer representing gigabytes (GiB).
+> * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
+> * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
 
-**Default Behavior**: If neither is set (config is 0 and environment variable is not set), the client sets a default memory limit based on the target throughput.
-
-**Notes**:
-* The limit applies per client. If multiple clients created, limit will apply to each separately.
-* The environment variable value must be a valid positive integer representing gigabytes (GiB).
-* The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
-* Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
-
-#### Maximum Parts Pending Read - `AWS_CRT_S3_MAX_PARTS_PENDING_READ`
+##### Maximum Parts Pending Read - `AWS_CRT_S3_MAX_PARTS_PENDING_READ`
 
 Controls the maximum number of parts that can be pending read from the input stream during a multipart upload. Higher values may improve upload throughput for large files by allowing more parts to be read in parallel, at the cost of higher memory usage.
 
@@ -59,30 +57,30 @@ Example Usage:
    export AWS_CRT_S3_MAX_PARTS_PENDING_READ=20
 ```
 
-**Notes**:
-* Only affects multipart uploads. Small files that fit in a single part are not affected.
-* Setting this too low may introduce delays between reads, as the meta-request waits for the client to schedule more work.
-* Setting this too high may cause a single upload to hog work tokens, starving other concurrent uploads.
-* The value must be a positive integer (1–4294967295). Invalid or zero values are ignored with a warning, and the default is used.
-* The value is read once on first use and cached for the lifetime of the process.
+> [!NOTE]
+> * Only affects multipart uploads. Small files that fit in a single part are not affected.
+> * Setting this too low may introduce delays between reads, as the meta-request waits for the client to schedule more work.
+> * Setting this too high may cause a single upload to hog work tokens, starving other concurrent uploads.
+> * The value must be a positive integer (1–4294967295). Invalid or zero values are ignored with a warning, and the default is used.
+> * The value is read once on first use and cached for the lifetime of the process.
 
-#### Test Bucket - `CRT_S3_TEST_BUCKET_NAME`
+##### Test Bucket - `CRT_S3_TEST_BUCKET_NAME`
 
 The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 
-# License
+## License
 
 This library is licensed under the Apache 2.0 License.
 
-# Usage
+## Usage
 
-## Building
+### Building
 
 CMake 3.9+ is required to build.
 
 `<install-path>` must be an absolute path in the following instructions.
 
-### Linux-Only Dependencies
+#### Linux-Only Dependencies
 
 If you are building on Linux, you will need to build aws-lc and s2n-tls first.
 
@@ -96,7 +94,7 @@ cmake -S s2n-tls -B s2n-tls/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAKE_
 cmake --build s2n-tls/build --target install
 ```
 
-### Building aws-c-s3 and Remaining Dependencies
+#### Building aws-c-s3 and Remaining Dependencies
 
 ```
 git clone git@github.com:awslabs/aws-c-common.git
@@ -136,7 +134,7 @@ cmake -S aws-c-s3 -B aws-c-s3/build -DCMAKE_INSTALL_PREFIX=<install-path> -DCMAK
 cmake --build aws-c-s3/build --target install
 ```
 
-### Running S3 sample
+#### Running S3 sample
 
 After installing all the dependencies, and building aws-c-s3, you can run the sample directly from the s3 build directory.
 
@@ -158,7 +156,7 @@ To list objects:
 aws-c-s3/build/samples/s3/s3 ls s3://<bucket-name> --region <region>
 ```
 
-# Testing
+## Testing
 
 The unit tests require an AWS account with S3 buckets set up in a particular way.
 Use the [test_helper script](./tests/test_helper/) to set this up.
