@@ -59,12 +59,12 @@ Example Usage:
    export AWS_CRT_S3_MAX_PARTS_PENDING_READ=20
 ```
 
-> [!NOTE]
-> * Only affects multipart uploads. Small files that fit in a single part are not affected.
-> * Setting this too low may introduce delays between reads, as the meta-request waits for the client to schedule more work.
-> * Setting this too high may cause a single upload to hog work tokens, starving other concurrent uploads.
-> * The value must be a positive integer (1–4294967295). Invalid or zero values are ignored with a warning, and the default is used.
-> * The value is read once on first use and cached for the lifetime of the process.
+**Notes**:
+* Only affects multipart uploads. Small files that fit in a single part are not affected.
+* Setting this too low may introduce delays between reads, as the meta-request waits for the client to schedule more work.
+* Setting this too high may cause a single upload to hog work tokens, starving other concurrent uploads.
+* The value must be a positive integer (1–4294967295). Invalid or zero values are ignored with a warning, and the default is used.
+* The value is read once on first use and cached for the lifetime of the process.
 
 #### Test Bucket - `CRT_S3_TEST_BUCKET_NAME`
 
