@@ -30,14 +30,14 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    export AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=4  # 4 GiB limit
    ```
 
-   > [!TIP]
-   > You can also control memory limit *in bytes* using client config. The client config takes precedence over the environment variable (memory_limit_in_bytes needs to be set to a non-zero value).
-   > ```c
-   >    struct aws_s3_client_config config = {
-   >        .memory_limit_in_bytes = GB_TO_BYTES(4), // 4 GiB limit
-   >        // ... other configuration
-   >    };
-   > ```
+> [!TIP]
+> You can also control memory limit *in bytes* using client config. The client config takes precedence over the environment variable (memory_limit_in_bytes needs to be set to a non-zero value).
+> ```c
+>    struct aws_s3_client_config config = {
+>        .memory_limit_in_bytes = GB_TO_BYTES(4), // 4 GiB limit
+>        // ... other configuration
+>    };
+> ```
 
    **Default Behavior**:
    If neither is set (config is 0 and environment variable is not set), the client sets a default memory limit based on the target throughput.
