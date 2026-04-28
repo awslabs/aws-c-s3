@@ -20,7 +20,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 ### Environment Variables
 
-#### Memory Limit - AWS_CRT_S3_MEMORY_LIMIT_IN_GIB
+#### Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB`
 
 The S3 client uses a buffer pool to manage memory for concurrent transfers. 
 
@@ -65,6 +65,10 @@ Example Usage:
 > * Setting this too high may cause a single upload to hog work tokens, starving other concurrent uploads.
 > * The value must be a positive integer (1–4294967295). Invalid or zero values are ignored with a warning, and the default is used.
 > * The value is read once on first use and cached for the lifetime of the process.
+
+#### Test Bucket - `CRT_S3_TEST_BUCKET_NAME`
+
+The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 
 # License
 
