@@ -191,6 +191,9 @@ struct aws_s3_meta_request {
 
     enum aws_s3_meta_request_type type;
     struct aws_string *s3express_session_host;
+    /* Estimated size of a meta request. for file downloads, discovery request reveal size.
+     * In other cases, we preemptively knew the size or will never know the size of the object. */
+    size_t object_size;
     /* Is the meta request made to s3express bucket or not. */
     bool is_express;
     /* If the buffer pool optimized for the specific size or not. */
