@@ -1647,6 +1647,97 @@ static int s_test_s3_get_object_file_path_to_position(struct aws_allocator *allo
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_file_path_direct_io, s_test_s3_get_object_file_path_direct_io)
+static int s_test_s3_get_object_file_path_direct_io(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-1MB");
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    client = aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_to_position,
+    s_test_s3_get_object_file_path_direct_io_to_position)
+static int s_test_s3_get_object_file_path_direct_io_to_position(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-1MB");
+    uint64_t pre_exist_file_length = 10;
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+                .recv_file_position = 20,
+                .pre_exist_file_length = pre_exist_file_length,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+    ASSERT_UINT_EQUALS(
+        get_options.get_options.recv_file_position + MB_TO_BYTES(1), meta_request_test_results.received_file_size);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    client = aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_empty_object, s_test_s3_get_object_empty_default)
 static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

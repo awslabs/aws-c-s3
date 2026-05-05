@@ -287,51 +287,92 @@ int aws_s3_meta_request_init_base(
     if (options->recv_filepath.len > 0) {
 
         meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
-        switch (options->recv_file_option) {
-            case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
-                break;
+        meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
 
-            case AWS_S3_RECV_FILE_CREATE_NEW:
-                if (aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via CREATE_NEW: file already exists",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
-                    break;
-                } else {
+        /* When direct_io is enabled, use O_DIRECT fd-based writes instead of FILE* fwrite.
+         * Supported for CREATE_OR_REPLACE, CREATE_NEW, and WRITE_TO_POSITION.
+         * APPEND is incompatible with O_DIRECT (no offset-based writes). */
+        if (meta_request->fio_opts.direct_io &&
+            options->recv_file_option != AWS_S3_RECV_FILE_CREATE_OR_APPEND) {
+
+            /* Validate preconditions same as the FILE* path */
+            if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW &&
+                aws_path_exists(meta_request->recv_filepath)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cannot receive file via CREATE_NEW: file already exists",
+                    (void *)meta_request);
+                aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
+                goto error;
+            }
+            if (options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION &&
+                !aws_path_exists(meta_request->recv_filepath)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
+                    (void *)meta_request);
+                aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
+                goto error;
+            }
+
+            meta_request->recv_file_direct_io = true;
+            meta_request->recv_file_base_position =
+                (options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION) ? options->recv_file_position : 0;
+
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT enabled for download write path. base_position:%" PRIu64,
+                (void *)meta_request,
+                meta_request->recv_file_base_position);
+        } else {
+            /* Standard FILE* path */
+            switch (options->recv_file_option) {
+                case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
                     meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                     break;
-                }
-            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
-                break;
-            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
-                if (!aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                    break;
-                } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
-                    if (meta_request->recv_file &&
-                        aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
-                        /* error out. */
-                        goto error;
-                    }
-                    break;
-                }
 
-            default:
-                AWS_ASSERT(false);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                break;
-        }
-        if (!meta_request->recv_file) {
-            goto error;
+                case AWS_S3_RECV_FILE_CREATE_NEW:
+                    if (aws_path_exists(meta_request->recv_filepath)) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Cannot receive file via CREATE_NEW: file already exists",
+                            (void *)meta_request);
+                        aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
+                        break;
+                    } else {
+                        meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
+                        break;
+                    }
+                case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
+                    break;
+                case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
+                    if (!aws_path_exists(meta_request->recv_filepath)) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
+                            (void *)meta_request);
+                        aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
+                        break;
+                    } else {
+                        meta_request->recv_file =
+                            aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                        if (meta_request->recv_file &&
+                            aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) !=
+                                AWS_OP_SUCCESS) {
+                            goto error;
+                        }
+                        break;
+                    }
+
+                default:
+                    AWS_ASSERT(false);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    break;
+            }
+            if (!meta_request->recv_file) {
+                goto error;
+            }
         }
     }
 
@@ -569,6 +610,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
             /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
             aws_file_delete(meta_request->recv_filepath);
         }
+    } else if (meta_request->recv_file_direct_io && meta_request->recv_file_delete_on_failure) {
+        /* O_DIRECT path: no FILE* to close, but still honor delete-on-failure during teardown */
+        aws_file_delete(meta_request->recv_filepath);
     }
     aws_string_destroy(meta_request->recv_filepath);
 
@@ -2139,7 +2183,65 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_start_timestamp_ns);
                         }
 
-                        if (meta_request->recv_file) {
+                        if (meta_request->recv_file_direct_io) {
+                            /* O_DIRECT write path — use offset-based direct I/O */
+                            uint64_t write_offset =
+                                meta_request->recv_file_base_position + delivery_range_start;
+                            struct aws_byte_cursor write_cursor =
+                                aws_byte_cursor_from_array(response_body.ptr, response_body.len);
+                            if (aws_file_path_write_to_offset_direct_io(
+                                    meta_request->recv_filepath, write_offset, write_cursor)) {
+                                if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
+                                    /* O_DIRECT not supported, fall back to FILE* for remainder */
+                                    AWS_LOGF_WARN(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "id=%p: O_DIRECT write not supported, falling back to buffered I/O",
+                                        (void *)meta_request);
+                                    meta_request->recv_file_direct_io = false;
+                                    aws_reset_error();
+                                    /* Open FILE* and seek to current position */
+                                    meta_request->recv_file = aws_fopen(
+                                        aws_string_c_str(meta_request->recv_filepath), "r+");
+                                    if (meta_request->recv_file &&
+                                        aws_fseek(
+                                            meta_request->recv_file,
+                                            (int64_t)(meta_request->recv_file_base_position + delivery_range_start),
+                                            SEEK_SET) == AWS_OP_SUCCESS) {
+                                        /* Retry this write with fwrite */
+                                        if (fwrite(
+                                                (void *)response_body.ptr,
+                                                response_body.len,
+                                                1,
+                                                meta_request->recv_file) < 1) {
+                                            int errno_value =
+                                                ferror(meta_request->recv_file) ? errno : 0;
+                                            aws_translate_and_raise_io_error_or(
+                                                errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                                            error_code = aws_last_error();
+                                        }
+                                    } else {
+                                        error_code = aws_last_error();
+                                    }
+                                    if (error_code != AWS_ERROR_SUCCESS) {
+                                        AWS_LOGF_ERROR(
+                                            AWS_LS_S3_META_REQUEST,
+                                            "id=%p Failed O_DIRECT fallback to buffered write. aws-error:%s",
+                                            (void *)meta_request,
+                                            aws_error_name(error_code));
+                                    }
+                                } else {
+                                    error_code = aws_last_error();
+                                    AWS_LOGF_ERROR(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
+                                        (void *)meta_request,
+                                        aws_error_name(error_code));
+                                }
+                            }
+                            if (meta_request->client->enable_read_backpressure) {
+                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                            }
+                        } else if (meta_request->recv_file) {
                             /* Write the data directly to the file. No need to seek, since the event will always be
                              * delivered with the right order. */
                             if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
@@ -2417,6 +2519,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
+    } else if (meta_request->recv_file_direct_io && finish_result.error_code &&
+               meta_request->recv_file_delete_on_failure) {
+        /* O_DIRECT path has no FILE* to close, but still honor delete-on-failure */
+        aws_file_delete(meta_request->recv_filepath);
     }
 
     while (!aws_linked_list_empty(&release_request_list)) {
