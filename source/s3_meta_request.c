@@ -2182,6 +2182,71 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     }
 
     /* Deliver all events */
+
+    /* If AIO is enabled, first harvest any previously submitted completions (non-blocking),
+     * then submit new writes for parts that haven't been submitted yet. */
+    if (meta_request->aio_ctx != 0 && error_code == AWS_ERROR_SUCCESS) {
+        /* Harvest completions from previous ticks (non-blocking, timeout=0) */
+        struct io_event aio_events[64];
+        struct timespec zero_timeout = {0, 0};
+        int n;
+        while ((n = (int)syscall(
+                    __NR_io_getevents, meta_request->aio_ctx, 0, 64, aio_events, &zero_timeout)) > 0) {
+            for (int i = 0; i < n; i++) {
+                struct aws_s3_request *req = (struct aws_s3_request *)(uintptr_t)aio_events[i].data;
+                if ((long)aio_events[i].res == (long)req->send_data.response_body.len) {
+                    req->file_write_completed = true;
+                } else {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: AIO write failed for part %u, res=%ld",
+                        (void *)meta_request,
+                        req->part_number,
+                        (long)aio_events[i].res);
+                }
+            }
+        }
+
+        /* Submit new AIO writes for parts not yet submitted */
+        bool has_pending_aio = false;
+        for (size_t i = 0; i < aws_array_list_length(event_delivery_array); ++i) {
+            struct aws_s3_meta_request_event *ev;
+            aws_array_list_get_at_ptr(event_delivery_array, (void **)&ev, i);
+            if (ev->type != AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY) continue;
+            struct aws_s3_request *req = ev->u.response_body.completed_request;
+            if (req->file_write_completed || req->aio_write_submitted) {
+                if (req->aio_write_submitted && !req->file_write_completed) has_pending_aio = true;
+                continue;
+            }
+            /* Only AIO-submit ranged parts (part 1 uses sync fallback) */
+            if (req->part_number <= 1) continue;
+            struct aws_byte_buf *body = &req->send_data.response_body;
+            if (body->len == 0) continue;
+
+            uint64_t offset = meta_request->recv_file_base_position + req->part_range_start;
+            struct iocb cb;
+            memset(&cb, 0, sizeof(cb));
+            cb.aio_fildes = meta_request->recv_file_fd;
+            cb.aio_lio_opcode = IOCB_CMD_PWRITE;
+            cb.aio_buf = (uint64_t)(uintptr_t)body->buffer;
+            cb.aio_nbytes = body->len;
+            cb.aio_offset = (int64_t)offset;
+            cb.aio_data = (uint64_t)(uintptr_t)req;
+
+            struct iocb *cbs[1] = {&cb};
+            if (syscall(__NR_io_submit, meta_request->aio_ctx, 1, cbs) == 1) {
+                req->aio_write_submitted = true;
+                has_pending_aio = true;
+            }
+        }
+
+        /* If there are still pending AIO writes, reschedule delivery task to check again */
+        if (has_pending_aio) {
+            /* Push undelivered events back and reschedule */
+            /* For now, we'll let the per-event loop handle incomplete writes via fallback */
+        }
+    }
+
     for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
         struct aws_s3_meta_request_event event;
         aws_array_list_get_at(event_delivery_array, &event, event_i);
@@ -2257,28 +2322,29 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
 
                         if (meta_request->recv_file_direct_io) {
-                            if (request->aio_write_submitted) {
-                                /* Wait for AIO completion */
-                                struct io_event aio_event;
-                                int n = (int)syscall(
-                                    __NR_io_getevents, meta_request->aio_ctx, 1, 1, &aio_event, NULL);
-                                if (n == 1 && (long)aio_event.res == (long)response_body.len) {
-                                    request->file_write_completed = true;
-                                } else {
-                                    AWS_LOGF_ERROR(
-                                        AWS_LS_S3_META_REQUEST,
-                                        "id=%p: AIO write failed for part %u. n=%d res=%ld",
-                                        (void *)meta_request,
-                                        request->part_number,
-                                        n,
-                                        n == 1 ? (long)aio_event.res : -1);
-                                    error_code = AWS_ERROR_FILE_WRITE_FAILURE;
-                                }
-                            }
                             if (request->file_write_completed) {
-                                /* Already written -- just handle backpressure */
+                                /* Already written via AIO or sync -- just handle backpressure */
                                 if (meta_request->client->enable_read_backpressure) {
                                     aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                }
+                            } else if (request->aio_write_submitted) {
+                                /* AIO submitted earlier -- wait for completion (likely already done) */
+                                struct io_event aio_ev;
+                                struct timespec aio_timeout = {5, 0}; /* 5s max */
+                                int n = (int)syscall(
+                                    __NR_io_getevents, meta_request->aio_ctx, 1, 1, &aio_ev, &aio_timeout);
+                                if (n == 1 && (long)aio_ev.res == (long)response_body.len) {
+                                    request->file_write_completed = true;
+                                    if (meta_request->client->enable_read_backpressure) {
+                                        aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                    }
+                                } else {
+                                    error_code = AWS_ERROR_FILE_WRITE_FAILURE;
+                                    AWS_LOGF_ERROR(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "id=%p: AIO completion failed for part %u",
+                                        (void *)meta_request,
+                                        request->part_number);
                                 }
                             } else {
                             /* O_DIRECT write path — use offset-based direct I/O */
