@@ -12,6 +12,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <linux/aio_abi.h>
+#include <string.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 /* O_DIRECT is not available on all platforms */
@@ -956,8 +959,8 @@ static void s_s3_auto_ranged_get_request_finished(
     }
 
     /* Parallel file write on connection thread (before lock).
-     * Each thread opens its own fd, writes at the part's offset, then closes.
-     * No shared state between threads -- fully independent writes. */
+     * For O_DIRECT with AIO: io_submit (non-blocking, returns immediately).
+     * For non-O_DIRECT or AIO unavailable: per-call open/pwrite/close. */
     if (!request_failed && meta_request->recv_filepath != NULL &&
         meta_request->recv_file_fd >= 0 &&
         request->send_data.response_body.len > 0 &&
@@ -965,24 +968,45 @@ static void s_s3_auto_ranged_get_request_finished(
         uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
         struct aws_byte_buf *body = &request->send_data.response_body;
 
-        int flags = O_WRONLY;
-        if (meta_request->recv_file_direct_io) {
-            flags |= O_DIRECT;
-        }
-        int fd = open(aws_string_c_str(meta_request->recv_filepath), flags);
-        if (fd >= 0) {
-            ssize_t written = pwrite(fd, body->buffer, body->len, (off_t)write_offset);
-            close(fd);
-            if (written == (ssize_t)body->len) {
-                request->file_write_completed = true;
+        if (meta_request->aio_ctx != 0) {
+            /* Linux AIO: submit async write, returns immediately */
+            struct iocb cb;
+            memset(&cb, 0, sizeof(cb));
+            cb.aio_fildes = meta_request->recv_file_fd;
+            cb.aio_lio_opcode = IOCB_CMD_PWRITE;
+            cb.aio_buf = (uint64_t)(uintptr_t)body->buffer;
+            cb.aio_nbytes = body->len;
+            cb.aio_offset = (int64_t)write_offset;
+            cb.aio_data = (uint64_t)(uintptr_t)request; /* for completion identification */
+
+            struct iocb *cbs[1] = {&cb};
+            int submitted = (int)syscall(__NR_io_submit, meta_request->aio_ctx, 1, cbs);
+            if (submitted == 1) {
+                request->aio_write_submitted = true;
             } else {
+                /* AIO submit failed, fall through to sync pwrite */
                 AWS_LOGF_WARN(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p: pwrite failed for part %u at offset %" PRIu64 ". errno:%d",
+                    "id=%p: io_submit failed for part %u, errno:%d. Falling back to pwrite.",
                     (void *)meta_request,
                     request->part_number,
-                    write_offset,
                     errno);
+            }
+        }
+
+        if (!request->aio_write_submitted) {
+            /* Sync fallback: per-call open/pwrite/close */
+            int flags = O_WRONLY;
+            if (meta_request->recv_file_direct_io) {
+                flags |= O_DIRECT;
+            }
+            int fd = open(aws_string_c_str(meta_request->recv_filepath), flags);
+            if (fd >= 0) {
+                ssize_t written = pwrite(fd, body->buffer, body->len, (off_t)write_offset);
+                close(fd);
+                if (written == (ssize_t)body->len) {
+                    request->file_write_completed = true;
+                }
             }
         }
     }

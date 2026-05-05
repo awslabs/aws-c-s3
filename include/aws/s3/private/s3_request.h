@@ -275,6 +275,9 @@ struct aws_s3_request {
     /* Get request only, file write already completed on connection thread (parallel write path) */
     bool file_write_completed;
 
+    /* Set when AIO write has been submitted (delivery task must wait for completion) */
+    bool aio_write_submitted;
+
     /* Get request only, if there was an attached checksum to validate did it match the computed checksum */
     bool checksum_match;
 

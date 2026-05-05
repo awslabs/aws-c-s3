@@ -30,6 +30,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <linux/aio_abi.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 /* O_DIRECT is not available on all platforms */
@@ -333,6 +335,19 @@ int aws_s3_meta_request_init_base(
                     } else {
                         aws_translate_and_raise_io_error(errno);
                         goto error;
+                    }
+                }
+
+                /* Set up Linux AIO context for async writes */
+                if (meta_request->recv_file_fd >= 0) {
+                    meta_request->aio_ctx = 0;
+                    if (syscall(__NR_io_setup, 256, &meta_request->aio_ctx) != 0) {
+                        AWS_LOGF_WARN(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: io_setup failed (errno=%d), falling back to sync pwrite",
+                            (void *)meta_request,
+                            errno);
+                        meta_request->aio_ctx = 0;
                     }
                 }
             }
@@ -659,6 +674,10 @@ static void s_s3_meta_request_destroy(void *user_data) {
             aws_file_delete(meta_request->recv_filepath);
         }
     } else if (meta_request->recv_file_fd >= 0) {
+        if (meta_request->aio_ctx != 0) {
+            syscall(__NR_io_destroy, meta_request->aio_ctx);
+            meta_request->aio_ctx = 0;
+        }
         close(meta_request->recv_file_fd);
         meta_request->recv_file_fd = -1;
         if (meta_request->recv_file_delete_on_failure) {
@@ -2238,8 +2257,26 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
 
                         if (meta_request->recv_file_direct_io) {
+                            if (request->aio_write_submitted) {
+                                /* Wait for AIO completion */
+                                struct io_event aio_event;
+                                int n = (int)syscall(
+                                    __NR_io_getevents, meta_request->aio_ctx, 1, 1, &aio_event, NULL);
+                                if (n == 1 && (long)aio_event.res == (long)response_body.len) {
+                                    request->file_write_completed = true;
+                                } else {
+                                    AWS_LOGF_ERROR(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "id=%p: AIO write failed for part %u. n=%d res=%ld",
+                                        (void *)meta_request,
+                                        request->part_number,
+                                        n,
+                                        n == 1 ? (long)aio_event.res : -1);
+                                    error_code = AWS_ERROR_FILE_WRITE_FAILURE;
+                                }
+                            }
                             if (request->file_write_completed) {
-                                /* Already written on connection thread -- just handle backpressure */
+                                /* Already written -- just handle backpressure */
                                 if (meta_request->client->enable_read_backpressure) {
                                     aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
                                 }
@@ -2608,6 +2645,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             aws_file_delete(meta_request->recv_filepath);
         }
     } else if (meta_request->recv_file_fd >= 0) {
+        if (meta_request->aio_ctx != 0) {
+            syscall(__NR_io_destroy, meta_request->aio_ctx);
+            meta_request->aio_ctx = 0;
+        }
         close(meta_request->recv_file_fd);
         meta_request->recv_file_fd = -1;
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {

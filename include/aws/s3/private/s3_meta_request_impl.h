@@ -323,6 +323,8 @@ struct aws_s3_meta_request {
     uint64_t recv_file_base_position;
     /* When >= 0, parallel pwrite() on connection threads (for CREATE_OR_REPLACE/CREATE_NEW only) */
     int recv_file_fd;
+    /* Linux AIO context for async O_DIRECT writes (0 = not initialized) */
+    unsigned long aio_ctx;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
