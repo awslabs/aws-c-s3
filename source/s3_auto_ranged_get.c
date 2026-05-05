@@ -10,8 +10,14 @@
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <unistd.h>
+
+/* O_DIRECT is not available on all platforms */
+#ifndef O_DIRECT
+#    define O_DIRECT 0
+#endif
 
 /* Dont use buffer pool when we know response size, and its below this number,
  * i.e. when user provides explicit range that is small, ex. range = 1-100.
@@ -950,31 +956,34 @@ static void s_s3_auto_ranged_get_request_finished(
     }
 
     /* Parallel file write on connection thread (before lock).
-     * Only for CREATE modes with a persistent fd -- writes at known offset via pwrite/O_DIRECT. */
-    if (!request_failed && meta_request->recv_file_fd >= 0 &&
-        request->send_data.response_body.len > 0) {
+     * Each thread opens its own fd, writes at the part's offset, then closes.
+     * No shared state between threads -- fully independent writes. */
+    if (!request_failed && meta_request->recv_filepath != NULL &&
+        meta_request->recv_file_fd >= 0 &&
+        request->send_data.response_body.len > 0 &&
+        request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE) {
         uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
         struct aws_byte_buf *body = &request->send_data.response_body;
 
-        ssize_t written;
+        int flags = O_WRONLY;
         if (meta_request->recv_file_direct_io) {
-            /* O_DIRECT pwrite -- buffer must be aligned (guaranteed by buffer pool) */
-            written = pwrite(meta_request->recv_file_fd, body->buffer, body->len, (off_t)write_offset);
-        } else {
-            written = pwrite(meta_request->recv_file_fd, body->buffer, body->len, (off_t)write_offset);
+            flags |= O_DIRECT;
         }
-
-        if (written == (ssize_t)body->len) {
-            request->file_write_completed = true;
-        } else {
-            /* Write failed -- will be retried in delivery task or cause error */
-            AWS_LOGF_WARN(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Parallel pwrite failed for part %u at offset %" PRIu64 ". errno:%d",
-                (void *)meta_request,
-                request->part_number,
-                write_offset,
-                errno);
+        int fd = open(aws_string_c_str(meta_request->recv_filepath), flags);
+        if (fd >= 0) {
+            ssize_t written = pwrite(fd, body->buffer, body->len, (off_t)write_offset);
+            close(fd);
+            if (written == (ssize_t)body->len) {
+                request->file_write_completed = true;
+            } else {
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: pwrite failed for part %u at offset %" PRIu64 ". errno:%d",
+                    (void *)meta_request,
+                    request->part_number,
+                    write_offset,
+                    errno);
+            }
         }
     }
 
