@@ -9,6 +9,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/task_scheduler.h>
 #include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
@@ -277,6 +278,9 @@ struct aws_s3_request {
 
     /* Set when AIO write has been submitted (delivery task must wait for completion) */
     bool aio_write_submitted;
+
+    /* Task for parallel file write */
+    struct aws_task write_task;
 
     /* Get request only, if there was an attached checksum to validate did it match the computed checksum */
     bool checksum_match;

@@ -304,9 +304,8 @@ int aws_s3_meta_request_init_base(
         /* When direct_io is enabled, use O_DIRECT fd-based writes instead of FILE* fwrite.
          * Only supported for CREATE_OR_REPLACE and CREATE_NEW (downloading from beginning).
          * WRITE_TO_POSITION and APPEND fall through to the standard FILE* path. */
-        if (meta_request->fio_opts.direct_io &&
-            (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
-             options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
+        if (meta_request->fio_opts.direct_io && (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
+                                                 options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
 
             /* Validate preconditions same as the FILE* path */
             if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW &&
@@ -326,8 +325,7 @@ int aws_s3_meta_request_init_base(
             if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
                 options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW) {
                 int flags = O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT;
-                meta_request->recv_file_fd =
-                    open(aws_string_c_str(meta_request->recv_filepath), flags, 0644);
+                meta_request->recv_file_fd = open(aws_string_c_str(meta_request->recv_filepath), flags, 0644);
                 if (meta_request->recv_file_fd < 0) {
                     if (errno == EINVAL) {
                         /* O_DIRECT not supported by filesystem, will fall back at write time */
@@ -335,19 +333,6 @@ int aws_s3_meta_request_init_base(
                     } else {
                         aws_translate_and_raise_io_error(errno);
                         goto error;
-                    }
-                }
-
-                /* Set up Linux AIO context for async writes */
-                if (meta_request->recv_file_fd >= 0) {
-                    meta_request->aio_ctx = 0;
-                    if (syscall(__NR_io_setup, 256, &meta_request->aio_ctx) != 0) {
-                        AWS_LOGF_WARN(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p: io_setup failed (errno=%d), falling back to sync pwrite",
-                            (void *)meta_request,
-                            errno);
-                        meta_request->aio_ctx = 0;
                     }
                 }
             }
@@ -359,9 +344,8 @@ int aws_s3_meta_request_init_base(
                 meta_request->recv_file_base_position,
                 meta_request->recv_file_fd);
         } else if (
-            !meta_request->fio_opts.direct_io &&
-            (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
-             options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
+            !meta_request->fio_opts.direct_io && (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
+                                                  options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
 
             /* Non-O_DIRECT parallel write path: open raw fd for pwrite() on connection threads */
             if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW &&
@@ -375,8 +359,7 @@ int aws_s3_meta_request_init_base(
             }
 
             int flags = O_WRONLY | O_CREAT | O_TRUNC;
-            meta_request->recv_file_fd =
-                open(aws_string_c_str(meta_request->recv_filepath), flags, 0644);
+            meta_request->recv_file_fd = open(aws_string_c_str(meta_request->recv_filepath), flags, 0644);
             if (meta_request->recv_file_fd < 0) {
                 aws_translate_and_raise_io_error(errno);
                 goto error;
@@ -418,8 +401,7 @@ int aws_s3_meta_request_init_base(
                         aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
                         break;
                     } else {
-                        meta_request->recv_file =
-                            aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                        meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
                         if (meta_request->recv_file &&
                             aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) !=
                                 AWS_OP_SUCCESS) {
@@ -674,10 +656,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
             aws_file_delete(meta_request->recv_filepath);
         }
     } else if (meta_request->recv_file_fd >= 0) {
-        if (meta_request->aio_ctx != 0) {
-            syscall(__NR_io_destroy, meta_request->aio_ctx);
-            meta_request->aio_ctx = 0;
-        }
         close(meta_request->recv_file_fd);
         meta_request->recv_file_fd = -1;
         if (meta_request->recv_file_delete_on_failure) {
@@ -1991,6 +1969,8 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
 
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
+static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
@@ -1999,6 +1979,16 @@ void aws_s3_meta_request_stream_response_body_synced(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(request->part_number > 0);
+
+    /* HACK: Schedule parallel write task on a round-robin event loop.
+     * The request still goes through the priority queue and delivery task for proper
+     * counter tracking -- but by the time delivery reaches it, the write is already done. */
+    if (meta_request->recv_file_fd >= 0 && meta_request->recv_file_direct_io && request->part_number > 1) {
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
+        aws_task_init(&request->write_task, s_s3_parallel_write_task, request, "s3_parallel_write");
+        aws_event_loop_schedule_task_now(loop, &request->write_task);
+        /* Fall through to push to priority queue normally */
+    }
 
     /* Push it into the priority queue. */
     s_s3_meta_request_body_streaming_push_synced(meta_request, request);
@@ -2132,7 +2122,26 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
 }
 
 /* Deliver events in event_delivery_array.
- * This task runs on the meta-request's io_event_loop thread. */
+/* HACK: Parallel write task -- just does pwrite. Delivery task handles all counters/completion. */
+static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    struct aws_s3_request *request = arg;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    if (task_status == AWS_TASK_STATUS_RUN_READY && meta_request->recv_filepath) {
+        uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
+        struct aws_byte_buf *body = &request->send_data.response_body;
+
+        int fd = open(aws_string_c_str(meta_request->recv_filepath), O_WRONLY | O_DIRECT);
+        if (fd >= 0) {
+            pwrite(fd, body->buffer, body->len, (off_t)write_offset);
+            close(fd);
+            request->file_write_completed = true;
+        }
+    }
+}
+
+/* This task runs on the meta-request's io_event_loop thread. */
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     (void)task_status;
@@ -2182,70 +2191,6 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     }
 
     /* Deliver all events */
-
-    /* If AIO is enabled, first harvest any previously submitted completions (non-blocking),
-     * then submit new writes for parts that haven't been submitted yet. */
-    if (meta_request->aio_ctx != 0 && error_code == AWS_ERROR_SUCCESS) {
-        /* Harvest completions from previous ticks (non-blocking, timeout=0) */
-        struct io_event aio_events[64];
-        struct timespec zero_timeout = {0, 0};
-        int n;
-        while ((n = (int)syscall(
-                    __NR_io_getevents, meta_request->aio_ctx, 0, 64, aio_events, &zero_timeout)) > 0) {
-            for (int i = 0; i < n; i++) {
-                struct aws_s3_request *req = (struct aws_s3_request *)(uintptr_t)aio_events[i].data;
-                if ((long)aio_events[i].res == (long)req->send_data.response_body.len) {
-                    req->file_write_completed = true;
-                } else {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: AIO write failed for part %u, res=%ld",
-                        (void *)meta_request,
-                        req->part_number,
-                        (long)aio_events[i].res);
-                }
-            }
-        }
-
-        /* Submit new AIO writes for parts not yet submitted */
-        bool has_pending_aio = false;
-        for (size_t i = 0; i < aws_array_list_length(event_delivery_array); ++i) {
-            struct aws_s3_meta_request_event *ev;
-            aws_array_list_get_at_ptr(event_delivery_array, (void **)&ev, i);
-            if (ev->type != AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY) continue;
-            struct aws_s3_request *req = ev->u.response_body.completed_request;
-            if (req->file_write_completed || req->aio_write_submitted) {
-                if (req->aio_write_submitted && !req->file_write_completed) has_pending_aio = true;
-                continue;
-            }
-            /* Only AIO-submit ranged parts (part 1 uses sync fallback) */
-            if (req->part_number <= 1) continue;
-            struct aws_byte_buf *body = &req->send_data.response_body;
-            if (body->len == 0) continue;
-
-            uint64_t offset = meta_request->recv_file_base_position + req->part_range_start;
-            struct iocb cb;
-            memset(&cb, 0, sizeof(cb));
-            cb.aio_fildes = meta_request->recv_file_fd;
-            cb.aio_lio_opcode = IOCB_CMD_PWRITE;
-            cb.aio_buf = (uint64_t)(uintptr_t)body->buffer;
-            cb.aio_nbytes = body->len;
-            cb.aio_offset = (int64_t)offset;
-            cb.aio_data = (uint64_t)(uintptr_t)req;
-
-            struct iocb *cbs[1] = {&cb};
-            if (syscall(__NR_io_submit, meta_request->aio_ctx, 1, cbs) == 1) {
-                req->aio_write_submitted = true;
-                has_pending_aio = true;
-            }
-        }
-
-        /* If there are still pending AIO writes, reschedule delivery task to check again */
-        if (has_pending_aio) {
-            /* Push undelivered events back and reschedule */
-            /* For now, we'll let the per-event loop handle incomplete writes via fallback */
-        }
-    }
 
     for (size_t event_i = 0; event_i < aws_array_list_length(event_delivery_array); ++event_i) {
         struct aws_s3_meta_request_event event;
@@ -2323,87 +2268,66 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
                         if (meta_request->recv_file_direct_io) {
                             if (request->file_write_completed) {
-                                /* Already written via AIO or sync -- just handle backpressure */
+                                /* Already written via parallel task -- just handle backpressure */
                                 if (meta_request->client->enable_read_backpressure) {
                                     aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
                                 }
-                            } else if (request->aio_write_submitted) {
-                                /* AIO submitted earlier -- wait for completion (likely already done) */
-                                struct io_event aio_ev;
-                                struct timespec aio_timeout = {5, 0}; /* 5s max */
-                                int n = (int)syscall(
-                                    __NR_io_getevents, meta_request->aio_ctx, 1, 1, &aio_ev, &aio_timeout);
-                                if (n == 1 && (long)aio_ev.res == (long)response_body.len) {
-                                    request->file_write_completed = true;
-                                    if (meta_request->client->enable_read_backpressure) {
-                                        aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
-                                    }
-                                } else {
-                                    error_code = AWS_ERROR_FILE_WRITE_FAILURE;
-                                    AWS_LOGF_ERROR(
-                                        AWS_LS_S3_META_REQUEST,
-                                        "id=%p: AIO completion failed for part %u",
-                                        (void *)meta_request,
-                                        request->part_number);
-                                }
                             } else {
-                            /* O_DIRECT write path — use offset-based direct I/O */
-                            uint64_t write_offset =
-                                meta_request->recv_file_base_position + delivery_range_start;
-                            struct aws_byte_cursor write_cursor =
-                                aws_byte_cursor_from_array(response_body.ptr, response_body.len);
-                            if (aws_file_path_write_to_offset_direct_io(
-                                    meta_request->recv_filepath, write_offset, write_cursor)) {
-                                if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
-                                    /* O_DIRECT not supported on this platform, fall back to FILE* */
-                                    AWS_LOGF_WARN(
-                                        AWS_LS_S3_META_REQUEST,
-                                        "id=%p: O_DIRECT write not supported, falling back to buffered I/O",
-                                        (void *)meta_request);
-                                    meta_request->recv_file_direct_io = false;
-                                    aws_reset_error();
-                                    /* Open FILE* and seek to current position */
-                                    meta_request->recv_file = aws_fopen(
-                                        aws_string_c_str(meta_request->recv_filepath), "r+");
-                                    if (meta_request->recv_file &&
-                                        aws_fseek(
-                                            meta_request->recv_file,
-                                            (int64_t)(meta_request->recv_file_base_position + delivery_range_start),
-                                            SEEK_SET) == AWS_OP_SUCCESS) {
-                                        /* Retry this write with fwrite */
-                                        if (fwrite(
-                                                (void *)response_body.ptr,
-                                                response_body.len,
-                                                1,
-                                                meta_request->recv_file) < 1) {
-                                            int errno_value =
-                                                ferror(meta_request->recv_file) ? errno : 0;
-                                            aws_translate_and_raise_io_error_or(
-                                                errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                                /* O_DIRECT write path — use offset-based direct I/O */
+                                uint64_t write_offset = meta_request->recv_file_base_position + delivery_range_start;
+                                struct aws_byte_cursor write_cursor =
+                                    aws_byte_cursor_from_array(response_body.ptr, response_body.len);
+                                if (aws_file_path_write_to_offset_direct_io(
+                                        meta_request->recv_filepath, write_offset, write_cursor)) {
+                                    if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
+                                        /* O_DIRECT not supported on this platform, fall back to FILE* */
+                                        AWS_LOGF_WARN(
+                                            AWS_LS_S3_META_REQUEST,
+                                            "id=%p: O_DIRECT write not supported, falling back to buffered I/O",
+                                            (void *)meta_request);
+                                        meta_request->recv_file_direct_io = false;
+                                        aws_reset_error();
+                                        /* Open FILE* and seek to current position */
+                                        meta_request->recv_file =
+                                            aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                                        if (meta_request->recv_file &&
+                                            aws_fseek(
+                                                meta_request->recv_file,
+                                                (int64_t)(meta_request->recv_file_base_position + delivery_range_start),
+                                                SEEK_SET) == AWS_OP_SUCCESS) {
+                                            /* Retry this write with fwrite */
+                                            if (fwrite(
+                                                    (void *)response_body.ptr,
+                                                    response_body.len,
+                                                    1,
+                                                    meta_request->recv_file) < 1) {
+                                                int errno_value = ferror(meta_request->recv_file) ? errno : 0;
+                                                aws_translate_and_raise_io_error_or(
+                                                    errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+                                                error_code = aws_last_error();
+                                            }
+                                        } else {
                                             error_code = aws_last_error();
+                                        }
+                                        if (error_code != AWS_ERROR_SUCCESS) {
+                                            AWS_LOGF_ERROR(
+                                                AWS_LS_S3_META_REQUEST,
+                                                "id=%p Failed O_DIRECT fallback to buffered write. aws-error:%s",
+                                                (void *)meta_request,
+                                                aws_error_name(error_code));
                                         }
                                     } else {
                                         error_code = aws_last_error();
-                                    }
-                                    if (error_code != AWS_ERROR_SUCCESS) {
                                         AWS_LOGF_ERROR(
                                             AWS_LS_S3_META_REQUEST,
-                                            "id=%p Failed O_DIRECT fallback to buffered write. aws-error:%s",
+                                            "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
                                             (void *)meta_request,
                                             aws_error_name(error_code));
                                     }
-                                } else {
-                                    error_code = aws_last_error();
-                                    AWS_LOGF_ERROR(
-                                        AWS_LS_S3_META_REQUEST,
-                                        "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
-                                        (void *)meta_request,
-                                        aws_error_name(error_code));
                                 }
-                            }
-                            if (meta_request->client->enable_read_backpressure) {
-                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
-                            }
+                                if (meta_request->client->enable_read_backpressure) {
+                                    aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                }
                             } /* end else (fallback O_DIRECT write in delivery) */
                         } else if (meta_request->recv_file_fd >= 0) {
                             if (request->file_write_completed) {
@@ -2711,17 +2635,13 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             aws_file_delete(meta_request->recv_filepath);
         }
     } else if (meta_request->recv_file_fd >= 0) {
-        if (meta_request->aio_ctx != 0) {
-            syscall(__NR_io_destroy, meta_request->aio_ctx);
-            meta_request->aio_ctx = 0;
-        }
         close(meta_request->recv_file_fd);
         meta_request->recv_file_fd = -1;
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
-    } else if (meta_request->recv_file_direct_io && finish_result.error_code &&
-               meta_request->recv_file_delete_on_failure) {
+    } else if (
+        meta_request->recv_file_direct_io && finish_result.error_code && meta_request->recv_file_delete_on_failure) {
         /* O_DIRECT path has no FILE* to close, but still honor delete-on-failure */
         aws_file_delete(meta_request->recv_filepath);
     }
