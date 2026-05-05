@@ -321,6 +321,8 @@ struct aws_s3_meta_request {
     bool recv_file_direct_io;
     /* Base file position for O_DIRECT writes (from recv_file_position option) */
     uint64_t recv_file_base_position;
+    /* When >= 0, parallel pwrite() on connection threads (for CREATE_OR_REPLACE/CREATE_NEW only) */
+    int recv_file_fd;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;

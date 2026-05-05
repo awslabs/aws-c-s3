@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
+#define _GNU_SOURCE /* NOLINT(bugprone-reserved-identifier) */
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
@@ -27,7 +28,14 @@
 #include <aws/io/socket.h>
 #include <aws/io/stream.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
+#include <unistd.h>
+
+/* O_DIRECT is not available on all platforms */
+#ifndef O_DIRECT
+#    define O_DIRECT 0
+#endif
 
 #define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
 #define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
@@ -171,6 +179,8 @@ int aws_s3_meta_request_init_base(
 
     AWS_ZERO_STRUCT(*meta_request);
 
+    meta_request->recv_file_fd = -1;
+
     AWS_ASSERT(vtable->update);
     AWS_ASSERT(vtable->prepare_request);
     AWS_ASSERT(vtable->destroy);
@@ -290,10 +300,11 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
 
         /* When direct_io is enabled, use O_DIRECT fd-based writes instead of FILE* fwrite.
-         * Supported for CREATE_OR_REPLACE, CREATE_NEW, and WRITE_TO_POSITION.
-         * APPEND is incompatible with O_DIRECT (no offset-based writes). */
+         * Only supported for CREATE_OR_REPLACE and CREATE_NEW (downloading from beginning).
+         * WRITE_TO_POSITION and APPEND fall through to the standard FILE* path. */
         if (meta_request->fio_opts.direct_io &&
-            options->recv_file_option != AWS_S3_RECV_FILE_CREATE_OR_APPEND) {
+            (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
+             options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
 
             /* Validate preconditions same as the FILE* path */
             if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW &&
@@ -305,27 +316,64 @@ int aws_s3_meta_request_init_base(
                 aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
                 goto error;
             }
-            if (options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION &&
-                !aws_path_exists(meta_request->recv_filepath)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
-                    (void *)meta_request);
-                aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                goto error;
-            }
 
             meta_request->recv_file_direct_io = true;
-            meta_request->recv_file_base_position =
-                (options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION) ? options->recv_file_position : 0;
+            meta_request->recv_file_base_position = 0;
+
+            /* For CREATE modes (downloading from beginning), open a persistent fd for parallel writes */
+            if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
+                options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW) {
+                int flags = O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT;
+                meta_request->recv_file_fd =
+                    open(aws_string_c_str(meta_request->recv_filepath), flags, 0644);
+                if (meta_request->recv_file_fd < 0) {
+                    if (errno == EINVAL) {
+                        /* O_DIRECT not supported by filesystem, will fall back at write time */
+                        meta_request->recv_file_fd = -1;
+                    } else {
+                        aws_translate_and_raise_io_error(errno);
+                        goto error;
+                    }
+                }
+            }
 
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT enabled for download write path. base_position:%" PRIu64,
+                "id=%p: O_DIRECT enabled for download write path. base_position:%" PRIu64 " fd:%d",
                 (void *)meta_request,
-                meta_request->recv_file_base_position);
+                meta_request->recv_file_base_position,
+                meta_request->recv_file_fd);
+        } else if (
+            !meta_request->fio_opts.direct_io &&
+            (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
+             options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
+
+            /* Non-O_DIRECT parallel write path: open raw fd for pwrite() on connection threads */
+            if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW &&
+                aws_path_exists(meta_request->recv_filepath)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cannot receive file via CREATE_NEW: file already exists",
+                    (void *)meta_request);
+                aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
+                goto error;
+            }
+
+            int flags = O_WRONLY | O_CREAT | O_TRUNC;
+            meta_request->recv_file_fd =
+                open(aws_string_c_str(meta_request->recv_filepath), flags, 0644);
+            if (meta_request->recv_file_fd < 0) {
+                aws_translate_and_raise_io_error(errno);
+                goto error;
+            }
+
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Parallel pwrite enabled for download. fd:%d",
+                (void *)meta_request,
+                meta_request->recv_file_fd);
         } else {
-            /* Standard FILE* path */
+            /* Sequential FILE* path (APPEND, WRITE_TO_POSITION without O_DIRECT) */
             switch (options->recv_file_option) {
                 case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
                     meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
@@ -608,6 +656,12 @@ static void s_s3_meta_request_destroy(void *user_data) {
         meta_request->recv_file = NULL;
         if (meta_request->recv_file_delete_on_failure) {
             /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
+            aws_file_delete(meta_request->recv_filepath);
+        }
+    } else if (meta_request->recv_file_fd >= 0) {
+        close(meta_request->recv_file_fd);
+        meta_request->recv_file_fd = -1;
+        if (meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
     } else if (meta_request->recv_file_direct_io && meta_request->recv_file_delete_on_failure) {
@@ -2184,6 +2238,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         }
 
                         if (meta_request->recv_file_direct_io) {
+                            if (request->file_write_completed) {
+                                /* Already written on connection thread -- just handle backpressure */
+                                if (meta_request->client->enable_read_backpressure) {
+                                    aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                }
+                            } else {
                             /* O_DIRECT write path — use offset-based direct I/O */
                             uint64_t write_offset =
                                 meta_request->recv_file_base_position + delivery_range_start;
@@ -2192,7 +2252,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             if (aws_file_path_write_to_offset_direct_io(
                                     meta_request->recv_filepath, write_offset, write_cursor)) {
                                 if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
-                                    /* O_DIRECT not supported, fall back to FILE* for remainder */
+                                    /* O_DIRECT not supported on this platform, fall back to FILE* */
                                     AWS_LOGF_WARN(
                                         AWS_LS_S3_META_REQUEST,
                                         "id=%p: O_DIRECT write not supported, falling back to buffered I/O",
@@ -2240,6 +2300,34 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             }
                             if (meta_request->client->enable_read_backpressure) {
                                 aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                            }
+                            } /* end else (fallback O_DIRECT write in delivery) */
+                        } else if (meta_request->recv_file_fd >= 0) {
+                            if (request->file_write_completed) {
+                                /* Already written on connection thread via pwrite */
+                                if (meta_request->client->enable_read_backpressure) {
+                                    aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                }
+                            } else {
+                                /* Fallback: pwrite in delivery task */
+                                ssize_t written = pwrite(
+                                    meta_request->recv_file_fd,
+                                    response_body.ptr,
+                                    response_body.len,
+                                    (off_t)(meta_request->recv_file_base_position + delivery_range_start));
+                                if (written != (ssize_t)response_body.len) {
+                                    aws_translate_and_raise_io_error_or(errno, AWS_ERROR_FILE_WRITE_FAILURE);
+                                    error_code = aws_last_error();
+                                    AWS_LOGF_ERROR(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "id=%p Failed pwrite in delivery. errno:%d aws-error:%s",
+                                        (void *)meta_request,
+                                        errno,
+                                        aws_error_name(error_code));
+                                }
+                                if (meta_request->client->enable_read_backpressure) {
+                                    aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
+                                }
                             }
                         } else if (meta_request->recv_file) {
                             /* Write the data directly to the file. No need to seek, since the event will always be
@@ -2516,6 +2604,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
+        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
+            aws_file_delete(meta_request->recv_filepath);
+        }
+    } else if (meta_request->recv_file_fd >= 0) {
+        close(meta_request->recv_file_fd);
+        meta_request->recv_file_fd = -1;
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }

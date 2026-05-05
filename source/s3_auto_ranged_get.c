@@ -9,7 +9,9 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <errno.h>
 #include <inttypes.h>
+#include <unistd.h>
 
 /* Dont use buffer pool when we know response size, and its below this number,
  * i.e. when user provides explicit range that is small, ex. range = 1-100.
@@ -944,6 +946,35 @@ static void s_s3_auto_ranged_get_request_finished(
                 error_code = aws_last_error_or_unknown();
             }
             meta_request->headers_callback = NULL;
+        }
+    }
+
+    /* Parallel file write on connection thread (before lock).
+     * Only for CREATE modes with a persistent fd -- writes at known offset via pwrite/O_DIRECT. */
+    if (!request_failed && meta_request->recv_file_fd >= 0 &&
+        request->send_data.response_body.len > 0) {
+        uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
+        struct aws_byte_buf *body = &request->send_data.response_body;
+
+        ssize_t written;
+        if (meta_request->recv_file_direct_io) {
+            /* O_DIRECT pwrite -- buffer must be aligned (guaranteed by buffer pool) */
+            written = pwrite(meta_request->recv_file_fd, body->buffer, body->len, (off_t)write_offset);
+        } else {
+            written = pwrite(meta_request->recv_file_fd, body->buffer, body->len, (off_t)write_offset);
+        }
+
+        if (written == (ssize_t)body->len) {
+            request->file_write_completed = true;
+        } else {
+            /* Write failed -- will be retried in delivery task or cause error */
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Parallel pwrite failed for part %u at offset %" PRIu64 ". errno:%d",
+                (void *)meta_request,
+                request->part_number,
+                write_offset,
+                errno);
         }
     }
 

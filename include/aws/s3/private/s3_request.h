@@ -272,6 +272,9 @@ struct aws_s3_request {
     /* Get request only, was there a checksum to validate */
     bool did_validate;
 
+    /* Get request only, file write already completed on connection thread (parallel write path) */
+    bool file_write_completed;
+
     /* Get request only, if there was an attached checksum to validate did it match the computed checksum */
     bool checksum_match;
 
