@@ -1980,14 +1980,15 @@ void aws_s3_meta_request_stream_response_body_synced(
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(request->part_number > 0);
 
-    /* HACK: Schedule parallel write task on a round-robin event loop.
-     * The request still goes through the priority queue and delivery task for proper
-     * counter tracking -- but by the time delivery reaches it, the write is already done. */
+    /* Parallel write: bypass priority queue entirely. Write task handles the write
+     * and increments delivery counters directly. No ordering needed for offset-based writes. */
     if (meta_request->recv_file_fd >= 0 && meta_request->recv_file_direct_io && request->part_number > 1) {
+        ++meta_request->synced_data.num_parts_delivery_sent;
+        aws_s3_request_acquire(request); /* prevent release while write task is pending */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
         aws_task_init(&request->write_task, s_s3_parallel_write_task, request, "s3_parallel_write");
         aws_event_loop_schedule_task_now(loop, &request->write_task);
-        /* Fall through to push to priority queue normally */
+        return;
     }
 
     /* Push it into the priority queue. */
@@ -2122,7 +2123,7 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
 }
 
 /* Deliver events in event_delivery_array.
-/* HACK: Parallel write task -- just does pwrite. Delivery task handles all counters/completion. */
+/* Parallel write task -- does pwrite and handles delivery counters directly. */
 static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     struct aws_s3_request *request = arg;
@@ -2132,13 +2133,41 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
         uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
         struct aws_byte_buf *body = &request->send_data.response_body;
 
+        aws_thread_id_t tid = aws_thread_current_thread_id();
+        printf("tid writting to disk is %p\n", tid);
         int fd = open(aws_string_c_str(meta_request->recv_filepath), O_WRONLY | O_DIRECT);
         if (fd >= 0) {
             pwrite(fd, body->buffer, body->len, (off_t)write_offset);
             close(fd);
-            request->file_write_completed = true;
+        }
+
+        /* Record thread ID for test verification */
+        size_t idx = (size_t)aws_atomic_fetch_add(&meta_request->parallel_write_count, 1);
+        if (idx < 16) {
+            meta_request->parallel_write_thread_ids[idx] = tid;
+        }
+        bool is_new = true;
+        for (size_t i = 0; i < idx && i < 16; i++) {
+            if (aws_thread_thread_id_equal(meta_request->parallel_write_thread_ids[i], tid)) {
+                is_new = false;
+                break;
+            }
+        }
+        if (is_new) {
+            aws_atomic_fetch_add(&meta_request->parallel_write_thread_count, 1);
         }
     }
+
+    /* Increment delivery counters and finish metrics (same as delivery task would do) */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        ++meta_request->synced_data.num_parts_delivery_completed;
+        aws_s3_request_finish_up_metrics_synced(request, meta_request);
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+
+    aws_s3_client_schedule_process_work(meta_request->client);
+    aws_s3_request_release(request);
 }
 
 /* This task runs on the meta-request's io_event_loop thread. */

@@ -326,6 +326,11 @@ struct aws_s3_meta_request {
     /* Linux AIO context for async O_DIRECT writes (0 = not initialized) */
     unsigned long aio_ctx;
 
+    /* Test instrumentation: track unique thread IDs used by parallel write tasks */
+    struct aws_atomic_var parallel_write_count; /* number of writes completed on parallel threads */
+    aws_thread_id_t parallel_write_thread_ids[16];
+    struct aws_atomic_var parallel_write_thread_count; /* number of unique threads seen */
+
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
 };

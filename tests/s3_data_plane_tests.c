@@ -1820,6 +1820,82 @@ static int s_test_s3_get_object_file_path_parallel_write_direct_io(struct aws_al
     return 0;
 }
 
+static struct {
+    size_t parallel_write_count;
+    size_t unique_thread_count;
+} s_parallel_thread_test_data;
+
+static void s_parallel_write_thread_finish(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data) {
+    (void)result;
+    (void)user_data;
+    s_parallel_thread_test_data.parallel_write_count =
+        (size_t)aws_atomic_load_int(&meta_request->parallel_write_count);
+    s_parallel_thread_test_data.unique_thread_count =
+        (size_t)aws_atomic_load_int(&meta_request->parallel_write_thread_count);
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_parallel_write_multi_thread,
+    s_test_s3_get_object_file_path_parallel_write_multi_thread)
+static int s_test_s3_get_object_file_path_parallel_write_multi_thread(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Test that parallel file writes are distributed across multiple threads.
+     * Uses 10MB object with 1MB part_size = 10 parts. Parts 2-10 go through
+     * the parallel write path, distributed across body_streaming_elg threads. */
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(1),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-10MB");
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .finish_callback = s_parallel_write_thread_finish,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+
+    /* Verify writes happened on multiple parallel threads.
+     * 10MB / 1MB = 10 parts. Part 1 uses normal path, parts 2-10 use parallel write.
+     * With 8 body_streaming_elg threads, writes should spread across >1 thread. */
+    printf("  Parallel writes: %zu, Unique threads: %zu\n",
+        s_parallel_thread_test_data.parallel_write_count,
+        s_parallel_thread_test_data.unique_thread_count);
+    ASSERT_TRUE(s_parallel_thread_test_data.parallel_write_count >= 5);
+    ASSERT_TRUE(s_parallel_thread_test_data.unique_thread_count > 1);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    client = aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_empty_object, s_test_s3_get_object_empty_default)
 static int s_test_s3_get_object_empty_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
