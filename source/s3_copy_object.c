@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <aws/common/xml_parser.h>
 
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
 static const size_t s_multipart_copy_minimum_object_size = GB_TO_BYTES(1);

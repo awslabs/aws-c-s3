@@ -13,6 +13,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
+#include <aws/common/xml_parser.h>
 #include <aws/io/stream.h>
 
 /* TODO: better logging of steps */
