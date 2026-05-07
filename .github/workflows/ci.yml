@@ -42,7 +42,7 @@ jobs:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
     - name: Checkout Sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
         # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
@@ -204,7 +204,7 @@ jobs:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
     - name: Checkout Sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Build ${{ env.PACKAGE_NAME }} + consumers
       run: |
         python3 -m venv .venv
@@ -221,7 +221,7 @@ jobs:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
     - name: Checkout Sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Build ${{ env.PACKAGE_NAME }} + consumers
       run: |
         python3 -m venv .venv
