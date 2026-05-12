@@ -13,6 +13,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/string.h>
+#include <aws/common/xml_parser.h>
 #include <aws/io/stream.h>
 
 /* TODO: better logging of steps */
@@ -1756,13 +1757,20 @@ static void s_s3_auto_ranged_put_request_finished(
                 aws_xml_get_body_at_path(meta_request->allocator, xml_doc, xml_path, &etag_header_value);
 
                 if (etag_header_value.len > 0) {
-                    struct aws_byte_buf etag_header_value_byte_buf =
-                        aws_replace_quote_entities(meta_request->allocator, etag_header_value);
-
-                    aws_http_headers_set(
-                        request->send_data.response_headers,
-                        g_etag_header_name,
-                        aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
+                    struct aws_byte_buf etag_header_value_byte_buf;
+                    aws_byte_buf_init(&etag_header_value_byte_buf, meta_request->allocator, 20);
+                    if (aws_byte_buf_append_unescaped_xml(
+                            meta_request->allocator, etag_header_value, &etag_header_value_byte_buf)) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST, "Server returned unexpected etag format. skipping etag unescaping");
+                        aws_http_headers_set(
+                            request->send_data.response_headers, g_etag_header_name, etag_header_value);
+                    } else {
+                        aws_http_headers_set(
+                            request->send_data.response_headers,
+                            g_etag_header_name,
+                            aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
+                    }
 
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
                 }

@@ -236,11 +236,6 @@ int aws_xml_get_body_at_path(
     const char *path_name_array[],
     struct aws_byte_cursor *out_body);
 
-/* replace &quot; with escaped /"
- * Returns initialized aws_byte_buf */
-AWS_S3_API
-struct aws_byte_buf aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_byte_cursor src);
-
 /* strip quotes if string is enclosed in quotes. does not remove quotes if they only appear on either side of the string
  */
 AWS_S3_API
