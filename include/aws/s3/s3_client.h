@@ -350,7 +350,9 @@ struct aws_s3_file_io_options {
      * Notes:
      * - Only supported on linux for now.
      * - Supported for both upload (send_filepath) and download (recv_filepath).
-     * - For download, O_DIRECT is not supported with AWS_S3_RECV_FILE_CREATE_OR_APPEND.
+     * - For download, O_DIRECT is only supported with AWS_S3_RECV_FILE_CREATE_OR_REPLACE
+     *   and AWS_S3_RECV_FILE_CREATE_NEW (i.e. writing from the beginning of the file).
+     *   APPEND and WRITE_TO_POSITION are not supported with O_DIRECT.
      * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
      * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
      */

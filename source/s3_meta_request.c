@@ -290,10 +290,10 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
 
         /* When direct_io is enabled, use O_DIRECT fd-based writes instead of FILE* fwrite.
-         * Supported for CREATE_OR_REPLACE, CREATE_NEW, and WRITE_TO_POSITION.
-         * APPEND is incompatible with O_DIRECT (no offset-based writes). */
+         * Only supported for CREATE_OR_REPLACE and CREATE_NEW (writing from the beginning). */
         if (meta_request->fio_opts.direct_io &&
-            options->recv_file_option != AWS_S3_RECV_FILE_CREATE_OR_APPEND) {
+            (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE ||
+             options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW)) {
 
             /* Validate preconditions same as the FILE* path */
             if (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_NEW &&
@@ -305,26 +305,23 @@ int aws_s3_meta_request_init_base(
                 aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
                 goto error;
             }
-            if (options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION &&
-                !aws_path_exists(meta_request->recv_filepath)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
-                    (void *)meta_request);
-                aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                goto error;
-            }
 
             meta_request->recv_file_direct_io = true;
-            meta_request->recv_file_base_position =
-                (options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION) ? options->recv_file_position : 0;
 
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT enabled for download write path. base_position:%" PRIu64,
-                (void *)meta_request,
-                meta_request->recv_file_base_position);
+                "id=%p: O_DIRECT enabled for download write path.",
+                (void *)meta_request);
         } else {
+            /* Fail if user requested O_DIRECT with APPEND or WRITE_TO_POSITION */
+            if (meta_request->fio_opts.direct_io) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p O_DIRECT for download is only supported with CREATE_OR_REPLACE and CREATE_NEW",
+                    (void *)meta_request);
+                aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+                goto error;
+            }
             /* Standard FILE* path */
             switch (options->recv_file_option) {
                 case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
@@ -2185,29 +2182,26 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
                         if (meta_request->recv_file_direct_io) {
                             /* O_DIRECT write path — use offset-based direct I/O */
-                            uint64_t write_offset =
-                                meta_request->recv_file_base_position + delivery_range_start;
+                            uint64_t write_offset = delivery_range_start;
                             struct aws_byte_cursor write_cursor =
                                 aws_byte_cursor_from_array(response_body.ptr, response_body.len);
                             if (aws_file_path_write_to_offset_direct_io(
                                     meta_request->recv_filepath, write_offset, write_cursor)) {
                                 if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
-                                    /* O_DIRECT not supported, fall back to FILE* for remainder */
+                                    /* Platform doesn't support O_DIRECT, fall back to buffered I/O */
                                     AWS_LOGF_WARN(
                                         AWS_LS_S3_META_REQUEST,
-                                        "id=%p: O_DIRECT write not supported, falling back to buffered I/O",
+                                        "id=%p: O_DIRECT write not supported on this platform, "
+                                        "falling back to buffered I/O",
                                         (void *)meta_request);
                                     meta_request->recv_file_direct_io = false;
                                     aws_reset_error();
-                                    /* Open FILE* and seek to current position */
+                                    /* Open FILE* and write this chunk */
                                     meta_request->recv_file = aws_fopen(
                                         aws_string_c_str(meta_request->recv_filepath), "r+");
                                     if (meta_request->recv_file &&
-                                        aws_fseek(
-                                            meta_request->recv_file,
-                                            (int64_t)(meta_request->recv_file_base_position + delivery_range_start),
-                                            SEEK_SET) == AWS_OP_SUCCESS) {
-                                        /* Retry this write with fwrite */
+                                        aws_fseek(meta_request->recv_file, (int64_t)write_offset, SEEK_SET) ==
+                                            AWS_OP_SUCCESS) {
                                         if (fwrite(
                                                 (void *)response_body.ptr,
                                                 response_body.len,
@@ -2222,14 +2216,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                     } else {
                                         error_code = aws_last_error();
                                     }
-                                    if (error_code != AWS_ERROR_SUCCESS) {
-                                        AWS_LOGF_ERROR(
-                                            AWS_LS_S3_META_REQUEST,
-                                            "id=%p Failed O_DIRECT fallback to buffered write. aws-error:%s",
-                                            (void *)meta_request,
-                                            aws_error_name(error_code));
-                                    }
                                 } else {
+                                    /* Real I/O error — hard fail */
                                     error_code = aws_last_error();
                                     AWS_LOGF_ERROR(
                                         AWS_LS_S3_META_REQUEST,

@@ -319,8 +319,6 @@ struct aws_s3_meta_request {
     bool recv_file_delete_on_failure;
     /* When true, use O_DIRECT for writing received data to file */
     bool recv_file_direct_io;
-    /* Base file position for O_DIRECT writes (from recv_file_position option) */
-    uint64_t recv_file_base_position;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
