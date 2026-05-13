@@ -133,7 +133,9 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
         struct test_case *test_case = &test_cases[i];
 
-        struct aws_byte_buf result_byte_buf = aws_replace_quote_entities(allocator, test_case->test_string);
+        struct aws_byte_buf result_byte_buf;
+        aws_byte_buf_init(&result_byte_buf, allocator, 20);
+        ASSERT_SUCCESS(aws_byte_buf_append_unescaped_xml(allocator, test_case->test_string, &result_byte_buf));
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
 
