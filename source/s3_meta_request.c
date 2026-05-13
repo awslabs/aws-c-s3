@@ -2192,12 +2192,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                                         (void *)meta_request);
                                     meta_request->recv_file_direct_io = false;
                                     aws_reset_error();
-                                    /* Open FILE* and write this chunk */
+                                    /* Open FILE* for writing — file may not exist yet since
+                                     * O_DIRECT path doesn't pre-create it */
                                     meta_request->recv_file =
-                                        aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
-                                    if (meta_request->recv_file &&
-                                        aws_fseek(meta_request->recv_file, (int64_t)write_offset, SEEK_SET) ==
-                                            AWS_OP_SUCCESS) {
+                                        aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
+                                    if (meta_request->recv_file) {
                                         if (fwrite(
                                                 (void *)response_body.ptr,
                                                 response_body.len,
