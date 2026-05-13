@@ -5,12 +5,12 @@
 
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
-#include <aws/checksums/crc.h>
 #include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
+#include <aws/checksums/crc.h>
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
@@ -1731,7 +1731,7 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     /* Download with O_DIRECT to a known file path */
-    const char *local_file_path = "/tmp/aws_s3_direct_io_crc32_verify";
+    const char *local_file_path = "aws_s3_direct_io_crc32_verify_test_file";
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
     struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
