@@ -50,7 +50,9 @@ static int s_test_upload_request_checksum_context_get_checksum_cursor(struct aws
     return AWS_OP_SUCCESS;
 }
 
-static struct aws_string *s_test_fn(struct aws_s3_meta_request *, void *) {
+static struct aws_string *s_test_fn(struct aws_s3_meta_request *req, void *user) {
+    (void)req;
+    (void)user;
     return NULL;
 }
 
