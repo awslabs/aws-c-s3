@@ -362,8 +362,15 @@ static void s_s3_default_prepare_request_finish(
         /* Only PUT Object and Upload part support trailing checksum, that needs the special encoding even if the body
          * has 0 length. */
         /* Create checksum context from config if needed */
-        struct aws_s3_upload_request_checksum_context *checksum_context =
-            aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        struct aws_s3_upload_request_checksum_context *checksum_context = NULL;
+
+        /**
+         * Note: CompleteMPU is unique in the sence that checksum on the object level is the full object checksum for all parts and 
+         * not checksum of the body. So avoid any additional checksum handling if default req is completeMPU.
+         */
+        if (meta_request_default->request_type != AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
+            checksum_context = aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        }
 
         aws_s3_message_util_assign_body(
             meta_request->allocator, &request->request_body, NULL, message, checksum_context);
