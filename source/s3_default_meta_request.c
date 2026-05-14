@@ -365,11 +365,13 @@ static void s_s3_default_prepare_request_finish(
         struct aws_s3_upload_request_checksum_context *checksum_context = NULL;
 
         /**
-         * Note: CompleteMPU is unique in the sence that checksum on the object level is the full object checksum for all parts and 
-         * not checksum of the body. So avoid any additional checksum handling if default req is completeMPU.
+         * Note: CompleteMPU is unique in the sence that checksum on the object level is the full object checksum for
+         * all parts and not checksum of the body. So avoid any additional checksum handling if default req is
+         * completeMPU.
          */
         if (meta_request_default->request_type != AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
-            checksum_context = aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+            checksum_context =
+                aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
         }
 
         aws_s3_message_util_assign_body(
