@@ -200,10 +200,15 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
     if ((checksum_cur != NULL) && (checksum_cur->len > 0)) {
         /* Create checksum context with pre-calculated checksum */
         part->checksum_context = aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
-            auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config, *checksum_cur);
+            auto_ranged_put->base.allocator,
+            &auto_ranged_put->base.checksum_config,
+            *checksum_cur,
+            meta_request->upload_review_callback != NULL);
     } else {
         part->checksum_context = aws_s3_upload_request_checksum_context_new(
-            auto_ranged_put->base.allocator, &auto_ranged_put->base.checksum_config);
+            auto_ranged_put->base.allocator,
+            &auto_ranged_put->base.checksum_config,
+            meta_request->upload_review_callback != NULL);
     }
     if (part->checksum_context == NULL) {
         aws_mem_release(meta_request->allocator, part);
@@ -1072,8 +1077,8 @@ static int s_s3_new_upload_part_info_after_body(
         /* Add part to array-list */
         struct aws_s3_mpu_part_info *part =
             aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_mpu_part_info));
-        part->checksum_context =
-            aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        part->checksum_context = aws_s3_upload_request_checksum_context_new(
+            meta_request->allocator, &meta_request->checksum_config, meta_request->upload_review_callback != NULL);
         part->size = request->request_body.len;
         aws_array_list_set_at(&auto_ranged_put->synced_data.part_list, &part, request->part_number - 1);
     }

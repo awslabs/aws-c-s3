@@ -1019,3 +1019,12 @@ int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uin
 
     return AWS_OP_SUCCESS;
 }
+
+static const struct aws_byte_cursor s_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
+
+bool aws_s3_is_checksum_value_header_name(struct aws_byte_cursor header_name) {
+    return aws_byte_cursor_starts_with_ignore_case(&header_name, &s_checksum_prefix) &&
+           !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-type") &&
+           !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-mode") &&
+           !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-algorithm");
+}
