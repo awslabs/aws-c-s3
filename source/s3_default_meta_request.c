@@ -370,8 +370,8 @@ static void s_s3_default_prepare_request_finish(
          * completeMPU.
          */
         if (meta_request_default->request_type != AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
-            checksum_context =
-                aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+            checksum_context = aws_s3_upload_request_checksum_context_new(
+                meta_request->allocator, &meta_request->checksum_config, meta_request->upload_review_callback != NULL);
         }
 
         aws_s3_message_util_assign_body(

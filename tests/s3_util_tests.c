@@ -1059,6 +1059,8 @@ static int s_test_s3_checksum_header(struct aws_allocator *allocator, void *ctx)
     ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-type")));
     ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-mode")));
     ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-algorithm")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-cHeCKsuM-tYpE")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("X-AMZ-CHECKSUM-ALGORITHM")));
 
     aws_s3_library_clean_up();
     return 0;
