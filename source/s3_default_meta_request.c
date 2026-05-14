@@ -347,7 +347,7 @@ static void s_s3_default_prepare_request_finish(
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_all_headers(
         meta_request->allocator, meta_request->initial_request_message);
 
-    bool flexible_checksum = meta_request->checksum_config.location != AWS_SCL_NONE;
+    bool flexible_checksum = meta_request->checksum_config.checksum_algorithm != AWS_SCA_NONE;
     if (!flexible_checksum && meta_request->should_compute_content_md5) {
         /* If flexible checksum used, client MUST skip Content-MD5 header computation */
         aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);

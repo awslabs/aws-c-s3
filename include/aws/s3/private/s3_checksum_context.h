@@ -40,6 +40,8 @@ struct aws_s3_upload_request_checksum_context {
 
     /* Validation */
     size_t encoded_checksum_size;
+
+    bool has_review_callback;
 };
 
 /**

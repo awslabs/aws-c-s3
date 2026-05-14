@@ -453,8 +453,6 @@ int aws_checksum_compute(
     }
 }
 
-static const struct aws_byte_cursor s_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
-
 static void s_byte_buf_to_upper(struct aws_byte_buf *buf) {
     AWS_PRECONDITION(buf);
 
@@ -489,7 +487,7 @@ static int s_init_and_verify_checksum_config_from_headers(
             return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         }
 
-        if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_checksum_prefix)) {
+        if (aws_s3_is_checksum_value_header_name(header.name)) {
             checksum_header_name = header.name;
             has_checksum_value_header = true;
             break;
@@ -551,7 +549,7 @@ static int s_init_and_verify_checksum_config_from_headers(
     checksum_config->location = AWS_SCL_NONE;
 
     if (header_algo == AWS_SCA_UNKNOWN) {
-        aws_byte_cursor_advance(&checksum_header_name, s_checksum_prefix.len);
+        aws_byte_cursor_advance(&checksum_header_name, sizeof("x-amz-checksum-") - 1);
         aws_byte_buf_init_copy_from_cursor(
             &checksum_config->unknown_checksum_algo, checksum_config->allocator, checksum_header_name);
         s_byte_buf_to_upper(&checksum_config->unknown_checksum_algo);

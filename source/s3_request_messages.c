@@ -239,7 +239,6 @@ const struct aws_byte_cursor g_s3_create_session_allowed_headers[] = {
 const size_t g_s3_create_session_allowed_headers_count = AWS_ARRAY_SIZE(g_s3_create_session_allowed_headers);
 
 static const struct aws_byte_cursor s_x_amz_meta_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-meta-");
-static const struct aws_byte_cursor s_x_amz_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
 
 static const struct aws_byte_cursor s_checksum_type_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-type");
@@ -1234,7 +1233,7 @@ void aws_s3_message_util_copy_headers(
         }
 
         if (exclude_x_amz_checksum) {
-            if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_x_amz_checksum_prefix)) {
+            if (aws_s3_is_checksum_value_header_name(header.name)) {
                 continue;
             }
         }

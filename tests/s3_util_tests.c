@@ -1046,3 +1046,20 @@ static int s_test_s3_extract_parts_from_etag(struct aws_allocator *allocator, vo
     aws_s3_library_clean_up();
     return 0;
 }
+
+AWS_TEST_CASE(test_s3_checksum_header, s_test_s3_checksum_header)
+static int s_test_s3_checksum_header(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    ASSERT_TRUE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-crc32")));
+    ASSERT_TRUE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-foo")));
+    ASSERT_TRUE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-md5")));
+
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-type")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-mode")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-algorithm ")));
+
+    aws_s3_library_clean_up();
+    return 0;
+}
