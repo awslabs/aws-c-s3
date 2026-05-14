@@ -114,12 +114,6 @@ static int s_test_upload_request_checksum_context_error_cases(struct aws_allocat
 }
 AWS_TEST_CASE(test_upload_request_checksum_context_error_cases, s_test_upload_request_checksum_context_error_cases)
 
-static struct aws_string *s_test_fn(struct aws_s3_meta_request *req, void *user) {
-    (void)req;
-    (void)user;
-    return NULL;
-}
-
 static int s_test_upload_request_checksum_context_different_algorithms(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
