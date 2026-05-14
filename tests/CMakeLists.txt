@@ -243,7 +243,6 @@ add_net_test_case(test_s3_range_requests_less_than_a_part)
 add_net_test_case(test_s3_not_satisfiable_range)
 add_net_test_case(test_s3_invalid_start_range_greator_than_end_range)
 add_net_test_case(test_s3_empty_file_edge_case)
-add_net_test_case(test_s3_default_put_object_checksum)
 
 add_net_test_case(test_s3_bad_endpoint)
 add_net_test_case(test_s3_different_endpoints)

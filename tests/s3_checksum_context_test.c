@@ -94,17 +94,28 @@ static int s_test_upload_request_checksum_context_error_cases(struct aws_allocat
         .location = AWS_SCL_NONE,
         .has_full_object_checksum = false,
     };
-    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(&config2));
+    struct aws_s3_upload_request_checksum_context *context2 =
+        aws_s3_upload_request_checksum_context_new(allocator, &config2);
+
+    ASSERT_NOT_NULL(context2);
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(context2));
 
     /* unknown algo */
-    struct aws_s3_meta_request_checksum_config_storage config2 = {
+    struct aws_s3_meta_request_checksum_config_storage config3 = {
         .allocator = allocator,
         .checksum_algorithm = AWS_SCA_CRC32,
         .location = AWS_SCL_NONE,
         .has_full_object_checksum = false,
         .full_object_checksum_callback = s_test_fn,
     };
-    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(&config2));
+    struct aws_s3_upload_request_checksum_context *context3 =
+        aws_s3_upload_request_checksum_context_new(allocator, &config3);
+
+    ASSERT_NOT_NULL(context3);
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(context3));
+
+    aws_s3_upload_request_checksum_context_release(context2);
+    aws_s3_upload_request_checksum_context_release(context3);
 
     return AWS_OP_SUCCESS;
 }
