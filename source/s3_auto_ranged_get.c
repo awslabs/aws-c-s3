@@ -9,6 +9,7 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <aws/common/system_info.h>
 #include <inttypes.h>
 
 /* Dont use buffer pool when we know response size, and its below this number,
@@ -837,6 +838,16 @@ static void s_s3_auto_ranged_get_request_finished(
                 /* Apply a buffer pool alignment to the calculated result. */
                 out_request_optimal_range_size = aws_s3_buffer_pool_derive_aligned_buffer_size(
                     meta_request->client->buffer_pool, out_request_optimal_range_size);
+                /* For O_DIRECT download, also ensure page alignment.
+                 * Buffer pool typically aligns to chunk_size which is page-aligned, but apply
+                 * a defensive round-up here to guarantee the invariant. */
+                if (meta_request->recv_file_direct_io) {
+                    size_t page_size = aws_system_info_page_size();
+                    if (out_request_optimal_range_size % page_size != 0) {
+                        out_request_optimal_range_size =
+                            ((out_request_optimal_range_size / page_size) + 1) * page_size;
+                    }
+                }
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Override the part size to be optimal. part_size=%" PRIu64 ".",

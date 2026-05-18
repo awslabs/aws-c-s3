@@ -319,6 +319,11 @@ struct aws_s3_meta_request {
     bool recv_file_delete_on_failure;
     /* When true, use O_DIRECT for writing received data to file */
     bool recv_file_direct_io;
+    /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
+     * For unaligned last part: expected to be 1.
+     * For unsupported platform: 1 on first fallback, then direct_io is disabled (no further increments).
+     * The warning is only logged when this transitions from 0, to avoid log spam. */
+    size_t recv_file_direct_io_fallback_count;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
