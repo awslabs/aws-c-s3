@@ -319,10 +319,14 @@ struct aws_s3_meta_request {
     bool recv_file_delete_on_failure;
     /* When true, use O_DIRECT for writing received data to file */
     bool recv_file_direct_io;
+    /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
+     * existing file size for CREATE_OR_APPEND. The actual write offset for each part is
+     * base_position + delivery_range_start. Only meaningful when recv_file_direct_io is true. */
+    uint64_t recv_file_direct_io_base_position;
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
-     * For unaligned last part: expected to be 1.
-     * For unsupported platform: 1 on first fallback, then direct_io is disabled (no further increments).
-     * The warning is only logged when this transitions from 0, to avoid log spam. */
+     * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)
+     * also increment this counter. The warning is only logged when this transitions from 0,
+     * to avoid log spam. */
     size_t recv_file_direct_io_fallback_count;
 
     /* File I/O options. */

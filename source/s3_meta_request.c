@@ -289,25 +289,14 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
         meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
 
+        /* "direct_io" is what we'll attempt; we may flip it off below if any precondition fails.
+         * recv_file_direct_io_fallback_count tracks each fallback decision (init-time and delivery). */
         bool direct_io = meta_request->fio_opts.direct_io;
+        size_t page_size = direct_io ? aws_system_info_page_size() : 0;
+        uint64_t direct_io_base_position = 0;
 
-        /* For O_DIRECT download, part_size must be page-aligned so that all parts except the last
-         * can be written via O_DIRECT. The last part's unaligned tail falls back to buffered write. */
-        if (direct_io) {
-            size_t page_size = aws_system_info_page_size();
-            if (part_size % page_size != 0) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Invalid meta request configuration - direct_io download requires part size "
-                    "to be aligned with page size. part size is:%zu, while page size is:%zu",
-                    (void *)meta_request,
-                    part_size,
-                    page_size);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                goto error;
-            }
-        }
-
+        /* Open the FILE* per the requested recv_file_option. Always open it even if direct_io is
+         * requested — we'll keep it open as the fallback when O_DIRECT cannot be used for a part. */
         switch (options->recv_file_option) {
             case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
                 meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
@@ -326,26 +315,31 @@ int aws_s3_meta_request_init_base(
                 break;
 
             case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                if (direct_io) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p O_DIRECT for download is only supported with CREATE_OR_REPLACE and CREATE_NEW",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
-                    goto error;
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "a+b");
+                /* For APPEND, the base position is the existing file size. We need it to be
+                 * page-aligned for O_DIRECT writes to land at correct offsets. */
+                if (direct_io && meta_request->recv_file) {
+                    int64_t existing_len = 0;
+                    if (aws_file_get_length(meta_request->recv_file, &existing_len) != AWS_OP_SUCCESS) {
+                        goto error;
+                    }
+                    if ((uint64_t)existing_len % page_size != 0) {
+                        AWS_LOGF_WARN(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: O_DIRECT requested with CREATE_OR_APPEND but existing file size %" PRId64
+                            " is not page-aligned (page size %zu). Falling back to buffered I/O.",
+                            (void *)meta_request,
+                            existing_len,
+                            page_size);
+                        direct_io = false;
+                        ++meta_request->recv_file_direct_io_fallback_count;
+                    } else {
+                        direct_io_base_position = (uint64_t)existing_len;
+                    }
                 }
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
                 break;
 
             case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
-                if (direct_io) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p O_DIRECT for download is only supported with CREATE_OR_REPLACE and CREATE_NEW",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
-                    goto error;
-                }
                 if (!aws_path_exists(meta_request->recv_filepath)) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
@@ -359,6 +353,23 @@ int aws_s3_meta_request_init_base(
                     aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
                     goto error;
                 }
+                /* For WRITE_TO_POSITION, the base offset is set by the user. Must be page-aligned
+                 * for O_DIRECT writes. */
+                if (direct_io) {
+                    if (options->recv_file_position % page_size != 0) {
+                        AWS_LOGF_WARN(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: O_DIRECT requested with WRITE_TO_POSITION but recv_file_position %" PRIu64
+                            " is not page-aligned (page size %zu). Falling back to buffered I/O.",
+                            (void *)meta_request,
+                            options->recv_file_position,
+                            page_size);
+                        direct_io = false;
+                        ++meta_request->recv_file_direct_io_fallback_count;
+                    } else {
+                        direct_io_base_position = options->recv_file_position;
+                    }
+                }
                 break;
 
             default:
@@ -371,13 +382,38 @@ int aws_s3_meta_request_init_base(
             goto error;
         }
 
-        /* For O_DIRECT, the file is already created via aws_fopen above (file now exists on disk).
-         * Keep the FILE* open — it's used as the fallback when O_DIRECT can't be used
-         * (unaligned last part or platform doesn't support O_DIRECT). */
+        /* Additional init-time fallback checks for O_DIRECT */
+        if (direct_io && !aws_file_direct_io_is_supported()) {
+            /* Platform doesn't support O_DIRECT. Fall back proactively at init rather than
+             * waiting for the first write to fail. */
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT is not supported on this platform. Falling back to buffered I/O.",
+                (void *)meta_request);
+            direct_io = false;
+            ++meta_request->recv_file_direct_io_fallback_count;
+        }
+
+        if (direct_io && part_size % page_size != 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT requires part_size to be page-aligned, but part_size is %zu and "
+                "page size is %zu. Falling back to buffered I/O.",
+                (void *)meta_request,
+                part_size,
+                page_size);
+            direct_io = false;
+            ++meta_request->recv_file_direct_io_fallback_count;
+        }
+
         if (direct_io) {
             meta_request->recv_file_direct_io = true;
+            meta_request->recv_file_direct_io_base_position = direct_io_base_position;
             AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST, "id=%p: O_DIRECT enabled for download write path.", (void *)meta_request);
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT enabled for download write path. base_position=%" PRIu64,
+                (void *)meta_request,
+                direct_io_base_position);
         }
     }
 
@@ -2208,7 +2244,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
                         if (meta_request->recv_file_direct_io) {
                             /* O_DIRECT write path — use offset-based direct I/O */
-                            uint64_t write_offset = delivery_range_start;
+                            uint64_t write_offset =
+                                meta_request->recv_file_direct_io_base_position + delivery_range_start;
                             struct aws_byte_cursor write_cursor =
                                 aws_byte_cursor_from_array(response_body.ptr, response_body.len);
 
@@ -2234,28 +2271,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             if (use_direct_io) {
                                 if (aws_file_path_write_to_offset_direct_io(
                                         meta_request->recv_filepath, write_offset, write_cursor)) {
-                                    if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
-                                        /* Platform doesn't support O_DIRECT, fall back to buffered I/O */
-                                        if (meta_request->recv_file_direct_io_fallback_count == 0) {
-                                            AWS_LOGF_WARN(
-                                                AWS_LS_S3_META_REQUEST,
-                                                "id=%p: O_DIRECT write not supported on this platform, "
-                                                "falling back to buffered I/O for the rest of this download",
-                                                (void *)meta_request);
-                                        }
-                                        ++meta_request->recv_file_direct_io_fallback_count;
-                                        meta_request->recv_file_direct_io = false;
-                                        aws_reset_error();
-                                        use_direct_io = false;
-                                    } else {
-                                        /* Real I/O error — hard fail */
-                                        error_code = aws_last_error();
-                                        AWS_LOGF_ERROR(
-                                            AWS_LS_S3_META_REQUEST,
-                                            "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
-                                            (void *)meta_request,
-                                            aws_error_name(error_code));
-                                    }
+                                    /* Platform support is checked at init via aws_file_direct_io_is_supported,
+                                     * and alignment is checked upfront. Any error here is a real I/O failure. */
+                                    error_code = aws_last_error();
+                                    AWS_LOGF_ERROR(
+                                        AWS_LS_S3_META_REQUEST,
+                                        "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
+                                        (void *)meta_request,
+                                        aws_error_name(error_code));
                                 }
                             }
 
