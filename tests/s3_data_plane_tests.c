@@ -1953,8 +1953,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_aligned(
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
-    ASSERT_INT_EQUALS(
-        (int64_t)(4096 + MB_TO_BYTES(1)), meta_request_test_results.received_file_size);
+    ASSERT_INT_EQUALS((int64_t)(4096 + MB_TO_BYTES(1)), meta_request_test_results.received_file_size);
     /* If O_DIRECT is supported: aligned position + part_size, no fallback needed.
      * Otherwise: init-time fallback to buffered I/O. */
     size_t expected_fallback_count = aws_file_direct_io_is_supported() ? 0 : 1;
@@ -1968,9 +1967,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_aligned(
 
 /* Multi-part download with O_DIRECT: download a 10MB object with 4MB part_size,
  * exercises the per-part write loop. All parts are page-aligned in this case. */
-AWS_TEST_CASE(
-    test_s3_get_object_file_path_direct_io_multi_part,
-    s_test_s3_get_object_file_path_direct_io_multi_part)
+AWS_TEST_CASE(test_s3_get_object_file_path_direct_io_multi_part, s_test_s3_get_object_file_path_direct_io_multi_part)
 static int s_test_s3_get_object_file_path_direct_io_multi_part(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 

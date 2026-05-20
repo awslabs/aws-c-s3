@@ -2343,10 +2343,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 /* 4. Checksum update */
-                if (error_code == AWS_ERROR_SUCCESS &&
-                    meta_request->meta_request_level_running_response_sum) {
-                    if (aws_checksum_update(
-                            meta_request->meta_request_level_running_response_sum, &response_body)) {
+                if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+                    if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
                         error_code = aws_last_error();
                         AWS_LOGF_ERROR(
                             AWS_LS_S3_META_REQUEST,

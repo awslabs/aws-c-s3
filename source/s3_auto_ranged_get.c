@@ -844,8 +844,7 @@ static void s_s3_auto_ranged_get_request_finished(
                 if (meta_request->recv_file_direct_io) {
                     size_t page_size = aws_system_info_page_size();
                     if (out_request_optimal_range_size % page_size != 0) {
-                        out_request_optimal_range_size =
-                            ((out_request_optimal_range_size / page_size) + 1) * page_size;
+                        out_request_optimal_range_size = ((out_request_optimal_range_size / page_size) + 1) * page_size;
                     }
                 }
                 AWS_LOGF_INFO(
