@@ -18,34 +18,61 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 ### Configuration
 
-#### Memory Limit
+#### Environment Variables
 
-The S3 client uses a buffer pool to manage memory for concurrent transfers. You can control the memory limit in two ways:
+1. **Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB`**
 
-1. **Via Configuration** (Recommended): Set `memory_limit_in_bytes` in `aws_s3_client_config`:
+   The S3 client uses a buffer pool to manage memory for concurrent transfers. 
 
-```c
-   struct aws_s3_client_config config = {
-       .memory_limit_in_bytes = GB_TO_BYTES(4), // 4 GiB limit
-       // ... other configuration
-   };
-   ```
+   Example Usage:
 
-2. **Via Environment Variable**: Set the `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB` environment variable:
-
-```bash
+   ```bash
    export AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=4  # 4 GiB limit
    ```
 
-**Priority**: The configuration value takes precedence over the environment variable. If `memory_limit_in_bytes` is set to a non-zero value in the config, the environment variable is ignored.
+   **Default Behavior**:
+   When nothing is set, the client sets a default memory limit based on the target throughput.
 
-**Default Behavior**: If neither is set (config is 0 and environment variable is not set), the client sets a default memory limit based on the target throughput.
+   **Notes**:
+   * The limit applies per client. If multiple clients created, limit will apply to each separately.
+   * The environment variable value must be a valid positive integer representing gigabytes (GiB).
+   * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
+   * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
 
-**Notes**:
-* The limit applies per client. If multiple clients created, limit will apply to each separately.
-* The environment variable value must be a valid positive integer representing gigabytes (GiB).
-* The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
-* Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
+> [!TIP]
+> You can also control memory limit *in bytes* using client config. The client config takes precedence over the environment variable (memory_limit_in_bytes needs to be set to a non-zero value).
+> ```c
+>    struct aws_s3_client_config config = {
+>        .memory_limit_in_bytes = GB_TO_BYTES(4), // 4 GiB limit
+>        // ... other configuration
+>    };
+> ```
+
+2. **Maximum Parts Pending Read - `AWS_CRT_S3_MAX_PARTS_PENDING_READ`**
+
+   Controls the maximum number of parts that can be pending read from the input stream during an individual multipart upload. Higher values may improve upload throughput for large files by allowing more parts to be read in parallel, only if the disk read speed can benefit from more concurrent reading of parts.
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_MAX_PARTS_PENDING_READ=20
+   ```
+
+   **Default Behavior**:
+   If not set, the default value is 5.
+
+   **Notes**:
+   * Only affects multipart uploads. Small files that fit in a single part are not affected.
+   * If there are multiple parallel multipart upload requests, each upload is limited by the value individually (not cumulatively).
+   * Setting this too low may introduce delays between reads, as the meta-request waits for the client to schedule more work.
+   * Setting this too high may cause a single upload to hog work tokens, starving other concurrent uploads.
+   * The value must be a positive integer (1–4294967295). Invalid or zero values are ignored with a warning, and the default is used.
+   * The value is read once on first use and cached for the lifetime of the process.
+   * If the network bandwidth of the device is too low, even a higher value of pending read might not be respected due to having maximum allowed requests in flight.
+
+3. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
+
+   The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 
 ## License
 
