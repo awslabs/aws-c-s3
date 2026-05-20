@@ -2318,12 +2318,6 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
                 }
 
-                /* Nothing to deliver after backpressure — re-queue and move on */
-                if (response_body.len == 0) {
-                    aws_array_list_push_front(&incomplete_deliver_events_array, &event);
-                    break;
-                }
-
                 /* 3. Sequential order validation */
                 uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
                 AWS_ASSERT(request->part_number >= 1);
@@ -2343,7 +2337,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 /* 4. Checksum update */
-                if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0 &&
+                    meta_request->meta_request_level_running_response_sum) {
                     if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
                         error_code = aws_last_error();
                         AWS_LOGF_ERROR(
@@ -2355,7 +2350,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 }
 
                 /* 5. Deliver body to sink (file or callback) */
-                if (error_code == AWS_ERROR_SUCCESS) {
+                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
                     if (request->send_data.metrics) {
                         aws_high_res_clock_get_ticks(
                             (uint64_t *)&request->send_data.metrics->time_metrics.deliver_start_timestamp_ns);
