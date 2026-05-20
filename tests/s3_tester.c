@@ -194,8 +194,7 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_error_code = result->error_code;
     meta_request_test_results->did_validate = result->did_validate;
     meta_request_test_results->validation_algorithm = result->validation_algorithm;
-    meta_request_test_results->recv_file_direct_io_fallback_count =
-        meta_request->recv_file_direct_io_fallback_count;
+    meta_request_test_results->recv_file_direct_io_fallback_count = meta_request->recv_file_direct_io_fallback_count;
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
