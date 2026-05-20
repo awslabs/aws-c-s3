@@ -2117,6 +2117,111 @@ static void s_buffered_write_to_recv_file(
     }
 }
 
+/* Write body to file using O_DIRECT when possible, falling back to buffered I/O for unaligned data. */
+static int s_write_body_to_file(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t file_offset) {
+
+    int error_code = AWS_ERROR_SUCCESS;
+
+    if (meta_request->recv_file_direct_io) {
+        size_t page_size = aws_system_info_page_size();
+        bool aligned = (body->len % page_size == 0);
+
+        if (!aligned && meta_request->recv_file_direct_io_fallback_count == 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT requested but data length %zu is not page-aligned "
+                "(page size %zu). Falling back to buffered I/O for this part. "
+                "This is expected for the last part of a download.",
+                (void *)meta_request,
+                body->len,
+                page_size);
+        }
+        if (!aligned) {
+            ++meta_request->recv_file_direct_io_fallback_count;
+        }
+
+        if (aligned) {
+            struct aws_byte_cursor write_cursor = *body;
+            if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, write_cursor)) {
+                error_code = aws_last_error();
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
+                    (void *)meta_request,
+                    aws_error_name(error_code));
+            }
+            return error_code;
+        }
+
+        /* Buffered fallback for unaligned data. recv_file is already open from init.
+         * Need to seek because O_DIRECT path doesn't update FILE* position. */
+        if (aws_fseek(meta_request->recv_file, (int64_t)file_offset, SEEK_SET) != AWS_OP_SUCCESS) {
+            return aws_last_error();
+        }
+        s_buffered_write_to_recv_file(meta_request, body, &error_code);
+        return error_code;
+    }
+
+    /* Regular FILE* path — no seek needed, events arrive in order. */
+    s_buffered_write_to_recv_file(meta_request, body, &error_code);
+    return error_code;
+}
+
+/* Deliver response body to the appropriate sink: file (O_DIRECT or buffered) or user callback. */
+static int s_deliver_body_to_sink(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t delivery_range_start,
+    struct aws_s3_request *request) {
+
+    int error_code = AWS_ERROR_SUCCESS;
+
+    if (meta_request->recv_file_direct_io || meta_request->recv_file) {
+        uint64_t file_offset = meta_request->recv_file_direct_io
+                                   ? meta_request->recv_file_direct_io_base_position + delivery_range_start
+                                   : 0; /* unused — sequential FILE* path doesn't seek */
+        error_code = s_write_body_to_file(meta_request, body, file_offset);
+        if (meta_request->client->enable_read_backpressure) {
+            aws_s3_meta_request_increment_read_window(meta_request, body->len);
+        }
+        return error_code;
+    }
+
+    if (meta_request->body_callback_ex != NULL &&
+        meta_request->body_callback_ex(
+            meta_request,
+            body,
+            (struct aws_s3_meta_request_receive_body_extra_info){
+                .range_start = delivery_range_start, .ticket = request->ticket},
+            meta_request->user_data)) {
+        error_code = aws_last_error_or_unknown();
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Response body callback raised error %d (%s).",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+        return error_code;
+    }
+
+    if (meta_request->body_callback != NULL &&
+        meta_request->body_callback(meta_request, body, delivery_range_start, meta_request->user_data)) {
+        error_code = aws_last_error_or_unknown();
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Response body callback raised error %d (%s).",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+        return error_code;
+    }
+
+    return AWS_ERROR_SUCCESS;
+}
+
 /* Deliver events in event_delivery_array.
  * This task runs on the meta-request's io_event_loop thread. */
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -2172,47 +2277,48 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         struct aws_s3_meta_request_event event;
         aws_array_list_get_at(event_delivery_array, &event, event_i);
         switch (event.type) {
-
             case AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY: {
                 struct aws_s3_request *request = event.u.response_body.completed_request;
                 size_t bytes_delivered_for_request = event.u.response_body.bytes_delivered;
                 AWS_ASSERT(meta_request == request->meta_request);
                 bool delivery_incomplete = false;
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
-                if (response_body.len == 0) {
-                    /* Nothing to delivery, finish this delivery event and break out. */
-                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
+                /* 1. Early return: empty body */
+                if (response_body.len == 0) {
+                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
-
                     aws_s3_request_release(request);
                     break;
                 }
 
+                /* 2. Backpressure: limit how many bytes we deliver this tick */
                 if (s_should_apply_backpressure(request)) {
-                    /* Apply backpressure for the request, only deliver the bytes that allowed to deliver. */
                     aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
                     if (response_body.len > (size_t)bytes_allowed_to_deliver) {
                         response_body.len = (size_t)bytes_allowed_to_deliver;
                         delivery_incomplete = true;
                     }
-                    /* Update the remaining bytes we allow to delivery. */
                     bytes_allowed_to_deliver -= response_body.len;
                 } else {
-                    /* We should not have any incomplete delivery in this case. */
                     AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
                 }
-                uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
 
+                /* Nothing to deliver after backpressure — re-queue and move on */
+                if (response_body.len == 0) {
+                    aws_array_list_push_front(&incomplete_deliver_events_array, &event);
+                    break;
+                }
+
+                /* 3. Sequential order validation */
+                uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
                 AWS_ASSERT(request->part_number >= 1);
                 if (request->part_number == 1) {
                     meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
                 }
-                /* Make sure the response body is delivered in the sequential order */
                 if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
-                    /* Unexpected error, log the error */
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p: Unexpected code error. Please report the error to the team, "
@@ -2224,138 +2330,48 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 }
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
-                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
-                    if (meta_request->meta_request_level_running_response_sum) {
-                        if (aws_checksum_update(
-                                meta_request->meta_request_level_running_response_sum, &response_body)) {
-                            error_code = aws_last_error();
-                            AWS_LOGF_ERROR(
-                                AWS_LS_S3_META_REQUEST,
-                                "id=%p Failed to update checksum. last error:%s",
-                                (void *)meta_request,
-                                aws_error_name(error_code));
-                        }
-                    }
-                    if (error_code == AWS_ERROR_SUCCESS) {
-                        if (request->send_data.metrics) {
-                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
-                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_start_timestamp_ns);
-                        }
-
-                        if (meta_request->recv_file_direct_io) {
-                            /* O_DIRECT write path — use offset-based direct I/O */
-                            uint64_t write_offset =
-                                meta_request->recv_file_direct_io_base_position + delivery_range_start;
-                            struct aws_byte_cursor write_cursor =
-                                aws_byte_cursor_from_array(response_body.ptr, response_body.len);
-
-                            /* Check if this chunk is page-aligned. Only the last part of a download
-                             * can have unaligned length. Use buffered write for that case. */
-                            size_t page_size = aws_system_info_page_size();
-                            bool use_direct_io = (response_body.len % page_size == 0);
-
-                            if (!use_direct_io && meta_request->recv_file_direct_io_fallback_count == 0) {
-                                AWS_LOGF_WARN(
-                                    AWS_LS_S3_META_REQUEST,
-                                    "id=%p: O_DIRECT requested but data length %zu is not page-aligned "
-                                    "(page size %zu). Falling back to buffered I/O for this part. "
-                                    "This is expected for the last part of a download.",
-                                    (void *)meta_request,
-                                    response_body.len,
-                                    page_size);
-                            }
-                            if (!use_direct_io) {
-                                ++meta_request->recv_file_direct_io_fallback_count;
-                            }
-
-                            if (use_direct_io) {
-                                if (aws_file_path_write_to_offset_direct_io(
-                                        meta_request->recv_filepath, write_offset, write_cursor)) {
-                                    /* Platform support is checked at init via aws_file_direct_io_is_supported,
-                                     * and alignment is checked upfront. Any error here is a real I/O failure. */
-                                    error_code = aws_last_error();
-                                    AWS_LOGF_ERROR(
-                                        AWS_LS_S3_META_REQUEST,
-                                        "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
-                                        (void *)meta_request,
-                                        aws_error_name(error_code));
-                                }
-                            }
-
-                            if (!use_direct_io && error_code == AWS_ERROR_SUCCESS) {
-                                /* Buffered write fallback. recv_file is already open from init.
-                                 * Need to seek because direct_io path doesn't update FILE* position. */
-                                if (aws_fseek(meta_request->recv_file, (int64_t)write_offset, SEEK_SET) !=
-                                    AWS_OP_SUCCESS) {
-                                    error_code = aws_last_error();
-                                } else {
-                                    s_buffered_write_to_recv_file(meta_request, &response_body, &error_code);
-                                }
-                            }
-                            if (meta_request->client->enable_read_backpressure) {
-                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
-                            }
-                        } else if (meta_request->recv_file) {
-                            /* Regular FILE* path. No need to seek — events arrive in order. */
-                            s_buffered_write_to_recv_file(meta_request, &response_body, &error_code);
-                            if (meta_request->client->enable_read_backpressure) {
-                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
-                            }
-                        } else if (
-                            meta_request->body_callback_ex != NULL &&
-                            meta_request->body_callback_ex(
-                                meta_request,
-                                &response_body,
-                                (struct aws_s3_meta_request_receive_body_extra_info){
-                                    .range_start = delivery_range_start, .ticket = request->ticket},
-                                meta_request->user_data)) {
-                            error_code = aws_last_error_or_unknown();
-                            AWS_LOGF_ERROR(
-                                AWS_LS_S3_META_REQUEST,
-                                "id=%p Response body callback raised error %d (%s).",
-                                (void *)meta_request,
-                                error_code,
-                                aws_error_str(error_code));
-                        } else if (
-                            meta_request->body_callback != NULL &&
-                            meta_request->body_callback(
-                                meta_request, &response_body, delivery_range_start, meta_request->user_data)) {
-
-                            error_code = aws_last_error_or_unknown();
-                            AWS_LOGF_ERROR(
-                                AWS_LS_S3_META_REQUEST,
-                                "id=%p Response body callback raised error %d (%s).",
-                                (void *)meta_request,
-                                error_code,
-                                aws_error_str(error_code));
-                        }
-
-                        if (request->send_data.metrics) {
-                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
-                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_end_timestamp_ns);
-                            AWS_ASSERT(metric->time_metrics.deliver_start_timestamp_ns != 0);
-                            metric->time_metrics.deliver_duration_ns = metric->time_metrics.deliver_end_timestamp_ns -
-                                                                       metric->time_metrics.deliver_start_timestamp_ns;
-                        }
+                /* 4. Checksum update */
+                if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+                    if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
+                        error_code = aws_last_error();
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Failed to update checksum. last error:%s",
+                            (void *)meta_request,
+                            aws_error_name(error_code));
                     }
                 }
+
+                /* 5. Deliver body to sink (file or callback) */
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    if (request->send_data.metrics) {
+                        aws_high_res_clock_get_ticks(
+                            (uint64_t *)&request->send_data.metrics->time_metrics.deliver_start_timestamp_ns);
+                    }
+
+                    error_code = s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request);
+
+                    if (request->send_data.metrics) {
+                        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+                        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_end_timestamp_ns);
+                        AWS_ASSERT(metric->time_metrics.deliver_start_timestamp_ns != 0);
+                        metric->time_metrics.deliver_duration_ns = metric->time_metrics.deliver_end_timestamp_ns -
+                                                                   metric->time_metrics.deliver_start_timestamp_ns;
+                    }
+                }
+
+                /* 6. Completion tracking */
                 event.u.response_body.bytes_delivered += response_body.len;
                 meta_request->io_threaded_data.num_bytes_delivery_completed += response_body.len;
 
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
-                    /* We completed the delivery for this request. */
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
-
                     ++num_parts_delivered;
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
-
                     aws_s3_request_release(request);
                 } else {
-                    /* We didn't complete the delivery for this request and no error happened */
-                    /* Push to the front of the queue and wait for the next tick to deliver the rest of the bytes. */
-                    /* Note: we push to the front of the array since when we move those incomplete events back to the
-                     * synced_queue, we need to make sure it still has the same order. */
+                    /* Incomplete delivery — re-queue for next tick */
                     aws_array_list_push_front(&incomplete_deliver_events_array, &event);
                 }
             } break;
