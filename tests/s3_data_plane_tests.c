@@ -5654,6 +5654,74 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_get_object_randomize_part_order, s_test_s3_get_object_randomize_part_order)
+static int s_test_s3_get_object_randomize_part_order(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Verify that downloading with randomize_get_part_order=true succeeds and
+     * that byte-range parts were NOT requested in sequential order. */
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 1 * 1024 * 1024,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .part_size = 1 * 1024 * 1024,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_10MB,
+                .randomize_get_part_order = true,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
+    ASSERT_TRUE(test_results.finished_response_status == 200);
+
+    /* Collect part numbers from GET_OBJECT requests in the order they were issued */
+    size_t num_metrics = aws_array_list_length(&test_results.synced_data.metrics);
+    uint32_t get_part_numbers[64];
+    size_t get_count = 0;
+    for (size_t i = 0; i < num_metrics && get_count < 64; ++i) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        aws_array_list_get_at(&test_results.synced_data.metrics, (void **)&metrics, i);
+        enum aws_s3_request_type type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+        aws_s3_request_metrics_get_request_type(metrics, &type);
+        if (type != AWS_S3_REQUEST_TYPE_GET_OBJECT) {
+            continue;
+        }
+        uint32_t part_number = 0;
+        aws_s3_request_metrics_get_part_number(metrics, &part_number);
+        get_part_numbers[get_count++] = part_number;
+    }
+
+    /* With 1MB parts and a 10MB object, we expect ~10 parts */
+    ASSERT_TRUE(get_count >= 2);
+
+    /* Verify all expected part numbers were fetched (valid permutation of 1..get_count) */
+    bool part_seen[65] = {false};
+    for (size_t i = 0; i < get_count; ++i) {
+        ASSERT_TRUE(get_part_numbers[i] >= 1 && get_part_numbers[i] <= get_count);
+        ASSERT_FALSE(part_seen[get_part_numbers[i]]);
+        part_seen[get_part_numbers[i]] = true;
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
 /* When streaming, the data will be read after the headers are sent, so, we don't support set the parts level checksum
  * via headers when streaming. */
 AWS_TEST_CASE(

@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
+#include <aws/common/device_random.h>
 #include <aws/common/string.h>
 #include <inttypes.h>
 
@@ -18,6 +19,23 @@
 const uint64_t s_min_size_response_for_pooling = 1 * 1024 * 1024;
 const uint32_t s_conservative_max_requests_in_flight = 8;
 const struct aws_byte_cursor g_application_xml_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("application/xml");
+
+int aws_s3_shuffle_uint32_array(uint32_t *array, uint32_t count) {
+    if (count <= 1) {
+        return AWS_OP_SUCCESS;
+    }
+    for (uint32_t i = count - 1; i > 0; --i) {
+        uint64_t rand_val = 0;
+        if (aws_device_random_u64(&rand_val)) {
+            return aws_raise_error(aws_last_error());
+        }
+        uint32_t j = (uint32_t)(rand_val % ((uint64_t)i + 1));
+        uint32_t tmp = array[i];
+        array[i] = array[j];
+        array[j] = tmp;
+    }
+    return AWS_OP_SUCCESS;
+}
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
@@ -94,6 +112,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
 
     auto_ranged_get->part_size_set = part_size_set;
     auto_ranged_get->force_dynamic_part_size = options->force_dynamic_part_size;
+    auto_ranged_get->randomize_part_order = options->randomize_get_part_order;
     struct aws_http_headers *headers = aws_http_message_get_headers(auto_ranged_get->base.initial_request_message);
     AWS_ASSERT(headers != NULL);
 
@@ -136,6 +155,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
+    aws_mem_release(meta_request->allocator, auto_ranged_get->shuffled_part_order);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -171,6 +191,12 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
         return auto_ranged_get->initial_message_has_start_range
                    ? AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE
                    : AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
+    }
+
+    /* When randomizing part order, use HEAD to discover object size without fetching any data.
+     * This allows all parts (including part 1) to participate in the shuffle. */
+    if (auto_ranged_get->randomize_part_order) {
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
     }
 
     /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
@@ -363,7 +389,9 @@ static bool s_s3_auto_ranged_get_update(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
+                    auto_ranged_get->shuffled_part_order
+                        ? auto_ranged_get->shuffled_part_order[auto_ranged_get->synced_data.num_parts_requested]
+                        : auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
 
                 aws_s3_calculate_auto_ranged_get_part_range(
@@ -970,6 +998,55 @@ update_synced_data:
                     auto_ranged_get->synced_data.first_part_size,
                     object_range_start,
                     object_range_end);
+
+                /* If randomize_part_order is enabled and there are multiple parts, shuffle the fetch order */
+                if (auto_ranged_get->randomize_part_order &&
+                    auto_ranged_get->synced_data.total_num_parts > 1) {
+                    uint32_t total = auto_ranged_get->synced_data.total_num_parts;
+                    auto_ranged_get->shuffled_part_order =
+                        aws_mem_calloc(meta_request->allocator, total, sizeof(uint32_t));
+
+                    if (auto_ranged_get->shuffled_part_order == NULL) {
+                        AWS_LOGF_WARN(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Failed to allocate shuffled part order array, falling back to sequential.",
+                            (void *)meta_request);
+                    } else {
+                        for (uint32_t i = 0; i < total; ++i) {
+                            auto_ranged_get->shuffled_part_order[i] = i + 1;
+                        }
+                        /* Shuffle within adjacent windows of s_conservative_max_requests_in_flight parts.
+                         * This ensures delivery can always make sequential progress within the pipeline's
+                         * buffering capacity, while still randomizing fetch order across concurrent consumers. */
+                        bool shuffle_failed = false;
+                        for (uint32_t window_start = 0; window_start < total;
+                             window_start += s_conservative_max_requests_in_flight) {
+                            uint32_t window_size = s_conservative_max_requests_in_flight;
+                            if (window_start + window_size >= total) {
+                                window_size = total - window_start;
+                            }
+                            if (aws_s3_shuffle_uint32_array(
+                                    &auto_ranged_get->shuffled_part_order[window_start], window_size)) {
+                                shuffle_failed = true;
+                                break;
+                            }
+                        }
+                        if (shuffle_failed) {
+                            AWS_LOGF_WARN(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p: Failed to shuffle part order, falling back to sequential.",
+                                (void *)meta_request);
+                            aws_mem_release(meta_request->allocator, auto_ranged_get->shuffled_part_order);
+                            auto_ranged_get->shuffled_part_order = NULL;
+                        } else {
+                            AWS_LOGF_DEBUG(
+                                AWS_LS_S3_META_REQUEST,
+                                "id=%p: Shuffled part fetch order for %" PRIu32 " parts.",
+                                (void *)meta_request,
+                                total);
+                        }
+                    }
+                }
             }
         }
 

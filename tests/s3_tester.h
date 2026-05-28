@@ -208,6 +208,7 @@ struct aws_s3_tester_meta_request_options {
         /* If larger than 0, create a pre-exist file with the length */
         uint64_t pre_exist_file_length;
         bool force_dynamic_part_size;
+        bool randomize_get_part_order;
     } get_options;
 
     /* Put Object Meta request specific options. */

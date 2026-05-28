@@ -904,6 +904,16 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
+     * If set to true, the auto-ranged GET will fetch parts in a randomized (shuffled) order instead of
+     * sequentially. The delivery order to the caller is unaffected—parts are still delivered in sequential
+     * order by the streaming layer. This can improve throughput when many consumers download the same
+     * object concurrently, by reducing contention on sequential byte ranges in caching layers.
+     * Only applies to AWS_S3_META_REQUEST_TYPE_GET_OBJECT.
+     */
+    bool randomize_get_part_order;
+
+    /**
+     * Optional.
      * The size threshold in bytes for when to use multipart uploads.
      * Uploads larger than this will use the multipart upload strategy.
      * Uploads smaller or equal to this will use a single HTTP request.

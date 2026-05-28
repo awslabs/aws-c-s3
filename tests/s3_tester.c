@@ -1628,6 +1628,7 @@ int aws_s3_tester_send_meta_request_with_options(
             }
             meta_request_options.message = message;
             meta_request_options.force_dynamic_part_size = options->get_options.force_dynamic_part_size;
+            meta_request_options.randomize_get_part_order = options->get_options.randomize_get_part_order;
         } else if (
             meta_request_options.type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT ||
             (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
