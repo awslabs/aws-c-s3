@@ -25,6 +25,8 @@ add_test_case(test_s3_upload_part_message_fail)
 add_test_case(test_s3_complete_multipart_message_new)
 add_test_case(test_s3_abort_multipart_upload_message_new)
 
+add_net_test_case(test_s3_put_object_custom_md5)
+
 add_net_test_case(test_s3_client_create_destroy)
 add_net_test_case(test_s3_client_create_error)
 add_net_test_case(test_s3_client_create_error_with_invalid_memory_limit_config)
@@ -259,6 +261,7 @@ add_test_case(test_s3_calculate_client_optimal_range_size)
 add_test_case(test_s3_calculate_request_optimal_range_size)
 add_test_case(test_s3_extract_parts_from_etag)
 add_test_case(test_add_user_agent_header)
+add_test_case(test_s3_checksum_header)
 
 add_test_case(test_get_existing_platform_info)
 add_test_case(test_get_nonexistent_platform_info)

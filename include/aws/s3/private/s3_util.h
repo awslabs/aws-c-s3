@@ -236,11 +236,6 @@ int aws_xml_get_body_at_path(
     const char *path_name_array[],
     struct aws_byte_cursor *out_body);
 
-/* replace &quot; with escaped /"
- * Returns initialized aws_byte_buf */
-AWS_S3_API
-struct aws_byte_buf aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_byte_cursor src);
-
 /* strip quotes if string is enclosed in quotes. does not remove quotes if they only appear on either side of the string
  */
 AWS_S3_API
@@ -389,6 +384,14 @@ int aws_s3_calculate_request_optimal_range_size(
  */
 AWS_S3_API
 int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uint32_t *out_num_parts);
+
+/**
+ * Helper to figure out if given header name is one of the checksum value headers.
+ * ex. returns true for x-amz-checksum-crc32 or x-amz-checksum-sha256, but false for x-amz-checksum-type.
+ * Note: relies on hardcoded list of non-checksum headers, which needs to be updated if s3 expands list of those.
+ */
+AWS_S3_API
+bool aws_s3_is_checksum_value_header_name(struct aws_byte_cursor header_name);
 
 AWS_EXTERN_C_END
 
