@@ -14,6 +14,10 @@
 #include <aws/io/host_resolver.h>
 #include <aws/s3/private/s3_platform_info.h>
 
+/* note: setting `has_recommended_configuration` to true would mean cli would
+ * load crt client by default on the instance. We are not ready for this
+ * behavior on certain instance families yet so this might be set to false. */
+
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.18xlarge"),
@@ -68,7 +72,7 @@ static struct aws_s3_platform_info s_p4de_platform_info = {
  * to the p4d. The rest is for other things on the machine to use. */
 struct aws_s3_platform_info s_p5_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5.48xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400u,
     .has_recommended_configuration = true,
 };
 /***** End p5.48xlarge *****/
@@ -88,8 +92,8 @@ struct aws_s3_platform_info s_p5_platform_info = {
 
 static struct aws_s3_platform_info s_p5e_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5e.48xlarge"),
-    .max_throughput_gbps = 100,
-    .has_recommended_configuration = false,
+    .max_throughput_gbps = 100u,
+    .has_recommended_configuration = true,
 };
 /***** End p5e.48xlarge *****/
 
@@ -97,8 +101,8 @@ static struct aws_s3_platform_info s_p5e_platform_info = {
 
 static struct aws_s3_platform_info s_p5en_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5en.48xlarge"),
-    .max_throughput_gbps = 100,
-    .has_recommended_configuration = false,
+    .max_throughput_gbps = 100u,
+    .has_recommended_configuration = true,
 };
 /***** End p5en.48xlarge *****/
 
@@ -106,8 +110,8 @@ static struct aws_s3_platform_info s_p5en_platform_info = {
 
 static struct aws_s3_platform_info s_p6_b200_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b200.48xlarge"),
-    .max_throughput_gbps = 200,
-    .has_recommended_configuration = false,
+    .max_throughput_gbps = 200u,
+    .has_recommended_configuration = true,
 };
 /***** End p6-b200.48xlarge *****/
 
@@ -115,8 +119,8 @@ static struct aws_s3_platform_info s_p6_b200_platform_info = {
 
 static struct aws_s3_platform_info s_p6_b300_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b300.48xlarge"),
-    .max_throughput_gbps = 350,
-    .has_recommended_configuration = false,
+    .max_throughput_gbps = 350u,
+    .has_recommended_configuration = true,
 };
 /***** End p6-b300.48xlarge *****/
 
@@ -124,14 +128,14 @@ static struct aws_s3_platform_info s_p6_b300_platform_info = {
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1n.32xlarge"),
     /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
-    .max_throughput_gbps = 800,
+    .max_throughput_gbps = 800u,
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_trn1_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1.32xlarge"),
     /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
-    .max_throughput_gbps = 600,
+    .max_throughput_gbps = 600u,
     .has_recommended_configuration = true,
 };
 
