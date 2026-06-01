@@ -14,6 +14,8 @@
 #include "app_ctx.h"
 #include "cli_progress_bar.h"
 
+#include <aws/common/clock.h>
+
 #include <inttypes.h>
 #include <stdio.h>
 
@@ -32,6 +34,7 @@ struct cp_app_ctx {
     const char *dest_endpoint;
     size_t expected_transfers;
     size_t completed_transfers;
+    uint64_t total_bytes;
     bool list_objects_completed;
     bool source_s3;
     bool source_file_system;
@@ -212,7 +215,27 @@ int s3_cp_main(int argc, char *argv[], const char *command_name, void *user_data
         s_usage(1);
     }
 
+    uint64_t start_ns = 0;
+    aws_high_res_clock_get_ticks(&start_ns);
+
     s_dispatch_and_run_transfers(&cp_app_ctx);
+
+    uint64_t end_ns = 0;
+    aws_high_res_clock_get_ticks(&end_ns);
+
+    double elapsed_secs = (double)(end_ns - start_ns) / 1000000000.0;
+    double total_gib = (double)cp_app_ctx.total_bytes / (1024.0 * 1024.0 * 1024.0);
+    double throughput_gibps = elapsed_secs > 0.0 ? total_gib / elapsed_secs : 0.0;
+    double throughput_gbps = throughput_gibps * 8.0 * (1024.0 * 1024.0 * 1024.0) / (1000.0 * 1000.0 * 1000.0);
+
+    fprintf(
+        stdout,
+        "\nTransfer complete: %.2f GiB in %.2f seconds\n"
+        "Throughput: %.2f GiB/s (%.2f Gbps)\n",
+        total_gib,
+        elapsed_secs,
+        throughput_gibps,
+        throughput_gbps);
 
     aws_condition_variable_clean_up(&cp_app_ctx.c_var);
     aws_mutex_clean_up(&cp_app_ctx.mutex);
@@ -575,6 +598,7 @@ static int s_kickoff_put_object(
 
     aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
     transfer_ctx->cp_app_ctx->expected_transfers++;
+    transfer_ctx->cp_app_ctx->total_bytes += file_size;
     aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
 
     return AWS_OP_SUCCESS;
@@ -725,6 +749,7 @@ static int s_kickoff_get_object(
 
     aws_mutex_lock(&transfer_ctx->cp_app_ctx->mutex);
     transfer_ctx->cp_app_ctx->expected_transfers++;
+    transfer_ctx->cp_app_ctx->total_bytes += size;
     aws_mutex_unlock(&transfer_ctx->cp_app_ctx->mutex);
 
     return AWS_OP_SUCCESS;
