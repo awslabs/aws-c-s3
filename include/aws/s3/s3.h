@@ -77,7 +77,8 @@ struct aws_s3_platform_info {
     struct aws_byte_cursor instance_type;
     /* max throughput for this instance type, in gigabits per second */
     double max_throughput_gbps;
-    /* If set to true, allows cli and boto to load CRT on the instance by default */
+    /* Whether this library recommends automatically applying its optimized
+     * configuration for this instance type without explicit user opt-in. */
     bool has_recommended_configuration;
 };
 

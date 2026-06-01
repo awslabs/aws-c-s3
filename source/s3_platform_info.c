@@ -14,9 +14,9 @@
 #include <aws/io/host_resolver.h>
 #include <aws/s3/private/s3_platform_info.h>
 
-/* note: setting `has_recommended_configuration` to true would mean cli would
- * load crt client by default on the instance. We are not ready for this
- * behavior on certain instance families yet so this might be set to false. */
+/* note: setting `has_recommended_configuration` to true would mean crt client
+ * can be loaded by default on the instance. We are not ready for this behavior
+ * on certain instance families yet so this might be set to false. */
 
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
