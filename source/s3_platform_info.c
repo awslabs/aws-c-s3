@@ -14,6 +14,10 @@
 #include <aws/io/host_resolver.h>
 #include <aws/s3/private/s3_platform_info.h>
 
+/* note: setting `has_recommended_configuration` to true would mean crt client
+ * can be loaded by default on the instance. We are not ready for this behavior
+ * on certain instance families yet so this might be set to false. */
+
 /**** Configuration info for the c5n.18xlarge *****/
 static struct aws_s3_platform_info s_c5n_18xlarge_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("c5n.18xlarge"),
@@ -68,23 +72,70 @@ static struct aws_s3_platform_info s_p4de_platform_info = {
  * to the p4d. The rest is for other things on the machine to use. */
 struct aws_s3_platform_info s_p5_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5.48xlarge"),
-    .max_throughput_gbps = 400U,
+    .max_throughput_gbps = 400u,
     .has_recommended_configuration = true,
 };
 /***** End p5.48xlarge *****/
+
+/* For all instances from p5e.48xlarge - p6-b300.48xlarge,
+ * the max_throughput_gbps values configured are based on the maximum
+ * bandwidth offered from a single NIC in these instances. CRT clients
+ * default to using a single NIC unless configured to use multiple NICs
+ * by identifying the number of NICs and providing the names in an array
+ * (refer s3_client.h - struct aws_s3_client_config). The max_throughput_gbps
+ * is only a default we set can be overridden by the user's client config.
+ * TODO: Once we are able to auto-detect NICs and add them, default values
+ * should be updated with maximum ENA network bandwidth allowed by these
+ * instances.
+ */
+/***** Begin p5e.48xlarge ******/
+
+static struct aws_s3_platform_info s_p5e_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5e.48xlarge"),
+    .max_throughput_gbps = 100u,
+    .has_recommended_configuration = true,
+};
+/***** End p5e.48xlarge *****/
+
+/***** Begin p5en.48xlarge ******/
+
+static struct aws_s3_platform_info s_p5en_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p5en.48xlarge"),
+    .max_throughput_gbps = 100u,
+    .has_recommended_configuration = true,
+};
+/***** End p5en.48xlarge *****/
+
+/***** Begin p6-b200.48xlarge ******/
+
+static struct aws_s3_platform_info s_p6_b200_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b200.48xlarge"),
+    .max_throughput_gbps = 200u,
+    .has_recommended_configuration = true,
+};
+/***** End p6-b200.48xlarge *****/
+
+/***** Begin p6-b300.48xlarge ******/
+
+static struct aws_s3_platform_info s_p6_b300_platform_info = {
+    .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("p6-b300.48xlarge"),
+    .max_throughput_gbps = 350u,
+    .has_recommended_configuration = true,
+};
+/***** End p6-b300.48xlarge *****/
 
 /**** Begin trn1_32_large *****/
 static struct aws_s3_platform_info s_trn1_n_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1n.32xlarge"),
     /* not all of the advertised 1600 Gbps bandwidth can be hit from the cpu in user-space */
-    .max_throughput_gbps = 800,
+    .max_throughput_gbps = 800u,
     .has_recommended_configuration = true,
 };
 
 static struct aws_s3_platform_info s_trn1_platform_info = {
     .instance_type = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("trn1.32xlarge"),
     /* not all of the advertised 800 Gbps bandwidth can be hit from the cpu in user-space */
-    .max_throughput_gbps = 600,
+    .max_throughput_gbps = 600u,
     .has_recommended_configuration = true,
 };
 
@@ -186,6 +237,10 @@ struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_new(struct aws_a
     s_add_platform_info_to_table(loader, &s_p4d_platform_info);
     s_add_platform_info_to_table(loader, &s_p4de_platform_info);
     s_add_platform_info_to_table(loader, &s_p5_platform_info);
+    s_add_platform_info_to_table(loader, &s_p5e_platform_info);
+    s_add_platform_info_to_table(loader, &s_p5en_platform_info);
+    s_add_platform_info_to_table(loader, &s_p6_b200_platform_info);
+    s_add_platform_info_to_table(loader, &s_p6_b300_platform_info);
     s_add_platform_info_to_table(loader, &s_trn1_n_platform_info);
     s_add_platform_info_to_table(loader, &s_trn1_platform_info);
 
