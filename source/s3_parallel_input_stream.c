@@ -120,20 +120,15 @@ static void s_s3_parallel_from_file_read_task(struct aws_task *task, void *arg, 
         /* Try direct IO. */
         if (aws_file_path_read_from_offset_direct_io(
                 impl->file_path, read_task->offset, read_task->length, read_task->dest, &actually_read)) {
-            if (aws_last_error() == AWS_ERROR_UNSUPPORTED_OPERATION) {
-                /* Direct IO not supported, fallback to normal read */
-                /* Log the warning */
-                AWS_LOGF_WARN(
-                    AWS_LS_S3_GENERAL,
-                    "Direct IO not supported, fallback to normal read. File path: %s",
-                    aws_string_c_str(impl->file_path));
-                /* Set direct IO to be false to avoid extra checks. */
-                impl->direct_io_read = false;
-                aws_reset_error();
-            } else {
-                error_code = aws_last_error();
-                goto finish;
-            }
+            /* Direct IO not supported, fallback to normal read */
+            /* Log the warning */
+            AWS_LOGF_WARN(
+                AWS_LS_S3_GENERAL,
+                "Direct IO not supported, fallback to normal read. File path: %s",
+                aws_string_c_str(impl->file_path));
+            /* Set direct IO to be false to avoid extra checks. */
+            impl->direct_io_read = false;
+            aws_reset_error();
         } else {
             /* Succeed. */
             goto finish;

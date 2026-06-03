@@ -2137,34 +2137,17 @@ static int s_write_body_to_file(
     int error_code = AWS_ERROR_SUCCESS;
 
     if (meta_request->recv_file_direct_io) {
-        size_t page_size = aws_system_info_page_size();
-        bool aligned = (body->len % page_size == 0);
 
-        if (!aligned && meta_request->recv_file_direct_io_fallback_count == 0) {
-            AWS_LOGF_WARN(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT requested but data length %zu is not page-aligned "
-                "(page size %zu). Falling back to buffered I/O for this part. "
-                "This is expected for the last part of a download.",
-                (void *)meta_request,
-                body->len,
-                page_size);
-        }
-        if (!aligned) {
-            ++meta_request->recv_file_direct_io_fallback_count;
-        }
-
-        if (aligned) {
-            struct aws_byte_cursor write_cursor = *body;
-            if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, write_cursor)) {
-                error_code = aws_last_error();
-                AWS_LOGF_ERROR(
+        if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body)) {
+            if (meta_request->recv_file_direct_io_fallback_count == 0) {
+                AWS_LOGF_WARN(
                     AWS_LS_S3_META_REQUEST,
-                    "id=%p Failed writing to file with O_DIRECT. aws-error:%s",
+                    "id=%p Failed writing to file with O_DIRECT. aws-error:%s. Fallback.",
                     (void *)meta_request,
                     aws_error_name(error_code));
+                ++meta_request->recv_file_direct_io_fallback_count;
             }
-            return error_code;
+            aws_reset_error();
         }
 
         /* Buffered fallback for unaligned data. recv_file is already open from init.
