@@ -5658,16 +5658,15 @@ AWS_TEST_CASE(test_s3_get_object_randomize_part_order, s_test_s3_get_object_rand
 static int s_test_s3_get_object_randomize_part_order(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    /* Verify that downloading with randomize_get_part_order=true succeeds and
-     * that byte-range parts were NOT requested in sequential order. */
+    /* Download a 10MB object using 1MB parts with randomized fetch order.
+     * Verify the download succeeds and parts were issued non-sequentially. */
+    const size_t expected_num_parts = 10;
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_client *client = NULL;
-    struct aws_s3_tester_client_options client_options = {
-        .part_size = 1 * 1024 * 1024,
-    };
+    struct aws_s3_tester_client_options client_options = {.part_size = 1 * 1024 * 1024};
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
     struct aws_s3_meta_request_test_results test_results;
@@ -5688,11 +5687,15 @@ static int s_test_s3_get_object_randomize_part_order(struct aws_allocator *alloc
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
     ASSERT_TRUE(test_results.finished_response_status == 200);
 
-    /* Collect part numbers from GET_OBJECT requests in the order they were issued */
-    size_t num_metrics = aws_array_list_length(&test_results.synced_data.metrics);
-    uint32_t get_part_numbers[64];
+    /* Extract GET_OBJECT part numbers ordered by when they were actually sent on the wire */
+    struct {
+        uint32_t part_number;
+        uint64_t send_start;
+    } get_requests[10];
     size_t get_count = 0;
-    for (size_t i = 0; i < num_metrics && get_count < 64; ++i) {
+
+    size_t num_metrics = aws_array_list_length(&test_results.synced_data.metrics);
+    for (size_t i = 0; i < num_metrics && get_count < expected_num_parts; ++i) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(&test_results.synced_data.metrics, (void **)&metrics, i);
         enum aws_s3_request_type type = AWS_S3_REQUEST_TYPE_UNKNOWN;
@@ -5700,21 +5703,44 @@ static int s_test_s3_get_object_randomize_part_order(struct aws_allocator *alloc
         if (type != AWS_S3_REQUEST_TYPE_GET_OBJECT) {
             continue;
         }
-        uint32_t part_number = 0;
-        aws_s3_request_metrics_get_part_number(metrics, &part_number);
-        get_part_numbers[get_count++] = part_number;
+        aws_s3_request_metrics_get_part_number(metrics, &get_requests[get_count].part_number);
+        aws_s3_request_metrics_get_send_start_timestamp_ns(metrics, &get_requests[get_count].send_start);
+        get_count++;
+    }
+    ASSERT_UINT_EQUALS(expected_num_parts, get_count);
+
+    /* Sort by send timestamp to reconstruct actual issue order */
+    for (size_t i = 0; i < get_count - 1; ++i) {
+        for (size_t j = i + 1; j < get_count; ++j) {
+            if (get_requests[j].send_start < get_requests[i].send_start) {
+                uint32_t tmp_part = get_requests[i].part_number;
+                uint64_t tmp_time = get_requests[i].send_start;
+                get_requests[i].part_number = get_requests[j].part_number;
+                get_requests[i].send_start = get_requests[j].send_start;
+                get_requests[j].part_number = tmp_part;
+                get_requests[j].send_start = tmp_time;
+            }
+        }
     }
 
-    /* With 1MB parts and a 10MB object, we expect ~10 parts */
-    ASSERT_TRUE(get_count >= 2);
-
-    /* Verify all expected part numbers were fetched (valid permutation of 1..get_count) */
-    bool part_seen[65] = {false};
+    /* All part numbers 1..10 must be present exactly once (ignore index 0) */
+    bool part_seen[11] = {false};
     for (size_t i = 0; i < get_count; ++i) {
-        ASSERT_TRUE(get_part_numbers[i] >= 1 && get_part_numbers[i] <= get_count);
-        ASSERT_FALSE(part_seen[get_part_numbers[i]]);
-        part_seen[get_part_numbers[i]] = true;
+        ASSERT_TRUE(get_requests[i].part_number >= 1 && get_requests[i].part_number <= expected_num_parts);
+        ASSERT_FALSE(part_seen[get_requests[i].part_number]);
+        part_seen[get_requests[i].part_number] = true;
     }
+
+    /* Parts must NOT have been issued in sequential order (1, 2, 3, ..., 10) */
+    /* Randomized, this is very unlikely (~1/8! or ~1/40K) */
+    bool is_sequential = true;
+    for (size_t i = 1; i < get_count; ++i) {
+        if (get_requests[i].part_number != get_requests[i - 1].part_number + 1) {
+            is_sequential = false;
+            break;
+        }
+    }
+    ASSERT_FALSE(is_sequential);
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
