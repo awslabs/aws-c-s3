@@ -7972,8 +7972,8 @@ static int s_test_s3_copy_object_properties_helper(
     aws_http_message_release(head_message);
     aws_s3_tester_clean_up(&head_tester);
 
-    /* Verify tags if REPLACE was used */
-    if (use_replace) {
+    /* Verify tags */
+    if (expect_metadata) {
         struct aws_s3_tester tag_tester;
         AWS_ZERO_STRUCT(tag_tester);
         ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tag_tester));
