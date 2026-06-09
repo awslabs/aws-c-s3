@@ -7820,6 +7820,253 @@ static int s_test_s3_copy_source_prefixed_by_slash_multipart(struct aws_allocato
     return AWS_OP_SUCCESS;
 }
 
+/**
+ * Helper: copy object then verify metadata and tags on the destination.
+ * If use_replace: sets REPLACE directives with explicit metadata/tags on the request.
+ * If !use_replace: sets COPY directives (no metadata/tags on request).
+ * expect_metadata: whether HeadObject should have the metadata after copy.
+ */
+static int s_test_s3_copy_object_properties_helper(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor source_key,
+    struct aws_byte_cursor destination_key,
+    bool use_replace,
+    bool expect_metadata) {
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor source_bucket = g_test_bucket_name;
+
+    char endpoint[1024];
+    snprintf(
+        endpoint,
+        sizeof(endpoint),
+        "%.*s.s3.%s.amazonaws.com",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        g_test_s3_region.ptr);
+
+    char copy_source_value[1024];
+    snprintf(
+        copy_source_value,
+        sizeof(copy_source_value),
+        "%.*s/%.*s",
+        (int)source_bucket.len,
+        source_bucket.ptr,
+        (int)source_key.len,
+        source_key.ptr);
+
+    char destination_path[512];
+    snprintf(destination_path, sizeof(destination_path), "/%.*s", (int)destination_key.len, destination_key.ptr);
+
+    /* Construct CopyObject request */
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+    ASSERT_NOT_NULL(message);
+    ASSERT_SUCCESS(aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str(destination_path)));
+    ASSERT_SUCCESS(aws_http_message_set_request_method(message, aws_http_method_put));
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    ASSERT_SUCCESS(aws_http_headers_add(headers, g_host_header_name, aws_byte_cursor_from_c_str(endpoint)));
+    ASSERT_SUCCESS(aws_http_headers_add(
+        headers, aws_byte_cursor_from_c_str("x-amz-copy-source"), aws_byte_cursor_from_c_str(copy_source_value)));
+
+    if (use_replace) {
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("x-amz-metadata-directive"), aws_byte_cursor_from_c_str("REPLACE")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("x-amz-meta-test-key"), aws_byte_cursor_from_c_str("test-value")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("Content-Type"), aws_byte_cursor_from_c_str("application/x-replaced")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("Content-Disposition"), aws_byte_cursor_from_c_str("attachment")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("Content-Language"), aws_byte_cursor_from_c_str("en-US")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("Cache-Control"), aws_byte_cursor_from_c_str("max-age=3600")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("x-amz-tagging-directive"), aws_byte_cursor_from_c_str("REPLACE")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("x-amz-tagging"), aws_byte_cursor_from_c_str("env=test&feature=copy")));
+    } else {
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("x-amz-metadata-directive"), aws_byte_cursor_from_c_str("COPY")));
+        ASSERT_SUCCESS(aws_http_headers_add(
+            headers, aws_byte_cursor_from_c_str("x-amz-tagging-directive"), aws_byte_cursor_from_c_str("COPY")));
+    }
+
+    /* Execute the copy */
+    struct aws_s3_meta_request_test_results copy_results;
+    aws_s3_meta_request_test_results_init(&copy_results, allocator);
+
+    struct aws_s3_tester_meta_request_options options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
+        .message = message,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, &copy_results));
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, copy_results.finished_response_status);
+
+    aws_s3_meta_request_test_results_clean_up(&copy_results);
+    aws_http_message_release(message);
+    aws_s3_tester_clean_up(&tester);
+
+    /* Verify destination metadata via HeadObject */
+    struct aws_s3_tester head_tester;
+    AWS_ZERO_STRUCT(head_tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &head_tester));
+
+    struct aws_http_message *head_message = aws_http_message_new_request(allocator);
+    ASSERT_NOT_NULL(head_message);
+    ASSERT_SUCCESS(aws_http_message_set_request_method(head_message, aws_byte_cursor_from_c_str("HEAD")));
+    ASSERT_SUCCESS(aws_http_message_set_request_path(head_message, aws_byte_cursor_from_c_str(destination_path)));
+    struct aws_http_headers *head_headers = aws_http_message_get_headers(head_message);
+    ASSERT_SUCCESS(aws_http_headers_add(head_headers, g_host_header_name, aws_byte_cursor_from_c_str(endpoint)));
+
+    struct aws_s3_meta_request_test_results head_results;
+    aws_s3_meta_request_test_results_init(&head_results, allocator);
+
+    struct aws_s3_tester_meta_request_options head_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .message = head_message,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("HeadObject"),
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&head_tester, &head_options, &head_results));
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, head_results.finished_response_status);
+
+    if (expect_metadata) {
+        struct aws_byte_cursor meta_value;
+        ASSERT_SUCCESS(aws_http_headers_get(
+            head_results.response_headers, aws_byte_cursor_from_c_str("x-amz-meta-test-key"), &meta_value));
+        ASSERT_TRUE(aws_byte_cursor_eq_c_str(&meta_value, "test-value"));
+
+        struct aws_byte_cursor cache_value;
+        ASSERT_SUCCESS(aws_http_headers_get(
+            head_results.response_headers, aws_byte_cursor_from_c_str("Cache-Control"), &cache_value));
+        ASSERT_TRUE(aws_byte_cursor_eq_c_str(&cache_value, "max-age=3600"));
+
+        struct aws_byte_cursor content_type_value;
+        ASSERT_SUCCESS(aws_http_headers_get(
+            head_results.response_headers, aws_byte_cursor_from_c_str("Content-Type"), &content_type_value));
+        ASSERT_TRUE(aws_byte_cursor_eq_c_str(&content_type_value, "application/x-replaced"));
+    } else {
+        /* Metadata NOT expected (documents MPU path limitation with COPY directive) */
+        struct aws_byte_cursor meta_value;
+        ASSERT_TRUE(
+            aws_http_headers_get(
+                head_results.response_headers, aws_byte_cursor_from_c_str("x-amz-meta-test-key"), &meta_value) !=
+            AWS_OP_SUCCESS);
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&head_results);
+    aws_http_message_release(head_message);
+    aws_s3_tester_clean_up(&head_tester);
+
+    /* Verify tags if REPLACE was used */
+    if (use_replace) {
+        struct aws_s3_tester tag_tester;
+        AWS_ZERO_STRUCT(tag_tester);
+        ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tag_tester));
+
+        struct aws_http_message *tag_message = aws_http_message_new_request(allocator);
+        ASSERT_NOT_NULL(tag_message);
+        ASSERT_SUCCESS(aws_http_message_set_request_method(tag_message, aws_byte_cursor_from_c_str("GET")));
+
+        char tag_path[1536];
+        snprintf(tag_path, sizeof(tag_path), "%s?tagging", destination_path);
+        ASSERT_SUCCESS(aws_http_message_set_request_path(tag_message, aws_byte_cursor_from_c_str(tag_path)));
+
+        struct aws_http_headers *tag_req_headers = aws_http_message_get_headers(tag_message);
+        ASSERT_SUCCESS(aws_http_headers_add(tag_req_headers, g_host_header_name, aws_byte_cursor_from_c_str(endpoint)));
+
+        struct aws_s3_meta_request_test_results tag_results;
+        aws_s3_meta_request_test_results_init(&tag_results, allocator);
+
+        struct aws_s3_tester_meta_request_options tag_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+            .message = tag_message,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .default_type_options =
+                {
+                    .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                    .operation_name = aws_byte_cursor_from_c_str("GetObjectTagging"),
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tag_tester, &tag_options, &tag_results));
+        ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, tag_results.finished_response_status);
+        /* Body > 100 bytes = contains actual tags (empty TagSet is ~39 bytes) */
+        ASSERT_TRUE(tag_results.received_body_size > 100);
+
+        aws_s3_meta_request_test_results_clean_up(&tag_results);
+        aws_http_message_release(tag_message);
+        aws_s3_tester_clean_up(&tag_tester);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(
+    test_s3_copy_object_with_replace_metadata_and_tagging,
+    s_test_s3_copy_object_with_replace_metadata_and_tagging)
+static int s_test_s3_copy_object_with_replace_metadata_and_tagging(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    /* REPLACE: copy with explicit metadata+tags, verify they arrive on destination */
+    ASSERT_SUCCESS(s_test_s3_copy_object_properties_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("pre-existing-1MB"),
+        aws_byte_cursor_from_c_str("copies/destination_1MB_replace_props"),
+        true /* use_replace */,
+        true /* expect_metadata */));
+
+    /* COPY directive on the result: single-part CopyObject natively handles it */
+    ASSERT_SUCCESS(s_test_s3_copy_object_properties_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("copies/destination_1MB_replace_props"),
+        aws_byte_cursor_from_c_str("copies/destination_1MB_copy_directive"),
+        false /* use_replace */,
+        true /* expect_metadata: single-part handles COPY natively */));
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(
+    test_s3_multipart_copy_object_with_replace_metadata_and_tagging,
+    s_test_s3_multipart_copy_object_with_replace_metadata_and_tagging)
+static int s_test_s3_multipart_copy_object_with_replace_metadata_and_tagging(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+    /* REPLACE: copy with explicit metadata+tags, verify they arrive on destination */
+    ASSERT_SUCCESS(s_test_s3_copy_object_properties_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("pre-existing-2GB"),
+        aws_byte_cursor_from_c_str("copies/destination_2GB_replace_props"),
+        true /* use_replace */,
+        true /* expect_metadata */));
+
+    /* COPY directive on the result: MPU path does NOT copy metadata (known limitation) */
+    ASSERT_SUCCESS(s_test_s3_copy_object_properties_helper(
+        allocator,
+        aws_byte_cursor_from_c_str("copies/destination_2GB_replace_props"),
+        aws_byte_cursor_from_c_str("copies/destination_2GB_copy_directive"),
+        false /* use_replace */,
+        false /* expect_metadata: MPU path does NOT handle COPY directive */));
+
+    return AWS_OP_SUCCESS;
+}
+
 static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool multipart) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
