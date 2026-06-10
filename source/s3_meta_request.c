@@ -16,13 +16,16 @@
 #include <aws/auth/signing.h>
 #include <aws/auth/signing_config.h>
 #include <aws/auth/signing_result.h>
+#include <aws/common/atomics.h>
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
+#include <aws/common/task_scheduler.h>
 #include <aws/io/async_stream.h>
 #include <aws/io/event_loop.h>
+#include <aws/io/future.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/io/socket.h>
 #include <aws/io/stream.h>
@@ -2128,7 +2131,114 @@ static void s_buffered_write_to_recv_file(
     }
 }
 
-/* Write body to file using O_DIRECT when possible, falling back to buffered I/O for unaligned data. */
+/* 1 MiB chunk size for parallel O_DIRECT writes */
+static const size_t s_parallel_write_chunk_size = 1 * 1024 * 1024;
+
+/* 60 second timeout for parallel write completion */
+static const uint64_t s_parallel_write_timeout_ns = 60ULL * AWS_TIMESTAMP_NANOS;
+
+struct s_parallel_write_chunk_task {
+    struct aws_task task;
+    struct aws_allocator *allocator;
+    const struct aws_string *filepath;
+    uint64_t offset;
+    struct aws_byte_cursor data;
+    /* Shared state across all chunks in one write */
+    struct aws_atomic_var *error_code;
+    struct aws_atomic_var *chunks_remaining;
+    struct aws_future_void *future;
+};
+
+static void s_parallel_write_chunk_task_fn(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    struct s_parallel_write_chunk_task *chunk_task = arg;
+
+    if (task_status != AWS_TASK_STATUS_RUN_READY) {
+        /* Task cancelled — store error */
+        aws_atomic_compare_exchange_int(chunk_task->error_code, 0, (size_t)AWS_ERROR_S3_CANCELED);
+        goto done;
+    }
+
+    if (aws_file_path_write_to_offset_direct_io(chunk_task->filepath, chunk_task->offset, chunk_task->data)) {
+        int err = aws_last_error();
+        aws_atomic_compare_exchange_int(chunk_task->error_code, 0, (size_t)err);
+        aws_reset_error();
+    }
+
+done:
+    /* Last chunk completes the future */
+    if (aws_atomic_fetch_sub(chunk_task->chunks_remaining, 1) == 1) {
+        aws_future_void_set_result(chunk_task->future);
+    }
+    aws_future_void_release(chunk_task->future);
+    aws_mem_release(chunk_task->allocator, chunk_task);
+}
+
+/**
+ * Write body to file using parallel O_DIRECT. Splits body into 1MiB chunks and dispatches
+ * them as tasks across the body_streaming_elg for concurrent writes.
+ *
+ * Returns AWS_OP_SUCCESS if all chunks written successfully, AWS_OP_ERR otherwise.
+ * On failure, aws_last_error() is set to the first chunk error encountered.
+ */
+static int s_parallel_direct_io_write(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t file_offset) {
+
+    struct aws_allocator *allocator = meta_request->allocator;
+    struct aws_event_loop_group *elg = meta_request->client->body_streaming_elg;
+    size_t num_chunks = (body->len + s_parallel_write_chunk_size - 1) / s_parallel_write_chunk_size;
+
+    /* For small writes (single chunk), skip the parallel machinery */
+    if (num_chunks <= 1) {
+        return aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body);
+    }
+
+    /* Shared coordination state — stack-allocated since we block until done */
+    struct aws_atomic_var shared_error;
+    struct aws_atomic_var chunks_remaining;
+    aws_atomic_init_int(&shared_error, 0);
+    aws_atomic_init_int(&chunks_remaining, num_chunks);
+
+    struct aws_future_void *future = aws_future_void_new(allocator);
+
+    /* Dispatch chunks across ELG threads */
+    for (size_t i = 0; i < num_chunks; ++i) {
+        size_t chunk_offset_in_body = i * s_parallel_write_chunk_size;
+        size_t chunk_len = s_parallel_write_chunk_size;
+        if (chunk_offset_in_body + chunk_len > body->len) {
+            chunk_len = body->len - chunk_offset_in_body;
+        }
+
+        struct s_parallel_write_chunk_task *chunk_task =
+            aws_mem_calloc(allocator, 1, sizeof(struct s_parallel_write_chunk_task));
+        chunk_task->allocator = allocator;
+        chunk_task->filepath = meta_request->recv_filepath;
+        chunk_task->offset = file_offset + chunk_offset_in_body;
+        chunk_task->data = aws_byte_cursor_from_array(body->ptr + chunk_offset_in_body, chunk_len);
+        chunk_task->error_code = &shared_error;
+        chunk_task->chunks_remaining = &chunks_remaining;
+        chunk_task->future = aws_future_void_acquire(future);
+
+        aws_task_init(&chunk_task->task, s_parallel_write_chunk_task_fn, chunk_task, "s3_parallel_write_chunk");
+
+        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(elg);
+        aws_event_loop_schedule_task_now(loop, &chunk_task->task);
+    }
+
+    /* Block delivery thread until all chunks complete */
+    aws_future_void_wait(future, s_parallel_write_timeout_ns);
+    aws_future_void_release(future);
+
+    int write_error = (int)aws_atomic_load_int(&shared_error);
+    if (write_error != 0) {
+        return aws_raise_error(write_error);
+    }
+    return AWS_OP_SUCCESS;
+}
+
+/* Write body to file using O_DIRECT when possible, falling back to buffered I/O. */
 static int s_write_body_to_file(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -2137,20 +2247,22 @@ static int s_write_body_to_file(
     int error_code = AWS_ERROR_SUCCESS;
 
     if (meta_request->recv_file_direct_io) {
-
-        if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body)) {
-            if (meta_request->recv_file_direct_io_fallback_count == 0) {
-                AWS_LOGF_WARN(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Failed writing to file with O_DIRECT. aws-error:%s. Fallback.",
-                    (void *)meta_request,
-                    aws_error_name(error_code));
-                ++meta_request->recv_file_direct_io_fallback_count;
-            }
-            aws_reset_error();
+        if (s_parallel_direct_io_write(meta_request, body, file_offset) == AWS_OP_SUCCESS) {
+            return AWS_ERROR_SUCCESS;
         }
 
-        /* Buffered fallback for unaligned data. recv_file is already open from init.
+        /* O_DIRECT failed — fall back to buffered path */
+        if (meta_request->recv_file_direct_io_fallback_count == 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Failed writing to file with O_DIRECT. aws-error:%s. Fallback.",
+                (void *)meta_request,
+                aws_error_name(aws_last_error()));
+        }
+        ++meta_request->recv_file_direct_io_fallback_count;
+        aws_reset_error();
+
+        /* Buffered fallback. recv_file is already open from init.
          * Need to seek because O_DIRECT path doesn't update FILE* position. */
         if (aws_fseek(meta_request->recv_file, (int64_t)file_offset, SEEK_SET) != AWS_OP_SUCCESS) {
             return aws_last_error();
