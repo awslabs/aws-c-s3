@@ -2137,37 +2137,60 @@ static const size_t s_parallel_write_chunk_size = 1 * 1024 * 1024;
 /* 60 second timeout for parallel write completion */
 static const uint64_t s_parallel_write_timeout_ns = 60ULL * AWS_TIMESTAMP_NANOS;
 
+struct s_parallel_write_shared_state {
+    struct aws_atomic_var error_code;
+    struct aws_atomic_var fallback_count;
+    struct aws_atomic_var chunks_remaining;
+    struct aws_allocator *allocator;
+};
+
 struct s_parallel_write_chunk_task {
     struct aws_task task;
     struct aws_allocator *allocator;
     const struct aws_string *filepath;
     uint64_t offset;
     struct aws_byte_cursor data;
-    /* Shared state across all chunks in one write */
-    struct aws_atomic_var *error_code;
-    struct aws_atomic_var *chunks_remaining;
+    struct s_parallel_write_shared_state *shared;
     struct aws_future_void *future;
 };
 
 static void s_parallel_write_chunk_task_fn(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     struct s_parallel_write_chunk_task *chunk_task = arg;
+    struct s_parallel_write_shared_state *shared = chunk_task->shared;
 
     if (task_status != AWS_TASK_STATUS_RUN_READY) {
-        /* Task cancelled — store error */
-        aws_atomic_compare_exchange_int(chunk_task->error_code, 0, (size_t)AWS_ERROR_S3_CANCELED);
+        size_t expected = 0;
+        aws_atomic_compare_exchange_int(&shared->error_code, &expected, (size_t)AWS_ERROR_S3_CANCELED);
         goto done;
     }
 
     if (aws_file_path_write_to_offset_direct_io(chunk_task->filepath, chunk_task->offset, chunk_task->data)) {
-        int err = aws_last_error();
-        aws_atomic_compare_exchange_int(chunk_task->error_code, 0, (size_t)err);
+        /* O_DIRECT failed for this chunk — try buffered fallback */
+        aws_reset_error();
+
+        FILE *f = aws_fopen(aws_string_c_str(chunk_task->filepath), "r+b");
+        if (f) {
+            bool success = (aws_fseek(f, (int64_t)chunk_task->offset, SEEK_SET) == AWS_OP_SUCCESS) &&
+                           (fwrite(chunk_task->data.ptr, chunk_task->data.len, 1, f) == 1);
+            fclose(f);
+            if (success) {
+                aws_atomic_fetch_add(&shared->fallback_count, 1);
+                goto done; /* fallback succeeded */
+            }
+        }
+        /* Both paths failed */
+        if (!aws_last_error()) {
+            aws_raise_error(AWS_ERROR_FILE_WRITE_FAILURE);
+        }
+        size_t expected = 0;
+        aws_atomic_compare_exchange_int(&shared->error_code, &expected, (size_t)aws_last_error());
         aws_reset_error();
     }
 
 done:
     /* Last chunk completes the future */
-    if (aws_atomic_fetch_sub(chunk_task->chunks_remaining, 1) == 1) {
+    if (aws_atomic_fetch_sub(&shared->chunks_remaining, 1) == 1) {
         aws_future_void_set_result(chunk_task->future);
     }
     aws_future_void_release(chunk_task->future);
@@ -2195,11 +2218,13 @@ static int s_parallel_direct_io_write(
         return aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body);
     }
 
-    /* Shared coordination state — stack-allocated since we block until done */
-    struct aws_atomic_var shared_error;
-    struct aws_atomic_var chunks_remaining;
-    aws_atomic_init_int(&shared_error, 0);
-    aws_atomic_init_int(&chunks_remaining, num_chunks);
+    /* Shared coordination state — heap-allocated, freed by last completing chunk */
+    struct s_parallel_write_shared_state *shared =
+        aws_mem_calloc(allocator, 1, sizeof(struct s_parallel_write_shared_state));
+    shared->allocator = allocator;
+    aws_atomic_init_int(&shared->error_code, 0);
+    aws_atomic_init_int(&shared->fallback_count, 0);
+    aws_atomic_init_int(&shared->chunks_remaining, num_chunks);
 
     struct aws_future_void *future = aws_future_void_new(allocator);
 
@@ -2217,8 +2242,7 @@ static int s_parallel_direct_io_write(
         chunk_task->filepath = meta_request->recv_filepath;
         chunk_task->offset = file_offset + chunk_offset_in_body;
         chunk_task->data = aws_byte_cursor_from_array(body->ptr + chunk_offset_in_body, chunk_len);
-        chunk_task->error_code = &shared_error;
-        chunk_task->chunks_remaining = &chunks_remaining;
+        chunk_task->shared = shared;
         chunk_task->future = aws_future_void_acquire(future);
 
         aws_task_init(&chunk_task->task, s_parallel_write_chunk_task_fn, chunk_task, "s3_parallel_write_chunk");
@@ -2231,7 +2255,14 @@ static int s_parallel_direct_io_write(
     aws_future_void_wait(future, s_parallel_write_timeout_ns);
     aws_future_void_release(future);
 
-    int write_error = (int)aws_atomic_load_int(&shared_error);
+    /* Propagate per-chunk fallback count to meta_request.
+     * Safe to read shared here because future completion means all chunks are done. */
+    size_t fallbacks = aws_atomic_load_int(&shared->fallback_count);
+    meta_request->recv_file_direct_io_fallback_count += fallbacks;
+
+    int write_error = (int)aws_atomic_load_int(&shared->error_code);
+    aws_mem_release(allocator, shared);
+
     if (write_error != 0) {
         return aws_raise_error(write_error);
     }
@@ -2251,7 +2282,11 @@ static int s_write_body_to_file(
             return AWS_ERROR_SUCCESS;
         }
 
-        /* O_DIRECT failed — fall back to buffered path */
+        // /* O_DIRECT failed — fall back to buffered path.
+        //  * Partial chunk writes may have extended the file beyond file_offset (gaps).
+        //  * Truncate back to file_offset so the buffered rewrite produces a clean file. */
+        // aws_file_truncate(meta_request->recv_filepath, (int64_t)file_offset);
+
         if (meta_request->recv_file_direct_io_fallback_count == 0) {
             AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
