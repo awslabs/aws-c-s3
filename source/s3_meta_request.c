@@ -2222,10 +2222,10 @@ static int s_parallel_direct_io_write(
     struct aws_allocator *allocator = meta_request->allocator;
     struct aws_event_loop_group *elg = meta_request->client->body_streaming_elg;
     size_t num_chunks = (body->len + s_parallel_write_chunk_size - 1) / s_parallel_write_chunk_size;
-    size_t thread_num = aws_event_loop_group_get_loop_count(elg);
+    size_t loop_count = aws_event_loop_group_get_loop_count(elg);
 
     /* For small writes (single chunk), skip the parallel machinery */
-    if (num_chunks <= 1 || thread_num <= 1) {
+    if (num_chunks <= 1 || loop_count <= 1) {
         return aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body);
     }
 
@@ -2243,7 +2243,6 @@ static int s_parallel_direct_io_write(
      * IMPORTANT: skip meta_request->io_event_loop — that's the loop we're blocking on.
      * Scheduling to it would deadlock. */
     struct aws_event_loop *current_loop = meta_request->io_event_loop;
-    size_t loop_count = aws_event_loop_group_get_loop_count(elg);
 
     for (size_t i = 0; i < num_chunks; ++i) {
         size_t chunk_offset_in_body = i * s_parallel_write_chunk_size;
