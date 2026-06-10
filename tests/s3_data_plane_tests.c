@@ -1669,6 +1669,7 @@ static int s_test_s3_get_object_file_path_direct_io(struct aws_allocator *alloca
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
+    /* Download with O_DIRECT */
     struct aws_s3_file_io_options fio_opts = {
         .direct_io = true,
     };
@@ -1706,6 +1707,7 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
     struct aws_s3_tester_client_options client_options = {
         .part_size = MB_TO_BYTES(5),
     };
+    size_t object_size = 20;
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -1724,7 +1726,7 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_size_mb = 1,
+                .object_size_mb = object_size,
                 .object_path_override = object_path,
             },
     };
@@ -1773,7 +1775,7 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
 
     /* Read file back from disk and compute CRC32.
      * The tester uploads content using AWS_AUTOGEN_LOREM_IPSUM pattern. */
-    size_t expected_size = MB_TO_BYTES(1);
+    size_t expected_size = MB_TO_BYTES(object_size);
     struct aws_byte_buf expected_buf;
     s_byte_buf_init_autogenned(&expected_buf, allocator, expected_size, AWS_AUTOGEN_LOREM_IPSUM);
     uint32_t expected_crc = aws_checksums_crc32(expected_buf.buffer, (int)expected_buf.len, 0);
