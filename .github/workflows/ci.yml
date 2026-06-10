@@ -230,6 +230,44 @@ jobs:
         chmod a+x builder
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
 
+  macos-s2n:
+    runs-on: macos-14 # latest
+    env:
+      AWS_CRT_USE_NON_FIPS_TLS_13: 1
+    steps:
+    - uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ env.CRT_CI_ROLE }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    - name: Checkout Sources
+      uses: actions/checkout@v6
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+        chmod a+x builder
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
+
+  macos-x64-s2n:
+    runs-on: macos-14-large # latest
+    env:
+      AWS_CRT_USE_NON_FIPS_TLS_13: 1
+    steps:
+    - uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ env.CRT_CI_ROLE }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    - name: Checkout Sources
+      uses: actions/checkout@v6
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+        chmod a+x builder
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
+
   # Test downstream repos.
   # This should not be required because we can run into a chicken and egg problem if there is a change that needs some fix in a downstream repo.
   downstream:
