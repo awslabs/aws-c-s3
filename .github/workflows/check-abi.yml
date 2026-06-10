@@ -1,0 +1,76 @@
+name: Check ABI compliance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: check-abi-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILDER_VERSION: v0.9.93
+  BUILDER_SOURCE: releases
+  BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
+  PACKAGE_NAME: aws-c-s3
+  LINUX_BASE_IMAGE: ubuntu-18-x64
+  RUN: ${{ github.run_id }}-${{ github.run_number }}
+  CRT_CI_ROLE: ${{ secrets.CRT_CI_ROLE_ARN }}
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions:
+  id-token: write
+
+jobs:
+  check-abi:
+    name: check-abi
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CRT_CI_ROLE }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install ABI tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            abi-compliance-checker abi-dumper universal-ctags
+
+      - name: Build head ref
+        run: |
+          aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
+          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra=-DCMAKE_C_FLAGS="-g -Og"
+
+      - name: Build base ref
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: |
+          git worktree add /tmp/base "$BASE_REF"
+          cd /tmp/base
+          aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
+          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra=-DCMAKE_C_FLAGS="-g -Og"
+
+      - name: Check ABI compliance
+        env:
+          HEAD_INSTALL: ${{ github.workspace }}/build/install
+          HEAD_SRC: ${{ github.workspace }}
+          BASE_INSTALL: /tmp/base/build/install
+          BASE_SRC: /tmp/base
+          OUT_DIR: ${{ github.workspace }}/abi-report
+        run: bash codebuild/check-abi.sh
+
+      - name: Emit summary
+        if: always()
+        run: |
+          if [[ -f "${{ github.workspace }}/abi-report/summary.md" ]]; then
+            cat "${{ github.workspace }}/abi-report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Check ABI compliance: failed before producing a report" >> "$GITHUB_STEP_SUMMARY"
+          fi
