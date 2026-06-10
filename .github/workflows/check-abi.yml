@@ -43,19 +43,23 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             abi-compliance-checker abi-dumper universal-ctags
 
-      - name: Build head ref
-        run: |
-          aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra=-DCMAKE_C_FLAGS="-g -Og"
-
-      - name: Build base ref
+      - name: Build base and head refs
         env:
           BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
         run: |
-          git worktree add /tmp/base "$BASE_REF"
-          cd /tmp/base
           aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra=-DCMAKE_C_FLAGS="-g -Og"
+
+          git worktree add /tmp/base "$BASE_REF"
+          cp linux-container-ci.sh /tmp/base/linux-container-ci.sh
+
+          # build head and base in parallel
+          ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra="-DCMAKE_C_FLAGS=-g -Og" run_tests=false &
+          pid_head=$!
+          ( cd /tmp/base && ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DBUILD_SHARED_LIBS=ON --cmake-extra="-DCMAKE_C_FLAGS=-g -Og" run_tests=false ) &
+          pid_base=$!
+
+          wait $pid_head
+          wait $pid_base
 
       - name: Check ABI compliance
         env:
