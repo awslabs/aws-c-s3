@@ -3,18 +3,15 @@
 # check-abi.sh - ABI dump and compatibility gate for a single C library.
 #
 # Expects two pre-built install trees (BASE_INSTALL, HEAD_INSTALL) produced
-# by the "Build base/head ref" workflow steps. Dumps the public ABI
-# (excluding private/ headers) and fails if the library is binary-incompatible
-# without a SOVERSION bump.
+# by the "Build base/head ref" workflow steps. cmake installs only public
+# headers to the install tree, so we use those directly for abi-dumper.
 #
 # Tools required: abi-dumper, abi-compliance-checker, universal-ctags, readelf
 #
 # Env:
 #   LIB           library name (default: basename of repo root)
 #   BASE_INSTALL  install prefix for base ref  (required)
-#   BASE_SRC      source checkout for base ref (required, for headers)
 #   HEAD_INSTALL  install prefix for head ref  (required)
-#   HEAD_SRC      source checkout for head ref (required, for headers)
 #   OUT_DIR       report output dir            (default: ./abi-report)
 
 set -euo pipefail
@@ -22,9 +19,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 LIB="${LIB:-$(basename "$REPO_ROOT")}"
 BASE_INSTALL="${BASE_INSTALL:?BASE_INSTALL must be set}"
-BASE_SRC="${BASE_SRC:?BASE_SRC must be set}"
 HEAD_INSTALL="${HEAD_INSTALL:?HEAD_INSTALL must be set}"
-HEAD_SRC="${HEAD_SRC:?HEAD_SRC must be set}"
 OUT_DIR="${OUT_DIR:-./abi-report}"
 
 mkdir -p "$OUT_DIR"
@@ -50,9 +45,10 @@ head_so="$(find_so "$HEAD_INSTALL")"
 [[ -n "$base_so" ]] || { log "ERROR: lib${LIB}.so not found under $BASE_INSTALL"; exit 1; }
 [[ -n "$head_so" ]] || { log "ERROR: lib${LIB}.so not found under $HEAD_INSTALL"; exit 1; }
 
-# Public headers only - exclude private/ dirs
-find "$BASE_SRC/include" -name "*.h" ! -path "*/private/*" > "$OUT_DIR/base-headers.txt" 2>/dev/null || true
-find "$HEAD_SRC/include" -name "*.h" ! -path "*/private/*" > "$OUT_DIR/head-headers.txt" 2>/dev/null || true
+# cmake installs only public headers to the install tree - use them directly.
+# private/ headers are never installed so no filtering needed.
+find "$BASE_INSTALL/include" -name "*.h" > "$OUT_DIR/base-headers.txt" 2>/dev/null || true
+find "$HEAD_INSTALL/include" -name "*.h" > "$OUT_DIR/head-headers.txt" 2>/dev/null || true
 
 log "=== ABI check: $LIB ==="
 log "base: $base_so"
@@ -83,12 +79,12 @@ head_sover="$(soversion "$head_so")"
   echo "## Check ABI compliance: \`$LIB\`"
   echo ""
   echo "- Binary compatibility: **${pct}%**"
-  echo "- SOVERSION: base \`${base_sover:-none}\` ->head \`${head_sover:-none}\`"
+  echo "- SOVERSION: base \`${base_sover:-none}\` -> head \`${head_sover:-none}\`"
   echo ""
   if [[ "$rc" -eq 0 ]]; then
     echo "ABI is backward-compatible."
   elif [[ -n "$base_sover" && "$base_sover" != "$head_sover" ]]; then
-    echo "ABI changed, but SOVERSION was bumped (\`$base_sover\` ->\`$head_sover\`)."
+    echo "ABI changed, but SOVERSION was bumped (\`$base_sover\`  -> \`$head_sover\`)."
   else
     echo "**ABI is incompatible and SOVERSION was not bumped.**"
     echo ""
