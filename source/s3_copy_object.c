@@ -489,14 +489,17 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
             aws_byte_buf_reset(&request->request_body, false);
 
             /* Build the message to complete our multipart upload, which includes a payload describing all of our
-             * completed parts. */
-            message = aws_s3_complete_multipart_message_new(
+             * completed parts. The object size (discovered via the HEAD on the source) is passed explicitly so the
+             * x-amz-mp-object-size header matches what S3 computes from the copied parts; the base CopyObject request
+             * is bodyless, so its Content-Length cannot be used as the source of that value. */
+            message = aws_s3_complete_multipart_message_with_object_size_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
                 copy_object->upload_id,
                 &copy_object->synced_data.part_list,
-                NULL);
+                NULL,
+                copy_object->synced_data.content_length);
 
             break;
         }

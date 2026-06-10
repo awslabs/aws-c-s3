@@ -678,13 +678,14 @@ static const struct aws_byte_cursor s_open_end_bracket = AWS_BYTE_CUR_INIT_FROM_
 static const struct aws_byte_cursor s_close_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">");
 static const struct aws_byte_cursor s_close_bracket_new_line = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">\n");
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
-struct aws_http_message *aws_s3_complete_multipart_message_new(
+struct aws_http_message *aws_s3_complete_multipart_message_with_object_size_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *parts,
-    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
+    uint64_t object_size) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
@@ -696,8 +697,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *message = NULL;
     bool set_checksums =
         checksum_config && (checksum_config->location != AWS_SCL_NONE || checksum_config->has_full_object_checksum);
-    const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
-    AWS_ASSERT(initial_message_headers);
     if (set_checksums) {
         mpu_algorithm_checksum_name =
             aws_get_completed_part_name_from_checksum_algorithm(checksum_config->checksum_algorithm);
@@ -750,11 +749,15 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
     }
-    struct aws_byte_cursor content_length_cursor;
-    if (aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor) ==
-        AWS_OP_SUCCESS) {
-        /* Set content-length from base message as x-amz-mp-object-size. */
-        if (aws_http_headers_set(headers, aws_byte_cursor_from_c_str("x-amz-mp-object-size"), content_length_cursor)) {
+    /* Send the total object size as x-amz-mp-object-size so S3 can validate the assembled object. object_size of 0
+     * means "unknown" (e.g. a streaming upload of unknown length); in that case the header is omitted, matching the
+     * prior behavior of skipping it when the base message had no Content-Length. */
+    if (object_size > 0) {
+        char object_size_buffer[32];
+        int object_size_len = snprintf(object_size_buffer, sizeof(object_size_buffer), "%" PRIu64, object_size);
+        struct aws_byte_cursor object_size_cursor =
+            aws_byte_cursor_from_array(object_size_buffer, (size_t)object_size_len);
+        if (aws_http_headers_set(headers, aws_byte_cursor_from_c_str("x-amz-mp-object-size"), object_size_cursor)) {
             goto error_clean_up;
         }
     }
@@ -853,6 +856,32 @@ error_clean_up:
     }
 
     return NULL;
+}
+
+struct aws_http_message *aws_s3_complete_multipart_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_buf *body_buffer,
+    const struct aws_string *upload_id,
+    const struct aws_array_list *parts,
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
+
+    /* Derive the object size from the base message's Content-Length, as the multipart upload path expects. A missing
+     * or unparseable Content-Length (e.g. a streaming upload of unknown length) yields 0, which tells the delegate to
+     * omit the x-amz-mp-object-size header. */
+    uint64_t object_size = 0;
+    struct aws_byte_cursor content_length_cursor;
+    const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
+    if (initial_message_headers != NULL &&
+        aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor) ==
+            AWS_OP_SUCCESS) {
+        if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &object_size)) {
+            object_size = 0;
+        }
+    }
+
+    return aws_s3_complete_multipart_message_with_object_size_new(
+        allocator, base_message, body_buffer, upload_id, parts, checksum_config, object_size);
 }
 
 struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
