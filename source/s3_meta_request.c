@@ -2165,28 +2165,38 @@ static void s_parallel_write_chunk_task_fn(struct aws_task *task, void *arg, enu
         goto done;
     }
 
-    if (aws_file_path_write_to_offset_direct_io(chunk_task->filepath, chunk_task->offset, chunk_task->data)) {
-        /* O_DIRECT failed for this chunk — try buffered fallback */
-        aws_reset_error();
+    /* Check alignment before calling O_DIRECT write — some aws-c-common versions
+     * fatal-assert on misalignment rather than returning an error. */
+    size_t page_size = aws_system_info_page_size();
+    bool aligned = (chunk_task->offset % page_size == 0) && ((uintptr_t)chunk_task->data.ptr % page_size == 0) &&
+                   (chunk_task->data.len % page_size == 0);
 
-        FILE *f = aws_fopen(aws_string_c_str(chunk_task->filepath), "r+b");
-        if (f) {
-            bool success = (aws_fseek(f, (int64_t)chunk_task->offset, SEEK_SET) == AWS_OP_SUCCESS) &&
-                           (fwrite(chunk_task->data.ptr, chunk_task->data.len, 1, f) == 1);
-            fclose(f);
-            if (success) {
-                aws_atomic_fetch_add(&shared->fallback_count, 1);
-                goto done; /* fallback succeeded */
-            }
-        }
-        /* Both paths failed */
-        if (!aws_last_error()) {
-            aws_raise_error(AWS_ERROR_FILE_WRITE_FAILURE);
-        }
-        size_t expected = 0;
-        aws_atomic_compare_exchange_int(&shared->error_code, &expected, (size_t)aws_last_error());
-        aws_reset_error();
+    if (aligned &&
+        !aws_file_path_write_to_offset_direct_io(chunk_task->filepath, chunk_task->offset, chunk_task->data)) {
+        /* O_DIRECT succeeded */
+        goto done;
     }
+
+    /* O_DIRECT skipped (unaligned) or failed — try buffered fallback */
+    aws_reset_error();
+
+    FILE *f = aws_fopen(aws_string_c_str(chunk_task->filepath), "r+b");
+    if (f) {
+        bool success = (aws_fseek(f, (int64_t)chunk_task->offset, SEEK_SET) == AWS_OP_SUCCESS) &&
+                       (fwrite(chunk_task->data.ptr, chunk_task->data.len, 1, f) == 1);
+        fclose(f);
+        if (success) {
+            aws_atomic_fetch_add(&shared->fallback_count, 1);
+            goto done; /* fallback succeeded */
+        }
+    }
+    /* Both paths failed */
+    if (!aws_last_error()) {
+        aws_raise_error(AWS_ERROR_FILE_WRITE_FAILURE);
+    }
+    size_t expected = 0;
+    aws_atomic_compare_exchange_int(&shared->error_code, &expected, (size_t)aws_last_error());
+    aws_reset_error();
 
 done:
     /* Last chunk completes the future */
