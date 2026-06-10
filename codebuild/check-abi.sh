@@ -75,24 +75,15 @@ pct="$(grep -ioP 'binary compatibility: \K[0-9.]+' "$OUT_DIR/acc.log" 2>/dev/nul
 base_sover="$(soversion "$base_so")"
 head_sover="$(soversion "$head_so")"
 
+# summary.md — the brief status table appended first to $GITHUB_STEP_SUMMARY
 {
   echo "## Check ABI compliance: \`$LIB\`"
   echo ""
   echo "- Binary compatibility: **${pct}%**"
   echo "- SOVERSION: base \`${base_sover:-none}\` -> head \`${head_sover:-none}\`"
-  echo ""
-  if [[ "$rc" -eq 0 ]]; then
-    echo "ABI is backward-compatible."
-  elif [[ -n "$base_sover" && "$base_sover" != "$head_sover" ]]; then
-    echo "ABI changed, but SOVERSION was bumped (\`$base_sover\`  -> \`$head_sover\`)."
-  else
-    echo "**ABI is incompatible and SOVERSION was not bumped.**"
+  if [[ "$rc" -ne 0 && ( -z "$base_sover" || "$base_sover" == "$head_sover" ) ]]; then
     echo ""
-    echo "Either revert the breaking change or bump SOVERSION in CMakeLists.txt."
-    echo ""
-    echo '```'
-    grep -v '^Report:' "$OUT_DIR/acc.log" 2>/dev/null | tail -20
-    echo '```'
+    echo "**ABI is incompatible and SOVERSION was not bumped. Either revert the breaking change or bump SOVERSION in CMakeLists.txt.**"
   fi
 } > "$OUT_DIR/summary.md"
 

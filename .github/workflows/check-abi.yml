@@ -78,8 +78,19 @@ jobs:
       - name: Emit summary
         if: always()
         run: |
-          if [[ -f "${{ github.workspace }}/abi-report/summary.md" ]]; then
-            cat "${{ github.workspace }}/abi-report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          REPORT_DIR="${{ github.workspace }}/abi-report"
+          if [[ -f "$REPORT_DIR/summary.md" ]]; then
+            cat "$REPORT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "## Check ABI compliance: failed before producing a report" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ -f "$REPORT_DIR/compat_report.html" ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "---" >> "$GITHUB_STEP_SUMMARY"
+            echo "## ABI compliance report" >> "$GITHUB_STEP_SUMMARY"
+            # Extract body content only - GitHub step summary expects a fragment,
+            # not a full HTML document. Sending the full file leaks DOCTYPE and
+            # outer tags as visible text.
+            sed -n '/<body/,/<\/body>/p' "$REPORT_DIR/compat_report.html" \
+              | sed 's/<body[^>]*>//;s/<\/body>//' >> "$GITHUB_STEP_SUMMARY"
           fi
