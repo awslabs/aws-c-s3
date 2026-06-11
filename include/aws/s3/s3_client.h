@@ -84,6 +84,11 @@ enum aws_s3_meta_request_type {
      *   source will not work
      * 3. source bucket is assumed to be in the same region as dest
      * 4. source bucket and dest bucket must both be either directory buckets or regular buckets.
+     * 5. on the multipart copy path, metadata, tags, and annotations are not
+     *   automatically copied from the source object. The caller must set
+     *   `x-amz-metadata-directive: REPLACE` and include all desired metadata
+     *   headers and `x-amz-tagging` on the request. Single-part copies (< 1GB)
+     *   are not affected as S3 CopyObject natively handles COPY directives.
      *
      * Provide the `meta_request_options.copy_source_uri` to bypass limitation 1 & 2.
      */
