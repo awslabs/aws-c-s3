@@ -173,16 +173,17 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
                    : AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
     }
 
+    /* If the object_size_hint indicates that it fits in a single part, try to get the file directly.
+     * This avoids a HEAD request and sizes the buffer reservation to the hint rather than full part_size.
+     * If the hint is wrong and the object is larger, the request will be cancelled and retried with ranged gets. */
+    if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0 &&
+        auto_ranged_get->object_size_hint <= meta_request->part_size) {
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+    }
+
     /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
     if (!meta_request->checksum_config.validate_response_checksum) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE;
-    }
-
-    /* If the object_size_hint indicates that it is a small one part file, then try to get the file directly
-     * TODO: Bypass memory limiter so that we don't overallocate memory for small files
-     */
-    if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint <= meta_request->part_size) {
-        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 
     /* Otherwise, do a headObject so that we can validate checksum if the file was uploaded as a single part */
@@ -265,10 +266,15 @@ static bool s_s3_auto_ranged_get_update(
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
                                 AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
-                        /* Note: our current default logic is to do part 1, discover size and then abort if payload its
-                         * too huge We optimistically reserve part size for it */
+                        /* Reserve only as much buffer as the hint suggests, capped at part_size.
+                         * If the hint is absent or zero, fall back to the full part_size reservation.
+                         * The cancellation path in s_s3_meta_request_headers_block_done handles the
+                         * case where the actual object is larger than reserved (retries with range gets). */
                         request->part_range_start = 0;
-                        request->part_range_end = meta_request->part_size - 1;
+                        request->part_range_end =
+                            (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0)
+                                ? aws_min_u64(auto_ranged_get->object_size_hint, meta_request->part_size) - 1
+                                : meta_request->part_size - 1;
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
                         break;
