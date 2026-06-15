@@ -9338,3 +9338,62 @@ static int s_test_s3_default_get_without_content_length(struct aws_allocator *al
 
     return AWS_OP_SUCCESS;
 }
+
+AWS_TEST_CASE(
+    test_s3_get_object_size_hint_sizes_first_request_buffer,
+    s_test_s3_get_object_size_hint_sizes_first_request_buffer)
+static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Verify that when object_size_hint is provided, the first GET request's range end reflects the hint
+     * rather than the full part_size. This ensures we don't over-reserve buffer memory. */
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Use a part_size larger than the object so the hint fits in one part */
+    size_t part_size = MB_TO_BYTES(20);
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = part_size,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    /* Hint is 5MB, object is 10MB — hint is wrong (object is bigger), but the first request buffer
+     * reservation should still use the hint value, not part_size. */
+    uint64_t object_size_hint = MB_TO_BYTES(5);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_10MB,
+            },
+        .object_size_hint = &object_size_hint,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
+
+    /* The first request (cancelled because object is larger than hint) should have
+     * part_range_end == object_size_hint - 1, not part_size - 1. It will be in the all-metrics list
+     * because it was cancelled (non-zero error), not in succeed_metrics. */
+    uint64_t first_range_end = 0;
+    struct aws_s3_request_metrics *first_metrics = NULL;
+    ASSERT_TRUE(aws_array_list_length(&test_results.synced_data.metrics) > 0);
+    ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.metrics, (void **)&first_metrics, 0));
+    aws_s3_request_metrics_get_part_range_end(first_metrics, &first_range_end);
+    ASSERT_UINT_EQUALS(object_size_hint - 1, first_range_end);
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}

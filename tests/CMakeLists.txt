@@ -480,6 +480,7 @@ add_net_test_case(s3_client_memory_limit_from_env_var_invalid)
 add_net_test_case(s3_client_memory_limit_from_env_var_overflow)
 
 add_net_test_case(test_s3_default_get_without_content_length)
+add_net_test_case(test_s3_get_object_size_hint_sizes_first_request_buffer)
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
