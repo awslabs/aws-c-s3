@@ -215,6 +215,8 @@ struct aws_s3_upload_part_timeout_stats {
 struct aws_s3_client {
     struct aws_allocator *allocator;
 
+    int random_new_member;
+
     struct aws_s3_buffer_pool *buffer_pool;
 
     struct aws_s3_client_vtable *vtable;
