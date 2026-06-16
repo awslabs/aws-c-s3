@@ -9386,8 +9386,7 @@ static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_
     uint64_t first_range_end = 0;
     struct aws_s3_request_metrics *first_metrics = NULL;
     ASSERT_TRUE(aws_array_list_length(&test_results.synced_data.succeed_metrics) > 0);
-    ASSERT_SUCCESS(
-        aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&first_metrics, 0));
+    ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&first_metrics, 0));
     aws_s3_request_metrics_get_part_range_end(first_metrics, &first_range_end);
     ASSERT_UINT_EQUALS(object_size_hint - 1, first_range_end);
 

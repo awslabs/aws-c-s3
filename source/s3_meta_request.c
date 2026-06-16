@@ -1480,9 +1480,6 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
     /*
      * When downloading parts via partNumber, if the response is larger than the buffer we reserved, cancel
      * immediately so we don't overflow memory. We'll retry using ranged gets instead.
