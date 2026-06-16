@@ -1484,16 +1484,20 @@ static int s_s3_meta_request_headers_block_done(
     AWS_PRECONDITION(meta_request);
 
     /*
-     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so
-     * we don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets
-     * instead.
+     * When downloading parts via partNumber, if the response is larger than the buffer we reserved, cancel
+     * immediately so we don't overflow memory. We'll retry using ranged gets instead.
+     *
+     * Compare against the reserved buffer size (part_range_end - part_range_start + 1) rather than part_size,
+     * because when object_size_hint is provided the buffer is sized to min(hint, part_size), which may be
+     * smaller than part_size. Using part_size here would miss the case where hint < content_length <= part_size.
      */
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
         uint64_t content_length;
+        uint64_t reserved_size = request->part_range_end - request->part_range_start + 1;
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length) &&
-            content_length > meta_request->part_size) {
+            content_length > reserved_size) {
             return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
         }
     }
