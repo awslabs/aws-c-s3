@@ -662,9 +662,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
             /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
             aws_file_delete(meta_request->recv_filepath);
         }
-    } else if (meta_request->recv_file_direct_io && meta_request->recv_file_delete_on_failure) {
-        /* O_DIRECT path: no FILE* to close, but still honor delete-on-failure during teardown */
-        aws_file_delete(meta_request->recv_filepath);
     }
     aws_string_destroy(meta_request->recv_filepath);
 
@@ -2111,21 +2108,21 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
 }
 
 /* Helper: write the response body to recv_file with fwrite. Sets *out_error_code on failure. */
-static void s_buffered_write_to_recv_file(
+static int s_buffered_write_to_recv_file(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_cursor *response_body,
-    int *out_error_code) {
+    const struct aws_byte_cursor *response_body) {
     if (fwrite((void *)response_body->ptr, response_body->len, 1, meta_request->recv_file) < 1) {
         int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno */
         aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
-        *out_error_code = aws_last_error();
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Failed writing to file. errno:%d. aws-error:%s",
             (void *)meta_request,
             errno_value,
-            aws_error_name(*out_error_code));
+            aws_error_name(aws_last_error()));
+        return AWS_OP_ERR;
     }
+    return AWS_OP_SUCCESS;
 }
 
 /* Write body to file using O_DIRECT when possible, falling back to buffered I/O for unaligned data. */
@@ -2134,34 +2131,37 @@ static int s_write_body_to_file(
     const struct aws_byte_cursor *body,
     uint64_t file_offset) {
 
-    int error_code = AWS_ERROR_SUCCESS;
-
     if (meta_request->recv_file_direct_io) {
-
-        if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body)) {
-            if (meta_request->recv_file_direct_io_fallback_count == 0) {
-                AWS_LOGF_WARN(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Failed writing to file with O_DIRECT. aws-error:%s. Fallback.",
-                    (void *)meta_request,
-                    aws_error_name(error_code));
-                ++meta_request->recv_file_direct_io_fallback_count;
-            }
-            aws_reset_error();
+        if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body) ==
+            AWS_OP_SUCCESS) {
+            /* We succeed. Early out. */
+            return AWS_OP_SUCCESS;
         }
+        /**
+         * Failed direct io write, fallback.
+         * Note: the flag for try direct io stays. Since the previous checks makes the direct io is EXPECTED to success,
+         * unless corner cases here, eg: last chunk that is not align with page size.
+         */
+        if (meta_request->recv_file_direct_io_fallback_count == 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Failed writing to file with O_DIRECT. aws-error:%s. Fallback.",
+                (void *)meta_request,
+                aws_error_name(aws_last_error()));
+        }
+        ++meta_request->recv_file_direct_io_fallback_count;
+        aws_reset_error();
 
         /* Buffered fallback for unaligned data. recv_file is already open from init.
          * Need to seek because O_DIRECT path doesn't update FILE* position. */
         if (aws_fseek(meta_request->recv_file, (int64_t)file_offset, SEEK_SET) != AWS_OP_SUCCESS) {
-            return aws_last_error();
+            return AWS_OP_ERR;
         }
-        s_buffered_write_to_recv_file(meta_request, body, &error_code);
-        return error_code;
+        /* Fallback to buffered write */
     }
 
     /* Regular FILE* path — no seek needed, events arrive in order. */
-    s_buffered_write_to_recv_file(meta_request, body, &error_code);
-    return error_code;
+    return s_buffered_write_to_recv_file(meta_request, body);
 }
 
 /* Deliver response body to the appropriate sink: file (O_DIRECT or buffered) or user callback. */
@@ -2573,10 +2573,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
-    } else if (
-        meta_request->recv_file_direct_io && finish_result.error_code && meta_request->recv_file_delete_on_failure) {
-        /* O_DIRECT path has no FILE* to close, but still honor delete-on-failure */
-        aws_file_delete(meta_request->recv_filepath);
     }
 
     while (!aws_linked_list_empty(&release_request_list)) {

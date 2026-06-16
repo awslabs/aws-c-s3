@@ -1845,8 +1845,8 @@ static int s_test_s3_get_object_file_path_direct_io_append_unaligned_fallback(
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
-    /* At least one fallback occurred at init (unaligned existing file size). */
-    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count >= 1);
+    /* one fallback occurred at init (unaligned existing file size). */
+    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count == 1);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     aws_s3_client_release(client);
@@ -1898,7 +1898,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
-    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count >= 1);
+    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count == 1);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     aws_s3_client_release(client);
@@ -2058,7 +2058,7 @@ static int s_test_s3_get_object_file_path_direct_io_unaligned_part_size_fallback
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
     /* Init-time fallback because part_size is not page-aligned */
-    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count >= 1);
+    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count == 1);
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     aws_s3_client_release(client);
