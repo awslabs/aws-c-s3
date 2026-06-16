@@ -9363,9 +9363,9 @@ static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_
     struct aws_s3_meta_request_test_results test_results;
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
-    /* Hint is 5MB, object is 10MB — hint is wrong (object is bigger), but the first request buffer
-     * reservation should still use the hint value, not part_size. */
-    uint64_t object_size_hint = MB_TO_BYTES(5);
+    /* Hint exactly matches the object size. The first request buffer reservation should be sized to
+     * the hint (10MB - 1), not the full part_size (20MB - 1). */
+    uint64_t object_size_hint = MB_TO_BYTES(10);
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -9381,13 +9381,13 @@ static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
 
-    /* The first request (cancelled because object is larger than hint) should have
-     * part_range_end == object_size_hint - 1, not part_size - 1. It will be in the all-metrics list
-     * because it was cancelled (non-zero error), not in succeed_metrics. */
+    /* The first (and only) request should have part_range_end == object_size_hint - 1, not part_size - 1.
+     * Without the fix, this would be part_size - 1 (20MB - 1 = 20971519). */
     uint64_t first_range_end = 0;
     struct aws_s3_request_metrics *first_metrics = NULL;
-    ASSERT_TRUE(aws_array_list_length(&test_results.synced_data.metrics) > 0);
-    ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.metrics, (void **)&first_metrics, 0));
+    ASSERT_TRUE(aws_array_list_length(&test_results.synced_data.succeed_metrics) > 0);
+    ASSERT_SUCCESS(
+        aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&first_metrics, 0));
     aws_s3_request_metrics_get_part_range_end(first_metrics, &first_range_end);
     ASSERT_UINT_EQUALS(object_size_hint - 1, first_range_end);
 
