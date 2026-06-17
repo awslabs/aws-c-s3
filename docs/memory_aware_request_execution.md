@@ -55,7 +55,9 @@ One complication is "forced" buffers. A forced buffer is one that
 comes from primary or secondary storage as usual, but it is allowed to exceed
 the memory limit. Forced buffers are only used when waiting for a normal ticket
 reservation could cause deadlock. (At time of writing, they're only used for
-async-writes)
+async-writes.) A custom buffer pool may instead *defer* such a reservation, returning a
+pending future it completes later when memory frees; see the `can_block` contract in
+`s3_buffer_pool.h`.
 
 ### Scheduling
 Running out of memory is a terminal condition within CRT and in general its not
