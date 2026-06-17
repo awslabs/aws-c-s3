@@ -40,6 +40,9 @@ struct aws_s3_auto_ranged_get {
 
     uint64_t object_size_hint;
     bool object_size_hint_available;
+    /* Set when a hint-based PART_NUMBER_1 request was cancelled because the actual content was larger than the hint.
+     * Causes the next PART_NUMBER_1 attempt to use a full part_size buffer instead of the (wrong) hint size. */
+    bool object_size_hint_proven_wrong;
 
     /* Members to only be used when the mutex in the base type is locked. */
     struct {
