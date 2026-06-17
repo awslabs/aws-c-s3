@@ -2627,13 +2627,6 @@ reset_connection:
         connection->retry_token = NULL;
     }
 
-    /* If we weren't successful, and we're here, that means this failure is not eligible for a retry. So finish the
-     * request, and close our HTTP connection. */
-    if (finish_code != AWS_S3_CONNECTION_FINISH_CODE_SUCCESS) {
-        if (connection->http_connection != NULL) {
-            aws_http_connection_close(connection->http_connection);
-        }
-    }
     aws_atomic_fetch_sub(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_sub(&client->stats.num_requests_network_io[meta_request->type], 1);
 
