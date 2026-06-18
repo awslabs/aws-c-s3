@@ -267,15 +267,14 @@ static bool s_s3_auto_ranged_get_update(
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
                                 AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
                         /* Reserve only as much buffer as the hint suggests, capped at part_size.
-                         * If the hint is absent, zero, or proven wrong by a prior cancelled attempt,
-                         * fall back to the full part_size reservation. If the hint turns out to be
-                         * wrong, the cancellation in s_s3_meta_request_headers_block_done fires before
-                         * the body arrives; the retry path sets object_size_hint_proven_wrong so we use
-                         * a full-sized buffer on the next attempt. */
+                         * If the hint is absent or zero, fall back to the full part_size reservation.
+                         * If the hint turns out to be too small, the cancellation in
+                         * s_s3_meta_request_headers_block_done fires before the body arrives, and the
+                         * mismatch handling below keeps the discovered size and fetches the data as
+                         * ranged gets instead of re-issuing a partNumber request. */
                         request->part_range_start = 0;
                         request->part_range_end =
-                            (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0 &&
-                             !auto_ranged_get->object_size_hint_proven_wrong)
+                            (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0)
                                 ? aws_min_u64(auto_ranged_get->object_size_hint, meta_request->part_size) - 1
                                 : meta_request->part_size - 1;
                         ++auto_ranged_get->synced_data.num_parts_requested;
@@ -970,7 +969,11 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
-            if (!first_part_size_mismatch && first_part_size) {
+            if (first_part_size) {
+                /* Record the discovered first-part size. On a partNumber size mismatch this is the
+                 * actual stored part size parsed from the cancelled response's headers; keeping it
+                 * means the recovery ranged gets align to the stored part boundaries (so per-part
+                 * checksum validation still works) without re-issuing a partNumber request. */
                 auto_ranged_get->synced_data.first_part_size = first_part_size;
             }
             if (auto_ranged_get->synced_data.object_range_empty == 0) {
@@ -990,19 +993,13 @@ update_synced_data:
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
                 if (first_part_size_mismatch && found_object_size) {
-                    if (first_part_size <= meta_request->part_size) {
-                        /* The buffer was undersized because the object_size_hint was smaller than the
-                         * actual content_length, but the content still fits within part_size. Mark the
-                         * hint as proven wrong and re-enter discovery so GET_OBJECT_WITH_PART_NUMBER_1
-                         * is retried with a full part_size buffer. This preserves per-part checksum
-                         * validation, which ranged-gets cannot provide for multipart objects. */
-                        auto_ranged_get->object_size_hint_proven_wrong = true;
-                        auto_ranged_get->synced_data.object_range_known = false;
-                        /* Free the etag stored from the cancelled attempt; it will be re-acquired on retry. */
-                        aws_string_destroy(auto_ranged_get->etag);
-                        auto_ranged_get->etag = NULL;
-                    }
-                    /* Reset to retry. */
+                    /* The hint-sized buffer was too small to hold the first part, so the partNumber
+                     * request was cancelled before its body arrived. We already parsed the object size
+                     * and the actual stored part size (first_part_size) from the cancelled response's
+                     * headers, so we keep that discovered range and fetch the data as ranged gets. The
+                     * recovery ranged gets align to the stored part boundaries (part 1 covers
+                     * [0, first_part_size - 1]), so per-part checksum validation still works without
+                     * re-issuing a second partNumber request. */
                     auto_ranged_get->synced_data.num_parts_requested = 0;
                     break;
                 }
