@@ -757,7 +757,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
-    bool first_part_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+    bool first_part_buffer_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE);
     bool empty_file_error = false;
 
     if (request->discovers_object_size) {
@@ -777,7 +777,7 @@ static void s_s3_auto_ranged_get_request_finished(
             goto update_synced_data;
         }
         /* Always extract ETag header for part size estimation */
-        if (!request_failed || first_part_size_mismatch) {
+        if (!request_failed || first_part_buffer_size_mismatch) {
             struct aws_byte_cursor etag_header_value;
             AWS_ASSERT(auto_ranged_get->etag == NULL);
             if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value) ==
@@ -992,7 +992,7 @@ update_synced_data:
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
-                if (first_part_size_mismatch && found_object_size) {
+                if (first_part_buffer_size_mismatch && found_object_size) {
                     /* The hint-sized buffer was too small to hold the first part, so the partNumber
                      * request was cancelled before its body arrived. We already parsed the object size
                      * and the actual stored part size (first_part_size) from the cancelled response's
