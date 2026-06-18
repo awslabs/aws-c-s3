@@ -9414,7 +9414,7 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     /* part_size smaller than the object forces a multi-part ranged download once the size is known. */
-    size_t part_size = MB_TO_BYTES(4);
+    size_t part_size = MB_TO_BYTES(12);
     struct aws_s3_tester_client_options client_options = {
         .part_size = part_size,
     };
@@ -9425,9 +9425,9 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
     struct aws_s3_meta_request_test_results test_results;
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
-    /* Hint of 1 byte is far smaller than the 10MB object, so the PART_NUMBER_1 buffer (sized to the hint)
+    /* Hint of 1 byte smaller than the 10MB object, so the PART_NUMBER_1 buffer (sized to the hint)
      * cannot hold the first part and the request is cancelled. */
-    uint64_t object_size_hint = 1;
+    uint64_t object_size_hint = 10239;
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
