@@ -757,7 +757,8 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
-    bool first_part_buffer_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+    bool first_part_buffer_size_mismatch =
+        (error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE);
     bool empty_file_error = false;
 
     if (request->discovers_object_size) {
