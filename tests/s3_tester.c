@@ -581,7 +581,8 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
-    /* We don't need to release the metrics from succeed/fail lists, since they're already released from the main list. */
+    /* We don't need to release the metrics from succeed/fail lists, since they're already released from the main list.
+     */
     aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
     aws_array_list_clean_up(&test_meta_request->synced_data.fail_metrics);
 
