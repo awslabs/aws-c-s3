@@ -9427,7 +9427,7 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
 
     /* Hint of 1 byte smaller than the 10MB object, so the PART_NUMBER_1 buffer (sized to the hint)
      * cannot hold the first part and the request is cancelled. */
-    uint64_t object_size_hint = 10239;
+    uint64_t object_size_hint = 1024 * 1024 * 10 - 1;
 
     struct aws_s3_tester_meta_request_options get_options = {
         .allocator = allocator,
@@ -9443,42 +9443,35 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
 
-    /* No succeeding request should be a partNumber request: the cancelled PART_NUMBER_1 fails, so it is
-     * excluded from succeed_metrics, and the recovery must use ranged gets only. A regression would
-     * re-issue a second (succeeding) partNumber=1 request, which would appear here. */
-    struct aws_byte_cursor part_number_query = aws_byte_cursor_from_c_str("partNumber");
-    size_t num_succeeded = aws_array_list_length(&test_results.synced_data.succeed_metrics);
-    ASSERT_TRUE(num_succeeded > 0);
-    for (size_t i = 0; i < num_succeeded; ++i) {
+    /* Exactly 1 failed request: the cancelled PART_NUMBER_1 whose buffer was too small. */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&test_results.synced_data.fail_metrics));
+    {
         struct aws_s3_request_metrics *metrics = NULL;
-        ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&metrics, i));
-
+        ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.fail_metrics, (void **)&metrics, 0));
         enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
         aws_s3_request_metrics_get_request_type(metrics, &request_type);
         ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_GET_OBJECT, request_type);
-
         const struct aws_string *path_query = NULL;
         aws_s3_request_metrics_get_request_path_query(metrics, &path_query);
         ASSERT_NOT_NULL(path_query);
         struct aws_byte_cursor path_cursor = aws_byte_cursor_from_string(path_query);
+        struct aws_byte_cursor part_number_query = aws_byte_cursor_from_c_str("partNumber");
         struct aws_byte_cursor found = {0};
-        ASSERT_TRUE(aws_byte_cursor_find_exact(&path_cursor, &part_number_query, &found) != AWS_OP_SUCCESS);
+        ASSERT_SUCCESS(aws_byte_cursor_find_exact(&path_cursor, &part_number_query, &found));
     }
 
-    /* Exactly one succeeding ranged get must cover offset 0 (the first part of the object). Parts
-     * download in parallel and metrics are recorded in completion order, so we scan rather than
-     * assume the part covering offset 0 finished first. */
-    size_t num_starting_at_zero = 0;
-    for (size_t i = 0; i < num_succeeded; ++i) {
+    /* Exactly 1 succeeding ranged GET covering the whole 10MB object (part_size=12MB > object). */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&test_results.synced_data.succeed_metrics));
+    {
         struct aws_s3_request_metrics *metrics = NULL;
-        ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&metrics, i));
-        uint64_t range_start = 0;
+        ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&metrics, 0));
+        enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+        aws_s3_request_metrics_get_request_type(metrics, &request_type);
+        ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_GET_OBJECT, request_type);
+        uint64_t range_start = UINT64_MAX;
         aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
-        if (range_start == 0) {
-            ++num_starting_at_zero;
-        }
+        ASSERT_UINT_EQUALS(0, range_start);
     }
-    ASSERT_UINT_EQUALS(1, num_starting_at_zero);
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
