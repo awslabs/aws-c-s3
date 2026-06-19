@@ -7174,6 +7174,209 @@ static int s_test_s3_put_fail_object_invalid_send_filepath(struct aws_allocator 
     return 0;
 }
 
+static int s_assert_make_meta_request_fails(
+    struct aws_allocator *allocator,
+    struct aws_s3_meta_request_options *options,
+    int expected_error) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options;
+    AWS_ZERO_STRUCT(client_options);
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, options);
+    ASSERT_NULL(meta_request);
+    ASSERT_INT_EQUALS(expected_error, aws_last_error());
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_body_fail_null_ptr, s_test_s3_request_body_fail_null_ptr)
+static int s_test_s3_request_body_fail_null_ptr(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, 1024 /*content_length*/, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("PutObject"),
+        .message = message,
+        .request_body = {.ptr = NULL, .len = 1024},
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    aws_http_message_release(message);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_body_fail_non_default_type, s_test_s3_request_body_fail_non_default_type)
+static int s_test_s3_request_body_fail_non_default_type(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+    struct aws_byte_cursor body = aws_byte_cursor_from_c_str("hello world");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, body.len, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .message = message,
+        .request_body = body,
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    aws_http_message_release(message);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_body_fail_content_length_mismatch, s_test_s3_request_body_fail_content_length_mismatch)
+static int s_test_s3_request_body_fail_content_length_mismatch(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+    struct aws_byte_cursor body = aws_byte_cursor_from_c_str("hello world");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, body.len + 1 /*content_length*/, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("PutObject"),
+        .message = message,
+        .request_body = body,
+    };
+    ASSERT_SUCCESS(
+        s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH));
+
+    aws_http_message_release(message);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_request_body_fail_with_send_filepath, s_test_s3_request_body_fail_with_send_filepath)
+static int s_test_s3_request_body_fail_with_send_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Write a small file to disk so send_filepath alone would be valid. */
+    struct aws_byte_cursor file_contents = aws_byte_cursor_from_c_str("hello world");
+    struct aws_input_stream *file_stream = aws_input_stream_new_from_cursor(allocator, &file_contents);
+    ASSERT_NOT_NULL(file_stream);
+    struct aws_string *filepath_str =
+        aws_s3_tester_create_file(allocator, aws_byte_cursor_from_c_str("request_body_conflict"), file_stream);
+    ASSERT_NOT_NULL(filepath_str);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, file_contents.len, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("PutObject"),
+        .message = message,
+        .send_filepath = aws_byte_cursor_from_string(filepath_str),
+        .request_body = file_contents,
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    aws_http_message_release(message);
+    aws_input_stream_release(file_stream);
+    aws_file_delete(filepath_str);
+    aws_string_destroy(filepath_str);
+    return 0;
+}
+
+/* Test that a zero-length `request_body` with a non-NULL pointer (a caller opting in to an empty body) is still
+ * validated: it must be rejected on a non-DEFAULT meta request type, just like a non-empty request_body. */
+AWS_TEST_CASE(
+    test_s3_request_body_zero_length_fail_non_default_type,
+    s_test_s3_request_body_zero_length_fail_non_default_type)
+static int s_test_s3_request_body_zero_length_fail_non_default_type(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Use a GET meta request: it needs no body source, so the only thing that can reject this is the
+     * request_body DEFAULT-only validation. */
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_name, object_key);
+    ASSERT_NOT_NULL(message);
+
+    uint8_t body_storage[1];
+    struct aws_byte_cursor empty_body = {.ptr = body_storage, .len = 0};
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .request_body = empty_body,
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    aws_http_message_release(message);
+    return 0;
+}
+
+/* Test that a zero-length `request_body` with a non-NULL pointer counts as a body source, so combining it with
+ * another body source (send_filepath) is rejected. */
+AWS_TEST_CASE(
+    test_s3_request_body_zero_length_fail_with_send_filepath,
+    s_test_s3_request_body_zero_length_fail_with_send_filepath)
+static int s_test_s3_request_body_zero_length_fail_with_send_filepath(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Write a small file to disk so send_filepath alone would be valid. */
+    struct aws_byte_cursor file_contents = aws_byte_cursor_from_c_str("hello world");
+    struct aws_input_stream *file_stream = aws_input_stream_new_from_cursor(allocator, &file_contents);
+    ASSERT_NOT_NULL(file_stream);
+    struct aws_string *filepath_str =
+        aws_s3_tester_create_file(allocator, aws_byte_cursor_from_c_str("request_body_zero_len_conflict"), file_stream);
+    ASSERT_NOT_NULL(filepath_str);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Content-Length 0 matches the zero-length request_body, so the only error is the dual body source (not a
+     * content-length mismatch). */
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_name, g_test_body_content_type, object_key, 0 /*content_length*/, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    /* Non-NULL pointer, zero length: still a body source, so this conflicts with send_filepath. */
+    uint8_t body_storage[1];
+    struct aws_byte_cursor empty_body = {.ptr = body_storage, .len = 0};
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("PutObject"),
+        .message = message,
+        .send_filepath = aws_byte_cursor_from_string(filepath_str),
+        .request_body = empty_body,
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    aws_http_message_release(message);
+    aws_input_stream_release(file_stream);
+    aws_file_delete(filepath_str);
+    aws_string_destroy(filepath_str);
+    return 0;
+}
+
 /* Test that the parallel read stream failed to send read the second part. */
 AWS_TEST_CASE(test_s3_put_fail_object_bad_parallel_read_stream, s_test_s3_put_fail_object_bad_parallel_read_stream)
 static int s_test_s3_put_fail_object_bad_parallel_read_stream(struct aws_allocator *allocator, void *ctx) {
