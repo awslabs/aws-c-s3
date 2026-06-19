@@ -578,6 +578,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
+        /* pending buffer acquisition will keep meta request alive from destroying.  */
         AWS_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket_future == NULL);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
@@ -2752,6 +2753,7 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 meta_request->synced_data.async_write.waker_user_data = user_data;
                 result.is_pending = true;
 
+                /* Keep the meta request alive until the ticket future callback invokes. */
                 aws_s3_meta_request_acquire(meta_request);
                 aws_future_s3_buffer_ticket_register_event_loop_callback(
                     buffered_ticket_future,
