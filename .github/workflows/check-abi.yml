@@ -12,7 +12,7 @@ concurrency:
 env:
   # Minimum builder version that ships AbiCheck. Update when a new release tags it.
   BUILDER_VERSION: abi-check
-  BUILDER_SOURCE: releases
+  BUILDER_SOURCE: channels
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
   RUN: ${{ github.run_id }}-${{ github.run_number }}
