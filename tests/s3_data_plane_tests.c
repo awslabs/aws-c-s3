@@ -4774,9 +4774,10 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
-    get_options.finish_callback = s_s3_test_validate_checksum;
+    /* Wrong hint causes buffer-sized ranged gets that don't align to S3 part boundaries, so no checksum. */
+    get_options.finish_callback = s_s3_test_no_validate_checksum;
 
-    /* will do GetPart first */
+    /* will do GetPart, cancel and do ranged Gets that don't align to part boundaries */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
