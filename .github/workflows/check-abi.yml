@@ -3,19 +3,13 @@ name: Check ABI compliance
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  workflow_dispatch:
 
 concurrency:
-  group: check-abi-${{ github.event.pull_request.number || github.ref }}
+  group: check-abi-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
-  # Minimum builder version that ships AbiCheck. Update when a new release tags it.
-  BUILDER_VERSION: abi-check
-  BUILDER_SOURCE: channels
-  BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
-  RUN: ${{ github.run_id }}-${{ github.run_number }}
   CRT_CI_ROLE: ${{ secrets.CRT_CI_ROLE_ARN }}
   AWS_DEFAULT_REGION: us-east-1
 
@@ -38,8 +32,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: ABI check
-        run: |
-          python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
-          chmod a+x builder
-          python builder run AbiCheck --lib-name "${{ env.PACKAGE_NAME }}"
+      - name: Check ABI
+        # Pointing at the fork branch while the builder change is in review.
+        # Switch to awslabs/aws-crt-builder/.github/actions/check-abi@main once merged.
+        uses: azkrishpy/aws-crt-builder/.github/actions/check-abi@abi-check
+        with:
+          lib-name: ${{ env.PACKAGE_NAME }}
+          builder-version: abi-check
+          builder-source: channels
