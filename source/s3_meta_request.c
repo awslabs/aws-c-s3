@@ -2125,11 +2125,7 @@ static int s_write_body_to_file(
             /* We succeed. Early out. */
             return AWS_OP_SUCCESS;
         }
-        /**
-         * Failed direct io write, fallback.
-         * Note: the flag for try direct io stays. Since the previous checks makes the direct io is EXPECTED to success,
-         * unless corner cases here, eg: last chunk that is not align with page size.
-         */
+
         if (meta_request->recv_file_direct_io_fallback_count == 0) {
             AWS_LOGF_WARN(
                 AWS_LS_S3_META_REQUEST,
@@ -2139,6 +2135,8 @@ static int s_write_body_to_file(
         }
         ++meta_request->recv_file_direct_io_fallback_count;
         aws_reset_error();
+        /* Reset flag to stop trying it. */
+        meta_request->recv_file_direct_io = false;
 
         /* Buffered fallback for unaligned data. recv_file is already open from init.
          * Need to seek because O_DIRECT path doesn't update FILE* position. */
