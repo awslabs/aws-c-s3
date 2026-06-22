@@ -578,6 +578,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
+        /* pending buffer acquisition will keep meta request alive from destroying.  */
+        AWS_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket_future == NULL);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
 
@@ -2385,7 +2387,15 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         }
 
         /* Clean out any pending async-write future */
-        if (meta_request->synced_data.async_write.waker != NULL) {
+        if (meta_request->synced_data.async_write.buffered_data_ticket_future != NULL) {
+            /* We're waiting on the buffer pool to fulfill a (deferred) ticket reservation.
+             * Error it out so its completion callback fires; that callback owns invoking the
+             * waker and cleaning up the future (and releasing the ref it holds on the meta request).
+             * NOTE: set_error schedules the callback as an event-loop task (it was registered with
+             * register_event_loop_callback), so this does NOT run the callback synchronously here. */
+            aws_future_s3_buffer_ticket_set_error(
+                meta_request->synced_data.async_write.buffered_data_ticket_future, AWS_ERROR_S3_CANCELED);
+        } else if (meta_request->synced_data.async_write.waker != NULL) {
             pending_async_write_waker = meta_request->synced_data.async_write.waker;
             pending_async_write_waker_user_data = meta_request->synced_data.async_write.waker_user_data;
 
@@ -2563,6 +2573,86 @@ void aws_s3_meta_request_result_setup(
     result->error_code = error_code;
 }
 
+/* Completion callback for a deferred async-write buffer reservation.
+ * Runs on the meta request's io_event_loop thread. */
+static void s_s3_meta_request_on_async_write_buffer_reserved(void *user_data) {
+    struct aws_s3_meta_request *meta_request = user_data;
+    AWS_PRECONDITION(meta_request);
+
+    aws_simple_completion_callback *waker = NULL;
+    void *waker_user_data = NULL;
+    bool schedule_work = false;
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+
+        struct aws_future_s3_buffer_ticket *future = meta_request->synced_data.async_write.buffered_data_ticket_future;
+        AWS_FATAL_ASSERT(future != NULL);
+        meta_request->synced_data.async_write.buffered_data_ticket_future = NULL;
+
+        int error_code = aws_future_s3_buffer_ticket_get_error(future);
+        if (error_code == AWS_ERROR_SUCCESS && !aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+            /* Reservation granted. Claim the buffer so the resumed poll_write() can copy data into it. */
+            meta_request->synced_data.async_write.buffered_data_ticket =
+                aws_future_s3_buffer_ticket_get_result_by_move(future);
+            meta_request->synced_data.async_write.buffered_data =
+                aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
+        } else if (error_code != AWS_ERROR_SUCCESS) {
+            /* Reservation failed. Terminate the meta request; the resumed poll_write() will report the
+             * failure to the caller. Kick the process-work loop so update() observes the finish result
+             * and drives the meta request to completion. */
+            if (error_code == AWS_ERROR_S3_CANCELED) {
+                AWS_LOGF_TRACE(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Async-write buffer reservation canceled; meta request already finishing.",
+                    (void *)meta_request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Failed to acquire buffer for async write, error %d (%s).",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code));
+            }
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+            schedule_work = true;
+        } else {
+            /* Reservation was granted, but the meta request already finished.
+             * Nothing to claim; releasing the future below returns the granted ticket to the pool. */
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Buffer reservation for async write fulfilled after meta request finished; "
+                "returning buffer to pool.",
+                (void *)meta_request);
+        }
+
+        aws_future_s3_buffer_ticket_release(future);
+
+        waker = meta_request->synced_data.async_write.waker;
+        meta_request->synced_data.async_write.waker = NULL;
+        waker_user_data = meta_request->synced_data.async_write.waker_user_data;
+        meta_request->synced_data.async_write.waker_user_data = NULL;
+
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
+
+    if (schedule_work) {
+        aws_s3_client_schedule_process_work(meta_request->client);
+    }
+
+    if (waker != NULL) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Invoking write waker, buffer reservation fulfilled. Ready for more data",
+            (void *)meta_request);
+        waker(waker_user_data);
+    }
+
+    aws_s3_meta_request_release(meta_request);
+}
+
 struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
     struct aws_s3_meta_request *meta_request,
     struct aws_byte_cursor data,
@@ -2625,9 +2715,10 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
 
             struct aws_future_s3_buffer_ticket *buffered_ticket_future;
-            /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
-             * waited for a normal ticket reservation, respecting the pool's memory limit.
-             * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
+            /* can_block=true: not granting this right away can block the meta request (deadlock risk
+             * if we waited on a normal reservation - see test_s3_many_async_uploads_without_data, and
+             * the can_block docs in s3_buffer_pool.h). The default pool grants synchronously (forced
+             * buffer); a custom pool may defer, which we handle below. */
 
             struct aws_s3_buffer_pool_reserve_meta meta = {
                 .size = meta_request->part_size,
@@ -2645,23 +2736,35 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 } else {
                     meta_request->synced_data.async_write.buffered_data_ticket =
                         aws_future_s3_buffer_ticket_get_result_by_move(buffered_ticket_future);
-
-                    aws_future_s3_buffer_ticket_release(buffered_ticket_future);
-
                     meta_request->synced_data.async_write.buffered_data =
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
-            } else {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
-                    (void *)meta_request);
-                illegal_usage_terminate_meta_request = true;
                 aws_future_s3_buffer_ticket_release(buffered_ticket_future);
+            } else {
+                /* The pool deferred the reservation. Ownership of buffered_ticket_future moves into
+                 * the meta request; the completion callback resumes poll_write() (or, if the meta
+                 * request finishes first, finish_default() errors the future) and releases it. */
+                AWS_LOGF_TRACE(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: write() pending, buffer reservation deferred by pool, waker registered ...",
+                    (void *)meta_request);
+
+                meta_request->synced_data.async_write.buffered_data_ticket_future = buffered_ticket_future;
+                meta_request->synced_data.async_write.waker = waker;
+                meta_request->synced_data.async_write.waker_user_data = user_data;
+                result.is_pending = true;
+
+                /* Keep the meta request alive until the ticket future callback invokes. */
+                aws_s3_meta_request_acquire(meta_request);
+                aws_future_s3_buffer_ticket_register_event_loop_callback(
+                    buffered_ticket_future,
+                    meta_request->io_event_loop,
+                    s_s3_meta_request_on_async_write_buffer_reserved,
+                    meta_request);
             }
         }
 
-        if (!illegal_usage_terminate_meta_request) {
+        if (!illegal_usage_terminate_meta_request && !result.is_pending) {
             /* Copy as much data as we can into the buffer */
             struct aws_byte_cursor processed_data =
                 aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
