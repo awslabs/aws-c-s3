@@ -9472,6 +9472,9 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
         uint64_t range_start = UINT64_MAX;
         aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
         ASSERT_UINT_EQUALS(0, range_start);
+        uint64_t range_end = 0;
+        aws_s3_request_metrics_get_part_range_end(metrics, &range_end);
+        ASSERT_UINT_EQUALS((1024 * 1024 * 10) - 1, range_end);
     }
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
