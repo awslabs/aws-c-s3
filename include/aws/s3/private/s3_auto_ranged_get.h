@@ -77,6 +77,11 @@ struct aws_s3_auto_ranged_get {
 
     uint32_t initial_message_has_range_header : 1;
     uint32_t initial_message_has_if_match_header : 1;
+
+    /* If true, parts will be fetched in a shuffled order instead of sequentially. */
+    bool randomize_part_order;
+    /* Shuffled array of part numbers [1..total_num_parts], allocated after total_num_parts is known. */
+    uint32_t *shuffled_part_order;
 };
 
 AWS_EXTERN_C_BEGIN
@@ -88,6 +93,13 @@ AWS_S3_API struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     size_t part_size,
     bool part_size_set,
     const struct aws_s3_meta_request_options *options);
+
+/**
+ * Shuffle a uint32_t array in place using Fisher-Yates.
+ * Returns AWS_OP_SUCCESS, or an error if the random source is unavailable.
+ */
+AWS_S3_API
+int aws_s3_shuffle_uint32_array(uint32_t *array, uint32_t count);
 
 AWS_EXTERN_C_END
 

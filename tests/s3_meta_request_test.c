@@ -53,6 +53,55 @@ TEST_CASE(meta_request_auto_ranged_get_new_error_handling) {
     return AWS_OP_SUCCESS;
 }
 
+TEST_CASE(meta_request_auto_ranged_get_randomize_part_order) {
+    (void)ctx;
+    (void)allocator;
+
+    /* Test: shuffle produces a valid permutation of 20 elements */
+    uint32_t array[20];
+    for (uint32_t i = 0; i < 20; ++i) {
+        array[i] = i + 1;
+    }
+
+    ASSERT_SUCCESS(aws_s3_shuffle_uint32_array(array, 20));
+
+    /* Verify all values 1..20 present exactly once */
+    bool seen[21] = {false};
+    bool is_sequential = true;
+    for (uint32_t i = 0; i < 20; ++i) {
+        ASSERT_TRUE(array[i] >= 1 && array[i] <= 20);
+        ASSERT_FALSE(seen[array[i]]);
+        seen[array[i]] = true;
+        if (array[i] != i + 1) {
+            is_sequential = false;
+        }
+    }
+    /* With 20 elements, probability of identity permutation is 1/20! ~ 0 */
+    ASSERT_FALSE(is_sequential);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(meta_request_shuffle_edge_cases) {
+    (void)ctx;
+    (void)allocator;
+
+    /* Empty array: no-op */
+    ASSERT_SUCCESS(aws_s3_shuffle_uint32_array(NULL, 0));
+
+    /* Single element: unchanged */
+    uint32_t single[] = {42};
+    ASSERT_SUCCESS(aws_s3_shuffle_uint32_array(single, 1));
+    ASSERT_UINT_EQUALS(42, single[0]);
+
+    /* Two elements: valid swap or no swap */
+    uint32_t pair[] = {1, 2};
+    ASSERT_SUCCESS(aws_s3_shuffle_uint32_array(pair, 2));
+    ASSERT_TRUE((pair[0] == 1 && pair[1] == 2) || (pair[0] == 2 && pair[1] == 1));
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(meta_request_auto_ranged_put_new_error_handling) {
     (void)ctx;
 
