@@ -4,12 +4,23 @@
  */
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_bitmap.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
 #include <inttypes.h>
+
+#ifdef _WIN32
+#    include <io.h>
+#    include <sys/stat.h>
+#    define fsync(fd) _commit(fd)
+#    define fileno(f) _fileno(f)
+#else
+#    include <sys/stat.h>
+#    include <unistd.h>
+#endif
 
 /* Dont use buffer pool when we know response size, and its below this number,
  * i.e. when user provides explicit range that is small, ex. range = 1-100.
@@ -33,6 +44,13 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static int s_s3_auto_ranged_get_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data);
+
+static void s_s3_auto_ranged_get_finish(struct aws_s3_meta_request *meta_request);
+
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -41,7 +59,8 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_get_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
-    .finish = aws_s3_meta_request_finish_default,
+    .finish = s_s3_auto_ranged_get_finish,
+    .pause_async = s_s3_auto_ranged_get_pause_async,
 };
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
@@ -55,6 +74,53 @@ static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_
     }
 
     return AWS_HTTP_STATUS_CODE_200_OK;
+}
+
+/**
+ * Initialize auto_ranged_get state from a resume token.
+ */
+static int s_s3_auto_ranged_get_init_from_resume_token(
+    struct aws_allocator *allocator,
+    struct aws_s3_auto_ranged_get *auto_ranged_get,
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+
+    auto_ranged_get->resume_token =
+        aws_s3_meta_request_resume_token_acquire((struct aws_s3_meta_request_resume_token *)resume_token);
+
+    /* part_size is already set correctly via init_base */
+    auto_ranged_get->synced_data.first_part_size = resume_token->first_part_size;
+    auto_ranged_get->synced_data.object_range_start = resume_token->object_range_start;
+    auto_ranged_get->synced_data.object_range_end = resume_token->object_range_end;
+    auto_ranged_get->synced_data.total_num_parts = (uint32_t)resume_token->total_num_parts;
+    auto_ranged_get->synced_data.object_range_known = true;
+
+    /* Set ETag from token for If-Match */
+    if (resume_token->etag) {
+        auto_ranged_get->etag = aws_string_clone_or_reuse(allocator, resume_token->etag);
+    }
+
+    /* Set Last-Modified from token for If-Unmodified-Since */
+    if (resume_token->s3_object_last_modified) {
+        auto_ranged_get->s3_object_last_modified =
+            aws_string_clone_or_reuse(allocator, resume_token->s3_object_last_modified);
+    }
+
+    /* Copy bitmap of completed parts directly from token */
+    aws_byte_buf_init_copy(&auto_ranged_get->delivered_parts_bitmap, allocator, &resume_token->completed_parts_bitmap);
+
+    /* Set counters */
+    uint32_t num_completed = (uint32_t)resume_token->num_parts_completed;
+    auto_ranged_get->synced_data.num_parts_completed = num_completed;
+    auto_ranged_get->synced_data.num_parts_successful = num_completed;
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Resuming download. %u out of %zu parts already completed.",
+        (void *)&auto_ranged_get->base,
+        num_completed,
+        resume_token->total_num_parts);
+
+    return AWS_OP_SUCCESS;
 }
 
 /* Allocate a new auto-ranged-get meta request. */
@@ -72,11 +138,38 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_s3_auto_ranged_get *auto_ranged_get =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
 
+    /* If resuming from a token, gather all info from it before init_base */
+    size_t effective_part_size = part_size;
+    if (options->resume_token != NULL) {
+        if (options->resume_token->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Resume token type mismatch. Expected GET_OBJECT.",
+                (void *)auto_ranged_get);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            aws_mem_release(allocator, auto_ranged_get);
+            return NULL;
+        }
+        if (s_s3_auto_ranged_get_init_from_resume_token(allocator, auto_ranged_get, options->resume_token)) {
+            aws_mem_release(allocator, auto_ranged_get);
+            return NULL;
+        }
+        effective_part_size = options->resume_token->part_size;
+        if (effective_part_size != part_size) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "Resume token part_size (%zu) differs from configured part_size (%zu). "
+                "Using token's part_size. This may affect buffer pool performance.",
+                effective_part_size,
+                part_size);
+        }
+    }
+
     /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
-            part_size,
+            effective_part_size,
             false,
             false,
             options,
@@ -114,11 +207,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
 
-    auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
+    if (options->resume_token == NULL) {
+        auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
+    }
     if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
     }
+
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
@@ -136,6 +232,9 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
+    aws_string_destroy(auto_ranged_get->s3_object_last_modified);
+    aws_s3_meta_request_resume_token_release(auto_ranged_get->resume_token);
+    aws_byte_buf_clean_up(&auto_ranged_get->delivered_parts_bitmap);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -359,11 +458,25 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
+                /* Find next part number that hasn't been completed yet.
+                 * TODO: This skip logic needs extensive testing — especially around interactions
+                 * with num_parts_requested/num_parts_completed counters and wind-down detection.
+                 * Edge cases: all remaining parts completed, gaps at start/end, single gap, etc. */
+                uint32_t next_part = auto_ranged_get->synced_data.num_parts_requested + 1;
+                while (next_part <= auto_ranged_get->synced_data.total_num_parts &&
+                       aws_s3_bitmap_get(&auto_ranged_get->delivered_parts_bitmap, next_part)) {
+                    ++next_part;
+                    ++auto_ranged_get->synced_data.num_parts_requested;
+                }
+                if (next_part > auto_ranged_get->synced_data.total_num_parts) {
+                    goto has_work_remaining;
+                }
+
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
+                    next_part /*part_number*/,
                     AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
 
                 aws_s3_calculate_auto_ranged_get_part_range(
@@ -511,6 +624,14 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
             aws_http_message_get_headers(message),
             g_if_match_header_name,
             aws_byte_cursor_from_string(auto_ranged_get->etag));
+    }
+    /* When resuming, add If-Unmodified-Since from the stored last-modified time */
+    if (auto_ranged_get->resume_token != NULL && auto_ranged_get->s3_object_last_modified != NULL) {
+        struct aws_byte_cursor if_unmodified_since = aws_byte_cursor_from_c_str("If-Unmodified-Since");
+        aws_http_headers_set(
+            aws_http_message_get_headers(message),
+            if_unmodified_since,
+            aws_byte_cursor_from_string(auto_ranged_get->s3_object_last_modified));
     }
 
     aws_s3_request_setup_send_data(request, message);
@@ -791,6 +912,15 @@ static void s_s3_auto_ranged_get_request_finished(
                 error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
             }
+
+            /* Capture Last-Modified for resume token */
+            struct aws_byte_cursor last_modified_value;
+            struct aws_byte_cursor last_modified_name = aws_byte_cursor_from_c_str("Last-Modified");
+            if (aws_http_headers_get(request->send_data.response_headers, last_modified_name, &last_modified_value) ==
+                AWS_OP_SUCCESS) {
+                auto_ranged_get->s3_object_last_modified =
+                    aws_string_new_from_cursor(meta_request->allocator, &last_modified_value);
+            }
             /* Extract number of parts stored in S3 from ETag and calculate estimated part size */
             uint32_t num_parts = 0;
             if (aws_s3_extract_parts_from_etag(etag_header_value, &num_parts) == AWS_OP_SUCCESS && num_parts > 0) {
@@ -970,6 +1100,14 @@ update_synced_data:
                     auto_ranged_get->synced_data.first_part_size,
                     object_range_start,
                     object_range_end);
+
+                /* Init delivered_parts_bitmap if not already set from resume token */
+                if (auto_ranged_get->delivered_parts_bitmap.len == 0) {
+                    aws_s3_bitmap_init(
+                        &auto_ranged_get->delivered_parts_bitmap,
+                        meta_request->allocator,
+                        auto_ranged_get->synced_data.total_num_parts);
+                }
             }
         }
 
@@ -1013,6 +1151,9 @@ update_synced_data:
                         ++auto_ranged_get->synced_data.num_parts_checksum_validated;
                     }
                     ++auto_ranged_get->synced_data.num_parts_successful;
+
+                    /* Mark part as delivered in bitmap */
+                    aws_s3_bitmap_set(&auto_ranged_get->delivered_parts_bitmap, request->part_number);
 
                     /* Send progress_callback for delivery on io_event_loop thread */
                     if (meta_request->progress_callback != NULL) {
@@ -1067,4 +1208,133 @@ update_synced_data:
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+}
+
+static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_synced(
+    struct aws_s3_meta_request *meta_request) {
+
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
+    token->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+    token->part_size = meta_request->part_size;
+    token->first_part_size = (size_t)auto_ranged_get->synced_data.first_part_size;
+    token->total_num_parts = auto_ranged_get->synced_data.total_num_parts;
+    token->object_range_start = auto_ranged_get->synced_data.object_range_start;
+    token->object_range_end = auto_ranged_get->synced_data.object_range_end;
+    token->num_parts_completed = auto_ranged_get->synced_data.num_parts_successful;
+
+    if (auto_ranged_get->etag) {
+        token->etag = aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->etag);
+    }
+
+    if (auto_ranged_get->s3_object_last_modified) {
+        token->s3_object_last_modified =
+            aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
+    }
+
+    /* Copy the delivered_parts_bitmap directly into the token */
+    aws_byte_buf_init_copy(
+        &token->completed_parts_bitmap, meta_request->allocator, &auto_ranged_get->delivered_parts_bitmap);
+
+    return token;
+}
+
+/*
+ * Custom finish override for pause/resume support.
+ * Handles: fsync before fclose, building the resume token, and firing pause/error callbacks.
+ *
+ * Alternative considered: add a `build_resume_token` vtable function and move callback
+ * invocation into finish_default. That would reduce duplication when multiple types support
+ * pause_async, but makes finish_default more complex with type-specific conditionals.
+ * Revisit if PUT duplicates this pattern.
+ */
+static void s_s3_auto_ranged_get_finish(struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    bool is_paused = false;
+    bool is_error = false;
+    int error_code = AWS_ERROR_SUCCESS;
+    aws_s3_meta_request_pause_complete_fn *pause_callback = NULL;
+    void *pause_user_data = NULL;
+    struct aws_s3_meta_request_resume_token *token = NULL;
+
+    /* Single lock acquisition: read state and build token while holding lock */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (auto_ranged_get->synced_data.pause_requested) {
+        is_paused = true;
+        pause_callback = auto_ranged_get->synced_data.pause_complete_callback;
+        pause_user_data = auto_ranged_get->synced_data.pause_complete_user_data;
+    } else if (meta_request->synced_data.finish_result.error_code != AWS_ERROR_SUCCESS) {
+        is_error = true;
+        error_code = meta_request->synced_data.finish_result.error_code;
+    }
+
+    if (is_paused || (is_error && meta_request->on_error_resume_token)) {
+        token = s_build_download_resume_token_synced(meta_request);
+    }
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+
+    /* fsync outside lock — blocking I/O should not hold the lock */
+    if ((is_paused || is_error) && meta_request->recv_file) {
+        fflush(meta_request->recv_file);
+        fsync(fileno(meta_request->recv_file));
+    }
+
+    /* Capture file last-modified time after fsync ensures mtime is stable */
+    if (token != NULL && meta_request->recv_filepath) {
+        struct stat file_stat;
+        if (stat(aws_string_c_str(meta_request->recv_filepath), &file_stat) == 0) {
+            token->file_last_modified_epoch_secs = (int64_t)file_stat.st_mtime;
+        }
+    }
+
+    /* Fire callbacks outside lock */
+    if (is_error && meta_request->on_error_resume_token && token) {
+        meta_request->on_error_resume_token(meta_request, token, error_code, meta_request->user_data);
+    }
+    if (is_paused && pause_callback) {
+        pause_callback(meta_request, token, AWS_ERROR_SUCCESS, pause_user_data);
+    }
+
+    /* Call the default finish path (fclose, finish_callback, cleanup) */
+    aws_s3_meta_request_finish_default(meta_request);
+
+    aws_s3_meta_request_resume_token_release(token);
+}
+
+static int s_s3_auto_ranged_get_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data) {
+
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (auto_ranged_get->synced_data.pause_requested) {
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* Invoke callback immediately — pause already in progress */
+        on_complete(meta_request, NULL, AWS_ERROR_INVALID_STATE, user_data);
+        return AWS_OP_SUCCESS;
+    }
+
+    auto_ranged_get->synced_data.pause_requested = true;
+    auto_ranged_get->synced_data.pause_complete_callback = on_complete;
+    auto_ranged_get->synced_data.pause_complete_user_data = user_data;
+
+    /* Stop scheduling new work and cancel in-flight HTTP streams */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Schedule work processing so the update loop can wind down and finish */
+    aws_s3_client_schedule_process_work(meta_request->client);
+
+    return AWS_OP_SUCCESS;
 }

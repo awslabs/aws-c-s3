@@ -21,6 +21,9 @@ struct aws_s3_auto_ranged_get {
 
     struct aws_string *etag;
 
+    /* S3 Last-Modified header value, captured from discovery response for resume token */
+    struct aws_string *s3_object_last_modified;
+
     /* Estimated object stored part size based on ETag analysis */
     uint64_t estimated_object_stored_part_size;
     /* Number of parts stored in S3. We derive this from ETag, if ETag is not formatted as expected, this will be
@@ -73,10 +76,23 @@ struct aws_s3_auto_ranged_get {
         uint32_t head_object_sent : 1;
         uint32_t head_object_completed : 1;
         uint32_t read_window_warning_issued : 1;
+
+        /* Pause state */
+        uint32_t pause_requested : 1;
+        aws_s3_meta_request_pause_complete_fn *pause_complete_callback;
+        void *pause_complete_user_data;
     } synced_data;
 
     uint32_t initial_message_has_range_header : 1;
     uint32_t initial_message_has_if_match_header : 1;
+
+    /* Resume token for resuming a paused download */
+    struct aws_s3_meta_request_resume_token *resume_token;
+
+    /* Bitmap tracking which parts have been delivered. Bit N = part N is done.
+     * Pre-populated from resume token on resume. Updated as parts complete.
+     * Copied directly into the token on pause/error. */
+    struct aws_byte_buf delivered_parts_bitmap;
 };
 
 AWS_EXTERN_C_BEGIN

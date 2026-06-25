@@ -378,6 +378,7 @@ int aws_s3_meta_request_init_base(
     meta_request->body_callback = options->body_callback;
     meta_request->body_callback_ex = options->body_callback_ex;
     meta_request->finish_callback = options->finish_callback;
+    meta_request->on_error_resume_token = options->on_error_resume_token;
 
     /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
     meta_request->impl = impl;
@@ -448,6 +449,20 @@ int aws_s3_meta_request_pause(
     }
 
     return meta_request->vtable->pause(meta_request, out_resume_token);
+}
+
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(on_complete);
+
+    if (!meta_request->vtable->pause_async) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+
+    return meta_request->vtable->pause_async(meta_request, on_complete, user_data);
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -2414,7 +2429,8 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
-        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
+        if (finish_result.error_code && finish_result.error_code != AWS_ERROR_S3_PAUSED &&
+            meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
     }

@@ -750,6 +750,20 @@ struct aws_s3_checksum_config {
  * 3) If the data is available, but copying each chunk is asynchronous, set `send_async_stream`.
  * 4) If you're not sure when each chunk of data will be available, use `send_using_async_writes`.
  */
+/**
+ * Callback for async pause completion or on-error resume token delivery.
+ * Delivers the resume token once all in-flight writes have flushed and state is captured.
+ * @param meta_request The meta request that was paused or failed.
+ * @param resume_token The resume token (NULL if pause failed). Caller must acquire to keep.
+ * @param error_code AWS_ERROR_SUCCESS if paused, or the error code that caused the failure.
+ * @param user_data User data passed to pause_async or from meta request options.
+ */
+typedef void(aws_s3_meta_request_pause_complete_fn)(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_resume_token *resume_token,
+    int error_code,
+    void *user_data);
+
 struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
@@ -1023,6 +1037,15 @@ struct aws_s3_meta_request_options {
     /* When set, this will cap the number of active connections for the meta request. When 0, the client will determine
      * it based on client side settings. (Recommended) */
     uint32_t max_active_connections_override;
+
+    /**
+     * Optional.
+     * Callback invoked with a resume token when a meta request fails unexpectedly.
+     * Allows persisting state for later resume without re-transferring completed parts.
+     * Supported for both upload (PUT) and download (GET) meta requests.
+     * Uses the same user_data as other callbacks.
+     */
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
 };
 
 /* Result details of a meta request.
@@ -1274,6 +1297,25 @@ int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token);
 
+/**
+ * Asynchronously pause a meta request. The on_complete callback fires once all
+ * in-flight work has completed and the resume token is ready.
+ *
+ * For download (GET) meta requests, this waits for file writes to flush before
+ * capturing the token. For upload (PUT) meta requests, this waits for in-flight
+ * parts to complete.
+ *
+ * @param meta_request The meta request to pause.
+ * @param on_complete Callback invoked with the resume token once pause is complete.
+ * @param user_data User data for the callback.
+ * @return AWS_OP_SUCCESS if pause was initiated, or AWS_OP_ERR.
+ */
+AWS_S3_API
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data);
+
 /*
  * Options to construct upload resume token.
  * Note: fields correspond to getters on the token below and it up to the caller
@@ -1352,6 +1394,106 @@ size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_r
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Options to construct download resume token.
+ */
+struct aws_s3_download_resume_token_options {
+    struct aws_byte_cursor etag;                /* Required */
+    struct aws_byte_cursor version_id;          /* Optional */
+    struct aws_byte_cursor s3_object_last_modified; /* HTTP-date format string. Optional */
+    uint64_t part_size;                         /* Required */
+    uint64_t first_part_size;                   /* Required */
+    uint64_t object_range_start;                /* Required */
+    uint64_t object_range_end;                  /* Required */
+    uint64_t object_size;                       /* Required */
+    size_t total_num_parts;                     /* Required */
+    const uint32_t *completed_parts;            /* Array of completed part numbers. Required */
+    size_t num_completed_parts;                 /* Length of completed_parts array. Required */
+    uint64_t total_bytes_transferred;           /* Optional */
+    enum aws_s3_checksum_algorithm checksum_algorithm; /* Optional */
+};
+
+/**
+ * Create download resume token from persisted data.
+ */
+AWS_S3_API
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_download(
+    struct aws_allocator *allocator,
+    const struct aws_s3_download_resume_token_options *options);
+
+/**
+ * ETag of the S3 object at time of pause.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_etag(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Version ID of the S3 object. May be empty if not versioned.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_version_id(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Last-Modified value of the S3 object at time of pause (HTTP-date format).
+ * May be empty if not available.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Object size (content-length) of the download.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_object_size(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Object range start for the download.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_object_range_start(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Object range end (inclusive) for the download.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_object_range_end(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * First part size used for the download (may differ from part_size).
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_first_part_size(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Total bytes successfully transferred (sum of completed part sizes).
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_total_bytes_transferred(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Checksum algorithm in use for the download.
+ */
+AWS_S3_API
+enum aws_s3_checksum_algorithm aws_s3_meta_request_resume_token_checksum_algorithm(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/**
+ * Get the bitmap of completed part numbers.
+ * Bit N corresponds to part N+1 (0-indexed bits, 1-indexed parts).
+ * Use total_num_parts to know the valid range.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_completed_parts_bitmap(
+    const struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
  * Add a reference, keeping this object alive.

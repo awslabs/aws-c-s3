@@ -124,6 +124,12 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
+    /* Async pause for download requests (waits for writes to flush before producing token) */
+    int (*pause_async)(
+        struct aws_s3_meta_request *meta_request,
+        aws_s3_meta_request_pause_complete_fn *on_complete,
+        void *user_data);
+
 #ifdef AWS_C_S3_ENABLE_TEST_STUBS
     /********************* TEST ONLY STUB **************************/
     /* A stub to the update implementation from meta request with the lock held. Only for tests. */
@@ -184,6 +190,8 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
     aws_s3_meta_request_finish_fn *finish_callback;
+
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
