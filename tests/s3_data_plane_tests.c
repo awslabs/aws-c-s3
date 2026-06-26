@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
+#include <aws/checksums/crc.h>
 #include <aws/common/byte_buf.h>
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
@@ -27,6 +28,12 @@
 #include <aws/testing/aws_test_harness.h>
 #include <aws/testing/stream_tester.h>
 #include <inttypes.h>
+
+/* Forward declaration for checksum validation callback used in O_DIRECT tests */
+void s_s3_test_validate_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *result,
+    void *user_data);
 
 AWS_TEST_CASE(test_s3_client_create_destroy, s_test_s3_client_create_destroy)
 static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void *ctx) {
@@ -1643,6 +1650,620 @@ static int s_test_s3_get_object_file_path_to_position(struct aws_allocator *allo
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     client = aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_file_path_direct_io, s_test_s3_get_object_file_path_direct_io)
+static int s_test_s3_get_object_file_path_direct_io(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-1MB");
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+
+    client = aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_content_verify,
+    s_test_s3_get_object_file_path_direct_io_content_verify)
+static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* Upload with CRC32 checksum */
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/direct_io_verify.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = 20,
+                .object_path_override = object_path,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /* Download with O_DIRECT to a known file path */
+    const char *local_file_path = "aws_s3_direct_io_crc32_verify_test_file";
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    struct aws_s3_checksum_config checksum_config = {
+        .validate_response_checksum = true,
+    };
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .recv_filepath = aws_byte_cursor_from_c_str(local_file_path),
+        .checksum_config = &checksum_config,
+        .fio_opts = &fio_opts,
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &meta_request_options, &meta_request_test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, meta_request_test_results.finished_error_code);
+    /* S3 response checksum was validated */
+    ASSERT_TRUE(meta_request_test_results.did_validate);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, meta_request_test_results.validation_algorithm);
+    /* 20 MiB multipart download with 5 MiB parts: all parts page-aligned.
+     * fallback_count is 0 if O_DIRECT is supported, otherwise 1 from the init-time platform fallback. */
+    size_t expected_fallback_count = aws_file_direct_io_is_supported() ? 0 : 1;
+    ASSERT_UINT_EQUALS(expected_fallback_count, meta_request->recv_file_direct_io_fallback_count);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    /* Read file back from disk and compute CRC32.
+     * The tester uploads content using AWS_AUTOGEN_LOREM_IPSUM pattern. */
+    size_t expected_size = MB_TO_BYTES(20);
+    struct aws_byte_buf expected_buf;
+    s_byte_buf_init_autogenned(&expected_buf, allocator, expected_size, AWS_AUTOGEN_LOREM_IPSUM);
+    uint32_t expected_crc = aws_checksums_crc32(expected_buf.buffer, (int)expected_buf.len, 0);
+
+    FILE *verify_file = aws_fopen(local_file_path, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    struct aws_byte_buf file_buf;
+    aws_byte_buf_init(&file_buf, allocator, expected_size);
+    file_buf.len = fread(file_buf.buffer, 1, expected_size, verify_file);
+    fclose(verify_file);
+
+    ASSERT_UINT_EQUALS(expected_size, file_buf.len);
+    uint32_t actual_crc = aws_checksums_crc32(file_buf.buffer, (int)file_buf.len, 0);
+    ASSERT_UINT_EQUALS(expected_crc, actual_crc);
+
+    /* Cleanup */
+    remove(local_file_path);
+    aws_byte_buf_clean_up(&file_buf);
+    aws_byte_buf_clean_up(&expected_buf);
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_get_object_file_path_direct_io_dev_null, s_test_s3_get_object_file_path_direct_io_dev_null)
+static int s_test_s3_get_object_file_path_direct_io_dev_null(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+#ifndef AWS_OS_LINUX
+    (void)allocator;
+    return AWS_OP_SKIP;
+#else
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/direct_io_dev_null.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .put_options =
+            {
+                .object_size_mb = 6, // more than 1 part
+                .object_path_override = object_path,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+    /* Download to /dev/null with O_DIRECT — open with O_DIRECT fails on /dev/null,
+     * so all writes fall back to buffered I/O. */
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    struct aws_s3_checksum_config checksum_config = {
+        .validate_response_checksum = true,
+    };
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .recv_filepath = aws_byte_cursor_from_c_str("/dev/null"),
+        .checksum_config = &checksum_config,
+        .fio_opts = &fio_opts,
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &meta_request_options, &meta_request_test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, meta_request_test_results.finished_error_code);
+    ASSERT_TRUE(meta_request_test_results.did_validate);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, meta_request_test_results.validation_algorithm);
+    /* /dev/null doesn't support O_DIRECT — verify fallback triggered (1 from init-time open failure) */
+    ASSERT_UINT_EQUALS(1, meta_request->recv_file_direct_io_fallback_count);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+#endif
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_append_unaligned_fallback,
+    s_test_s3_get_object_file_path_direct_io_append_unaligned_fallback)
+static int s_test_s3_get_object_file_path_direct_io_append_unaligned_fallback(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-1MB");
+    /* Existing file size of 10 bytes is not page-aligned → init-time fallback to buffered I/O.
+     * Download still succeeds via the FILE* fallback path. */
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
+                .pre_exist_file_length = 10,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+    /* one fallback occurred at init (unaligned existing file size). */
+    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count == 1);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_write_to_position_unaligned_fallback,
+    s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_fallback)
+static int s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_fallback(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/pre-existing-1MB");
+    /* recv_file_position = 100 is not page-aligned → init-time fallback to buffered I/O.
+     * Download still succeeds via the FILE* fallback path. */
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+                .recv_file_position = 100,
+                .pre_exist_file_length = 200,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count == 1);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+/* O_DIRECT with WRITE_TO_POSITION at a page-aligned position should successfully use O_DIRECT.
+ * On Linux: count == 0 (all writes go through O_DIRECT, no fallback). The base_position is
+ * applied to delivery write_offset. */
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_write_to_position_aligned,
+    s_test_s3_get_object_file_path_direct_io_write_to_position_aligned)
+static int s_test_s3_get_object_file_path_direct_io_write_to_position_aligned(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    /* recv_file_position = 4096 (page-aligned). The 1MB object will be written starting at offset
+     * 4096 in the local file. Pre-existing file size 4096 ensures WRITE_TO_POSITION precondition
+     * is met. */
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_1MB,
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+                .recv_file_position = 4096,
+                .pre_exist_file_length = 4096,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+    ASSERT_INT_EQUALS((int64_t)(4096 + MB_TO_BYTES(1)), meta_request_test_results.received_file_size);
+    /* If O_DIRECT is supported: aligned position + part_size, no fallback needed.
+     * Otherwise: init-time fallback to buffered I/O. */
+    size_t expected_fallback_count = aws_file_direct_io_is_supported() ? 0 : 1;
+    ASSERT_UINT_EQUALS(expected_fallback_count, meta_request_test_results.recv_file_direct_io_fallback_count);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+/* Multi-part download with O_DIRECT: download a 10MB object with 4MB part_size,
+ * exercises the per-part write loop. All parts are page-aligned in this case. */
+AWS_TEST_CASE(test_s3_get_object_file_path_direct_io_multi_part, s_test_s3_get_object_file_path_direct_io_multi_part)
+static int s_test_s3_get_object_file_path_direct_io_multi_part(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(4),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .validate_get_response_checksum = true,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .finish_callback = s_s3_test_validate_checksum,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_10MB,
+                .file_on_disk = true,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+    ASSERT_INT_EQUALS((int64_t)MB_TO_BYTES(10), meta_request_test_results.received_file_size);
+    /* All parts (4+4+2 MiB) are page-aligned. fallback_count is 0 if O_DIRECT is supported,
+     * otherwise 1 from the init-time platform fallback. */
+    size_t expected_fallback_count = aws_file_direct_io_is_supported() ? 0 : 1;
+    ASSERT_UINT_EQUALS(expected_fallback_count, meta_request_test_results.recv_file_direct_io_fallback_count);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+/* O_DIRECT requires part_size to be page-aligned. With unaligned part_size, init silently
+ * falls back to buffered I/O. Download still succeeds. */
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_unaligned_part_size_fallback,
+    s_test_s3_get_object_file_path_direct_io_unaligned_part_size_fallback)
+static int s_test_s3_get_object_file_path_direct_io_unaligned_part_size_fallback(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* part_size = 5 MB - 1 byte, not page-aligned */
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5) - 1,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_1MB,
+                .file_on_disk = true,
+            },
+    };
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &meta_request_test_results));
+    /* Init-time fallback because part_size is not page-aligned */
+    ASSERT_TRUE(meta_request_test_results.recv_file_direct_io_fallback_count == 1);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+/* Round-trip with byte-precise object size (10MiB - 1 byte). Multi-part download with O_DIRECT.
+ * Verifies the unaligned last-part fallback path: all but the last part go through O_DIRECT,
+ * the last part has unaligned length and falls back to buffered fwrite. Read back from disk
+ * and compare CRC32 to confirm all bytes are correct. */
+AWS_TEST_CASE(
+    test_s3_get_object_file_path_direct_io_unaligned_last_part,
+    s_test_s3_get_object_file_path_direct_io_unaligned_last_part)
+static int s_test_s3_get_object_file_path_direct_io_unaligned_last_part(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* 4 MB part_size: 10 MiB - 1 = 9 parts of 4 MiB + 1 last part of (10 MiB - 1 - 8 MiB) bytes.
+     * Wait: 10 MiB = 10485760, 4 MiB = 4194304. 10485760 - 1 = 10485759.
+     * 10485759 / 4194304 = 2 full parts (2 * 4194304 = 8388608), remainder = 2097151 bytes.
+     * Last part = 2097151 = 2 MiB - 1 byte (NOT page-aligned).  */
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(4),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* Upload 10 MiB - 1 byte */
+    size_t object_size = MB_TO_BYTES(10) - 1;
+    struct aws_byte_buf upload_buf;
+    aws_s3_create_test_buffer(allocator, object_size, &upload_buf);
+    struct aws_byte_cursor upload_cursor = aws_byte_cursor_from_buf(&upload_buf);
+    struct aws_input_stream *upload_stream = aws_input_stream_new_from_cursor(allocator, &upload_cursor);
+
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/direct_io_unaligned_last.bin")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+
+    /* Use the lower-level API to upload the byte-precise body */
+    struct aws_http_message *put_message = aws_s3_test_put_object_request_new(
+        allocator, &host_cursor, object_path, g_test_body_content_type, upload_stream, 0);
+
+    struct aws_s3_meta_request_options put_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .message = put_message,
+    };
+
+    struct aws_s3_meta_request_test_results put_results;
+    aws_s3_meta_request_test_results_init(&put_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &put_options, &put_results));
+
+    struct aws_s3_meta_request *put_request = aws_s3_client_make_meta_request(client, &put_options);
+    ASSERT_NOT_NULL(put_request);
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, put_results.finished_error_code);
+    aws_s3_meta_request_release(put_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+    aws_http_message_release(put_message);
+    aws_s3_meta_request_test_results_clean_up(&put_results);
+
+    /* Download with O_DIRECT to a known path */
+    const char *local_file_path = "aws_s3_direct_io_unaligned_last_test_file";
+    struct aws_http_message *get_message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+    struct aws_s3_meta_request_options get_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = get_message,
+        .recv_filepath = aws_byte_cursor_from_c_str(local_file_path),
+        .fio_opts = &fio_opts,
+    };
+
+    struct aws_s3_meta_request_test_results get_results;
+    aws_s3_meta_request_test_results_init(&get_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &get_options, &get_results));
+
+    struct aws_s3_meta_request *get_request = aws_s3_client_make_meta_request(client, &get_options);
+    ASSERT_NOT_NULL(get_request);
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, get_results.finished_error_code);
+    /* On Linux: 2 aligned parts go through O_DIRECT, 1 unaligned last part falls back. count == 1.
+     * On non-Linux: first write triggers UNSUPPORTED_OPERATION fallback, count == 1. */
+    ASSERT_UINT_EQUALS(1, get_request->recv_file_direct_io_fallback_count);
+    aws_s3_meta_request_release(get_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    /* Read back from disk and verify CRC32 matches the upload */
+    uint32_t expected_crc = aws_checksums_crc32(upload_buf.buffer, (int)upload_buf.len, 0);
+
+    FILE *verify_file = aws_fopen(local_file_path, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    struct aws_byte_buf file_buf;
+    aws_byte_buf_init(&file_buf, allocator, object_size);
+    file_buf.len = fread(file_buf.buffer, 1, object_size, verify_file);
+    fclose(verify_file);
+
+    ASSERT_UINT_EQUALS(object_size, file_buf.len);
+    uint32_t actual_crc = aws_checksums_crc32(file_buf.buffer, (int)file_buf.len, 0);
+    ASSERT_UINT_EQUALS(expected_crc, actual_crc);
+
+    /* Cleanup */
+    remove(local_file_path);
+    aws_byte_buf_clean_up(&file_buf);
+    aws_s3_meta_request_test_results_clean_up(&get_results);
+    aws_http_message_release(get_message);
+    aws_string_destroy(host_name);
+    aws_input_stream_release(upload_stream);
+    aws_byte_buf_clean_up(&upload_buf);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return 0;
 }
