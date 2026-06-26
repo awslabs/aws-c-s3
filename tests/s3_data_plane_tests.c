@@ -5419,9 +5419,12 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
+    /* Wrong hint causes mismatch; ranged get spans full object, misaligned from stored parts, so no checksum. */
+    get_options.finish_callback = s_s3_test_no_validate_checksum;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
+
     aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 

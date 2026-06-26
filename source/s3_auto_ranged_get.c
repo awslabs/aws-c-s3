@@ -980,7 +980,7 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
-            if (first_part_size) {
+            if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Record the discovered first-part size. On a partNumber size mismatch this is the
                  * actual stored part size parsed from the cancelled response's headers; keeping it
                  * means the recovery ranged gets align to the stored part boundaries (so per-part
