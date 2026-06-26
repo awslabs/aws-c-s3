@@ -981,10 +981,9 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
             if (!first_part_buffer_size_mismatch && first_part_size) {
-                /* Record the discovered first-part size. On a partNumber size mismatch this is the
-                 * actual stored part size parsed from the cancelled response's headers; keeping it
-                 * means the recovery ranged gets align to the stored part boundaries (so per-part
-                 * checksum validation still works) without re-issuing a partNumber request. */
+                /* Only record the discovered first-part size on a successful partNumber request.
+                 * On a buffer-size mismatch the request was cancelled before the body arrived, so
+                 * we fall back to ranged gets using the client part_size (already the default). */
                 auto_ranged_get->synced_data.first_part_size = first_part_size;
             }
             if (auto_ranged_get->synced_data.object_range_empty == 0) {
@@ -1006,11 +1005,10 @@ update_synced_data:
                 if (first_part_buffer_size_mismatch && found_object_size) {
                     /* The hint-sized buffer was too small to hold the first part, so the partNumber
                      * request was cancelled before its body arrived. We already parsed the object size
-                     * and the actual stored part size (first_part_size) from the cancelled response's
-                     * headers, so we keep that discovered range and fetch the data as ranged gets. The
-                     * recovery ranged gets align to the stored part boundaries (part 1 covers
-                     * [0, first_part_size - 1]), so per-part checksum validation still works without
-                     * re-issuing a second partNumber request. */
+                     * from the cancelled response's headers, so we keep that discovered range and fetch
+                     * the data as ranged gets using the client part_size. Note: the recovery ranged gets
+                     * may not align to stored part boundaries, so per-part checksum validation may not
+                     * be possible in this case. */
                     auto_ranged_get->synced_data.num_parts_requested = 0;
                     break;
                 }
