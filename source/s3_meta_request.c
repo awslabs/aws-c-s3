@@ -1561,21 +1561,22 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
-    struct aws_s3_meta_request *meta_request = request->meta_request;
-    AWS_PRECONDITION(meta_request);
-
     /*
-     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so
-     * we don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets
-     * instead.
+     * When downloading parts via partNumber, if the response is larger than the buffer we reserved, cancel
+     * immediately so we don't overflow memory. We'll retry using ranged gets instead.
+     *
+     * Compare against the reserved buffer size (part_range_end - part_range_start + 1) rather than part_size,
+     * because when object_size_hint is provided the buffer is sized to min(hint, part_size), which may be
+     * smaller than part_size. Using part_size here would miss the case where hint < content_length <= part_size.
      */
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
         uint64_t content_length;
+        uint64_t reserved_size = request->part_range_end - request->part_range_start + 1;
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length) &&
-            content_length > meta_request->part_size) {
-            return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+            content_length > reserved_size) {
+            return aws_raise_error(AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE);
         }
     }
     return AWS_OP_SUCCESS;
@@ -1870,11 +1871,11 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
-            error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
+            error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
             error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
-            if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
+            if (error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
                 /* Log at info level instead of error as it's expected and not a fatal error */
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,

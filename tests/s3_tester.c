@@ -264,6 +264,8 @@ static void s_s3_test_meta_request_telemetry(
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
     if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS) {
         aws_array_list_push_back(&meta_request_test_results->synced_data.succeed_metrics, &metrics);
+    } else {
+        aws_array_list_push_back(&meta_request_test_results->synced_data.fail_metrics, &metrics);
     }
     aws_s3_request_metrics_acquire(metrics);
     aws_s3_tester_unlock_synced_data(tester);
@@ -561,6 +563,8 @@ void aws_s3_meta_request_test_results_init(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.succeed_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
+    aws_array_list_init_dynamic(
+        &test_meta_request->synced_data.fail_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -578,8 +582,10 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
-    /* We don't need to release the metrics from the succeed list, since it's already released from the main list. */
+    /* We don't need to release the metrics from succeed/fail lists, since they're already released from the main list.
+     */
     aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
+    aws_array_list_clean_up(&test_meta_request->synced_data.fail_metrics);
 
     for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {
         aws_string_destroy(test_meta_request->upload_review.part_checksums_array[i]);
