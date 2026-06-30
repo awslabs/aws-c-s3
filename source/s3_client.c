@@ -1330,7 +1330,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     if (options->send_async_stream != NULL) {
         ++body_source_count;
     }
-    if (options->request_body.ptr == NULL && options->request_body.len > 0) {
+    if (!aws_byte_cursor_is_valid(&options->request_body)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "Could not create meta request."
