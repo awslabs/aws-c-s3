@@ -798,11 +798,11 @@ static int s_request_body_test_helper(
 
     struct aws_uri mock_server;
     ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
-    const struct aws_byte_cursor *host_cursor = aws_uri_authority(&mock_server);
+    struct aws_byte_cursor host_cursor = *aws_uri_authority(&mock_server);
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
 
     struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
-        allocator, host_cursor, g_test_body_content_type, object_path, body.len, 0 /*flags*/);
+        allocator, &host_cursor, g_test_body_content_type, object_path, body.len, 0 /*flags*/);
     ASSERT_NOT_NULL(message);
 
     if (omit_content_length) {
