@@ -222,8 +222,6 @@ typedef int(aws_s3_meta_request_receive_body_callback_ex_fn)(
  * Information sent in the meta_request progress callback.
  */
 struct aws_s3_meta_request_progress {
-    /* Total bytes transferred so far across all progress updates */
-    uint64_t total_bytes_transferred;
 
     /* Bytes transferred since the previous progress update */
     uint64_t bytes_transferred;
