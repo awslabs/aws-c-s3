@@ -5395,9 +5395,10 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
-    get_options.finish_callback = s_s3_test_validate_checksum;
+    /* Wrong hint causes buffer-sized ranged gets that don't align to S3 part boundaries, so no checksum. */
+    get_options.finish_callback = s_s3_test_no_validate_checksum;
 
-    /* will do GetPart first */
+    /* will do GetPart, cancel and do ranged Gets that don't align to part boundaries */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
@@ -5418,9 +5419,12 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
 
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
     get_options.client = client;
+    /* Wrong hint causes mismatch; ranged get spans full object, misaligned from stored parts, so no checksum. */
+    get_options.finish_callback = s_s3_test_no_validate_checksum;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
     client = aws_s3_client_release(client);
     tester.bound_to_client = false;
+
     aws_byte_buf_clean_up(&path_buf);
     aws_s3_tester_clean_up(&tester);
 
@@ -10157,6 +10161,150 @@ static int s_test_s3_default_get_without_content_length(struct aws_allocator *al
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
     aws_string_destroy(host_name);
     aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_size_hint_sizes_first_request_buffer,
+    s_test_s3_get_object_size_hint_sizes_first_request_buffer)
+static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Verify that when object_size_hint is provided, the first GET request's range end reflects the hint
+     * rather than the full part_size. This ensures we don't over-reserve buffer memory. */
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Use a part_size larger than the object so the hint fits in one part */
+    size_t part_size = MB_TO_BYTES(20);
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = part_size,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    /* Hint exactly matches the object size. The first request buffer reservation should be sized to
+     * the hint (10MB - 1), not the full part_size (20MB - 1). */
+    uint64_t object_size_hint = MB_TO_BYTES(10);
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_10MB,
+            },
+        .object_size_hint = &object_size_hint,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
+
+    /* The first (and only) request should have part_range_end == object_size_hint - 1, not part_size - 1.
+     * Without the fix, this would be part_size - 1 (20MB - 1 = 20971519). */
+    uint64_t first_range_end = 0;
+    struct aws_s3_request_metrics *first_metrics = NULL;
+    ASSERT_TRUE(aws_array_list_length(&test_results.synced_data.succeed_metrics) > 0);
+    ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&first_metrics, 0));
+    aws_s3_request_metrics_get_part_range_end(first_metrics, &first_range_end);
+    ASSERT_UINT_EQUALS(object_size_hint - 1, first_range_end);
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get,
+    s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get)
+static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
+    struct aws_allocator *allocator,
+    void *ctx) {
+    (void)ctx;
+
+    /* When object_size_hint is smaller than the actual first part, the hint-sized PART_NUMBER_1 request
+     * is cancelled at the header stage. We should keep the discovered object size and fetch the data as
+     * ranged gets, NOT re-issue another PART_NUMBER_1 request. This guards against the regression where
+     * the meta request re-entered discovery and sent a second partNumber=1 request. */
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* part_size smaller than the object forces a multi-part ranged download once the size is known. */
+    size_t part_size = MB_TO_BYTES(12);
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = part_size,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    /* Hint of 1 byte smaller than the 10MB object, so the PART_NUMBER_1 buffer (sized to the hint)
+     * cannot hold the first part and the request is cancelled. */
+    uint64_t object_size_hint = 1024 * 1024 * 10 - 1;
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+        .client = client,
+        .get_options =
+            {
+                .object_path = g_pre_existing_object_10MB,
+            },
+        .object_size_hint = &object_size_hint,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &test_results));
+
+    /* Exactly 1 failed request: the cancelled PART_NUMBER_1 whose buffer was too small. */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&test_results.synced_data.fail_metrics));
+    {
+        struct aws_s3_request_metrics *metrics = NULL;
+        ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.fail_metrics, (void **)&metrics, 0));
+        enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+        aws_s3_request_metrics_get_request_type(metrics, &request_type);
+        ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_GET_OBJECT, request_type);
+        const struct aws_string *path_query = NULL;
+        aws_s3_request_metrics_get_request_path_query(metrics, &path_query);
+        ASSERT_NOT_NULL(path_query);
+        struct aws_byte_cursor path_cursor = aws_byte_cursor_from_string(path_query);
+        struct aws_byte_cursor part_number_query = aws_byte_cursor_from_c_str("partNumber");
+        struct aws_byte_cursor found = {0};
+        ASSERT_SUCCESS(aws_byte_cursor_find_exact(&path_cursor, &part_number_query, &found));
+    }
+
+    /* Exactly 1 succeeding ranged GET covering the whole 10MB object (part_size=12MB > object). */
+    ASSERT_UINT_EQUALS(1, aws_array_list_length(&test_results.synced_data.succeed_metrics));
+    {
+        struct aws_s3_request_metrics *metrics = NULL;
+        ASSERT_SUCCESS(aws_array_list_get_at(&test_results.synced_data.succeed_metrics, (void **)&metrics, 0));
+        enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+        aws_s3_request_metrics_get_request_type(metrics, &request_type);
+        ASSERT_UINT_EQUALS(AWS_S3_REQUEST_TYPE_GET_OBJECT, request_type);
+        uint64_t range_start = UINT64_MAX;
+        aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
+        ASSERT_UINT_EQUALS(0, range_start);
+        uint64_t range_end = 0;
+        aws_s3_request_metrics_get_part_range_end(metrics, &range_end);
+        ASSERT_UINT_EQUALS((1024 * 1024 * 10) - 1, range_end);
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
