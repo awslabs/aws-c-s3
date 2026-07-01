@@ -3,6 +3,48 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+/*
+ * A meta request represents a single user-initiated S3 operation (GetObject, PutObject,
+ * CopyObject, or a pass-through default request). It is a state machine that produces
+ * individual HTTP requests on demand, not a pre-planned list. The client's work loop
+ * calls vtable->update() repeatedly, and the meta request decides what to produce next
+ * based on its current state and the results of previous requests.
+ *
+ * For PutObject, the state machine starts by producing a CreateMultipartUpload request.
+ * Once the response arrives with an upload_id, subsequent update() calls produce UploadPart
+ * requests until flow-control limits are hit or all parts are started. After all parts
+ * complete, it produces a CompleteMultipartUpload. When that finishes, update() returns
+ * work_remaining=false and the client removes the meta request.
+ *
+ * For GetObject, the state machine first sends a HeadObject or a ranged GET for part 1 to
+ * discover the object size. Once the size is known, subsequent update() calls produce
+ * ranged GETs (Range: bytes=X-Y) for each part until all parts are requested.
+ *
+ * Every aws_s3_request carries a backlink (request->meta_request) and a request_tag so
+ * completions route back to the right meta request and it knows which sub-operation
+ * finished. The client does not understand PUT/GET/COPY logic; it just calls update()
+ * on each meta request and routes completions back via the backlink by calling
+ * aws_s3_meta_request_finished_request().
+ *
+ * Each meta request type implements three vtable functions:
+ *   update()           - produce the next request based on current state.
+ *   prepare_request()  - build the HTTP message (headers, body).
+ *   finished_request() - handle completion, advance the state machine.
+ * See s3_auto_ranged_get.c, s3_auto_ranged_put.c, s3_copy_object.c,
+ * s3_default_meta_request.c.
+ *
+ * update() is called from the client's process_work_event_loop thread.
+ * prepare_request() runs async on the body_streaming_elg or the meta request's
+ * io_event_loop. finished_request() can be called from any networking thread.
+ * The meta request has its own synced_data/lock for state shared across threads,
+ * following the same pattern as the client.
+ *
+ * This file manages the preparation pipeline: vtable->prepare_request() builds the
+ * HTTP message and reads the body, then s_s3_meta_request_sign_request() signs it
+ * with SigV4, then the callback notifies the client that the request is ready for
+ * connection assignment.
+ */
+
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
 #include "aws/s3/private/s3_checksums.h"
