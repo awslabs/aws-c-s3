@@ -757,6 +757,8 @@ struct aws_s3_checksum_config {
  * 2) If the data is on disk, set `send_filepath` for best performance.
  * 3) If the data is available, but copying each chunk is asynchronous, set `send_async_stream`.
  * 4) If you're not sure when each chunk of data will be available, use `send_using_async_writes`.
+ * 5) If the data is already in memory and you want the client to upload it with no extra copy or
+ *    allocation, set `request_body` (DEFAULT meta request only).
  */
 struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
@@ -885,6 +887,30 @@ struct aws_s3_meta_request_options {
      * Do not set if the body is being passed by other means (see note above).
      */
     bool send_using_async_writes;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * If set, the request body is sent directly from this caller-owned memory, with no additional
+     * allocation or copy by the client.
+     *
+     * Use this when you already hold the entire fixed request body in memory (e.g. in a buffer from your
+     * own memory pool) and want to avoid the client allocating a new buffer and copying into it.
+     *
+     * Memory ownership / lifetime:
+     * - The client BORROWS this memory; it never copies, frees, or modifies it.
+     * - The memory MUST stay valid and unmodified until the meta request completes. The client
+     *   re-reads it on every send attempt, so it must outlive all retries. To learn when it is safe
+     *   to free or reuse the memory, use the meta request's shutdown callback (the `aws_s3_meta_request_shutdown_fn`
+     *   passed when the meta request was created); it is invoked once the meta request is fully torn
+     *   down, after the request and all its retries are done.
+     *
+     * This is currently only supported for an AWS_S3_META_REQUEST_TYPE_DEFAULT meta request, which
+     * sends the body as a single request.
+     *
+     * Do not set if the body is being passed by other means (i.e. the message body-stream,
+     * send_filepath, send_async_stream, or send_using_async_writes).
+     */
+    struct aws_byte_cursor request_body;
 
     /**
      * Optional.
