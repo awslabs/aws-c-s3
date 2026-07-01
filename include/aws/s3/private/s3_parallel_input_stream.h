@@ -125,7 +125,8 @@ int aws_parallel_input_stream_get_length(struct aws_parallel_input_stream *strea
  *
  * Notes for direct_io_read:
  * - checking `aws_file_path_read_from_offset_direct_io` for detail
- * - For `AWS_ERROR_UNSUPPORTED_OPERATION`, fallback to reading with cache with warnings, instead of fail.
+ * - If `aws_file_path_read_from_offset_direct_io` failed, fallback to reading via cache with warnings,
+ *      instead of fail read.
  * - If alignment required, it's callers' responsibility to align with the page size.
  *
  * @param allocator The allocator to use for memory allocation

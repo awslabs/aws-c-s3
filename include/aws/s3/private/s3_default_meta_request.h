@@ -15,6 +15,8 @@ struct aws_s3_meta_request_default {
 
     size_t content_length;
 
+    struct aws_byte_cursor request_body;
+
     /* Actual type for the single request (may be AWS_S3_REQUEST_TYPE_UNKNOWN) */
     enum aws_s3_request_type request_type;
 

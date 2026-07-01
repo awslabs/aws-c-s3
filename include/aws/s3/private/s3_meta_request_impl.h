@@ -265,9 +265,14 @@ struct aws_s3_meta_request {
             struct aws_byte_buf buffered_data;
             struct aws_s3_buffer_ticket *buffered_data_ticket;
 
+            /* Set while we're waiting on the buffer pool to fulfill a (deferred) ticket reservation
+             * for buffered_data_ticket. While set, poll_write() returns result.is_pending. */
+            struct aws_future_s3_buffer_ticket *buffered_data_ticket_future;
+
             /* Waker callback.
              * Stored if a poll_write() call returns result.is_pending
-             * because we already had 1 part's worth of data.
+             * (because we already had 1 part's worth of data, or because we're
+             * waiting on the buffer pool to fulfill a ticket reservation).
              * Invoked when we're ready to accept another poll_write() call. */
             aws_simple_completion_callback *waker;
             void *waker_user_data;
@@ -317,6 +322,17 @@ struct aws_s3_meta_request {
     FILE *recv_file;
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
+    /* When true, use O_DIRECT for writing received data to file */
+    bool recv_file_direct_io;
+    /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
+     * existing file size for CREATE_OR_APPEND. The actual write offset for each part is
+     * base_position + delivery_range_start. Only meaningful when recv_file_direct_io is true. */
+    uint64_t recv_file_direct_io_base_position;
+    /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
+     * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)
+     * also increment this counter. The warning is only logged when this transitions from 0,
+     * to avoid log spam. */
+    size_t recv_file_direct_io_fallback_count;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;

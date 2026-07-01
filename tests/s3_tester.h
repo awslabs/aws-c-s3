@@ -277,6 +277,10 @@ struct aws_s3_meta_request_test_results {
     bool did_validate;
     enum aws_s3_checksum_algorithm validation_algorithm;
 
+    /* Captured from meta_request->recv_file_direct_io_fallback_count via a finish callback.
+     * Tests can check this to verify the expected number of O_DIRECT fallbacks occurred. */
+    size_t recv_file_direct_io_fallback_count;
+
     /* Record data from progress_callback() */
     struct {
         uint64_t content_length;          /* Remember progress->content_length */
@@ -289,6 +293,8 @@ struct aws_s3_meta_request_test_results {
         struct aws_array_list metrics;
         /* The array_list of `struct aws_s3_request_metrics *` that the request succeed, to avoid retries counts. */
         struct aws_array_list succeed_metrics;
+        /* The array_list of `struct aws_s3_request_metrics *` that the request failed. */
+        struct aws_array_list fail_metrics;
     } synced_data;
 
     /* record data from the upload_review_callback */
