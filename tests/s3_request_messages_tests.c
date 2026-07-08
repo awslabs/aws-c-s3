@@ -1013,10 +1013,7 @@ static int s_test_s3_abort_multipart_upload_message_newt(struct aws_allocator *a
 }
 
 /* Assert that a header is present on a message and equal to the expected value. */
-static int s_assert_header_value(
-    struct aws_http_message *message,
-    const char *name,
-    const char *expected_value) {
+static int s_assert_header_value(struct aws_http_message *message, const char *name, const char *expected_value) {
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     ASSERT_TRUE(headers != NULL);
 

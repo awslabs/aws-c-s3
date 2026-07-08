@@ -580,6 +580,8 @@ static int s_s3_copy_source_object_head_forward_headers(
                 return AWS_OP_ERR;
             }
         }
+        /* Avoid leaking the error code. */
+        aws_reset_error();
     }
 
     return AWS_OP_SUCCESS;
