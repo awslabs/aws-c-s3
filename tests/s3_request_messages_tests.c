@@ -17,6 +17,7 @@
 #include <aws/http/request_response.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
+#include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
 #include <inttypes.h>
 
@@ -1007,6 +1008,132 @@ static int s_test_s3_abort_multipart_upload_message_newt(struct aws_allocator *a
 #undef TEST_PATH
 #undef UPLOAD_ID
 #undef EXPECTED_UPLOAD_PART_PATH
+
+    return 0;
+}
+
+/* Assert that a header is present on a message and equal to the expected value. */
+static int s_assert_header_value(
+    struct aws_http_message *message,
+    const char *name,
+    const char *expected_value) {
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    ASSERT_TRUE(headers != NULL);
+
+    struct aws_byte_cursor name_cursor = aws_byte_cursor_from_c_str(name);
+    struct aws_byte_cursor value;
+    AWS_ZERO_STRUCT(value);
+    ASSERT_SUCCESS(aws_http_headers_get(headers, name_cursor, &value));
+
+    struct aws_byte_cursor expected_cursor = aws_byte_cursor_from_c_str(expected_value);
+    ASSERT_TRUE(aws_byte_cursor_eq(&value, &expected_cursor));
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Assert that a header is NOT present on a message. */
+static int s_assert_header_absent(struct aws_http_message *message, const char *name) {
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    ASSERT_TRUE(headers != NULL);
+
+    struct aws_byte_cursor name_cursor = aws_byte_cursor_from_c_str(name);
+    struct aws_byte_cursor value;
+    AWS_ZERO_STRUCT(value);
+    ASSERT_FAILS(aws_http_headers_get(headers, name_cursor, &value));
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Builds a representative CopyObject request message: it carries the destination Host, the source reference via
+ * x-amz-copy-source, and the access-gating headers whose forwarding to the source-size HEAD is under test. */
+static int s_create_copy_object_message(struct aws_allocator *allocator, struct aws_http_message **out_message) {
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+    ASSERT_TRUE(message != NULL);
+
+    ASSERT_SUCCESS(aws_http_message_set_request_method(message, aws_byte_cursor_from_c_str("PUT")));
+    ASSERT_SUCCESS(aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("/dest-key")));
+
+    const struct aws_http_header headers[] = {
+        s_http_header_from_c_str("Host", "dest-bucket.s3.us-east-1.amazonaws.com"),
+        s_http_header_from_c_str("x-amz-copy-source", "/source-bucket/source-key"),
+        s_http_header_from_c_str("x-amz-request-payer", "requester"),
+        /* Asserts the DESTINATION owner -- must NOT be forwarded to a HEAD of the source object. */
+        s_http_header_from_c_str("x-amz-expected-bucket-owner", "111111111111"),
+        /* Asserts the SOURCE owner -- must be forwarded to the source HEAD as x-amz-expected-bucket-owner. */
+        s_http_header_from_c_str("x-amz-source-expected-bucket-owner", "222222222222"),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header_array(message, headers, AWS_ARRAY_SIZE(headers)));
+
+    *out_message = message;
+    return AWS_OP_SUCCESS;
+}
+
+/* Verifies that the source-object-size HEAD built for a CopyObject forwards the access-gating headers from the original
+ * request. Without this, a Requester Pays source object returns 403 on the size HEAD and the whole copy fails. Covers
+ * both the source_uri branch (mountpoint path) and the x-amz-copy-source fallback branch. */
+AWS_TEST_CASE(test_s3_get_source_object_size_message_new, s_test_s3_get_source_object_size_message_new)
+static int s_test_s3_get_source_object_size_message_new(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    aws_s3_library_init(allocator);
+
+    /* --- Branch 1: source_uri provided (the mountpoint-s3 path). --- */
+    {
+        struct aws_http_message *base_message = NULL;
+        ASSERT_SUCCESS(s_create_copy_object_message(allocator, &base_message));
+
+        struct aws_uri source_uri;
+        AWS_ZERO_STRUCT(source_uri);
+        struct aws_byte_cursor uri_str =
+            aws_byte_cursor_from_c_str("https://source-bucket.s3.us-east-1.amazonaws.com/source-key");
+        ASSERT_SUCCESS(aws_uri_init_parse(&source_uri, allocator, &uri_str));
+
+        struct aws_http_message *head_message =
+            aws_s3_get_source_object_size_message_new(allocator, base_message, &source_uri);
+        ASSERT_TRUE(head_message != NULL);
+
+        ASSERT_SUCCESS(s_test_http_message_request_method(head_message, "HEAD"));
+        struct aws_byte_cursor expected_path = aws_byte_cursor_from_c_str("/source-key");
+        ASSERT_SUCCESS(s_test_http_message_request_path(head_message, &expected_path));
+        ASSERT_SUCCESS(s_assert_header_value(head_message, "Host", "source-bucket.s3.us-east-1.amazonaws.com"));
+
+        /* Requester Pays must be forwarded verbatim. */
+        ASSERT_SUCCESS(s_assert_header_value(head_message, "x-amz-request-payer", "requester"));
+        /* The source owner must map onto the HEAD's expected-bucket-owner -- NOT the destination owner. */
+        ASSERT_SUCCESS(s_assert_header_value(head_message, "x-amz-expected-bucket-owner", "222222222222"));
+        /* The CopyObject-only source-owner header itself is not a valid header on a plain HEAD. */
+        ASSERT_SUCCESS(s_assert_header_absent(head_message, "x-amz-source-expected-bucket-owner"));
+
+        aws_http_message_release(head_message);
+        aws_uri_clean_up(&source_uri);
+        aws_http_message_release(base_message);
+    }
+
+    /* --- Branch 2: no source_uri, source parsed from the x-amz-copy-source header (fallback path). --- */
+    {
+        struct aws_http_message *base_message = NULL;
+        ASSERT_SUCCESS(s_create_copy_object_message(allocator, &base_message));
+
+        struct aws_uri empty_uri;
+        AWS_ZERO_STRUCT(empty_uri);
+
+        struct aws_http_message *head_message =
+            aws_s3_get_source_object_size_message_new(allocator, base_message, &empty_uri);
+        ASSERT_TRUE(head_message != NULL);
+
+        ASSERT_SUCCESS(s_test_http_message_request_method(head_message, "HEAD"));
+        struct aws_byte_cursor expected_path = aws_byte_cursor_from_c_str("/source-key");
+        ASSERT_SUCCESS(s_test_http_message_request_path(head_message, &expected_path));
+
+        ASSERT_SUCCESS(s_assert_header_value(head_message, "x-amz-request-payer", "requester"));
+        ASSERT_SUCCESS(s_assert_header_value(head_message, "x-amz-expected-bucket-owner", "222222222222"));
+        ASSERT_SUCCESS(s_assert_header_absent(head_message, "x-amz-source-expected-bucket-owner"));
+
+        aws_http_message_release(head_message);
+        aws_http_message_release(base_message);
+    }
+
+    aws_s3_library_clean_up();
 
     return 0;
 }
