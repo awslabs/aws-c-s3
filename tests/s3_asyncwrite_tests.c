@@ -5,10 +5,13 @@
 #include "s3_tester.h"
 
 #include <aws/checksums/crc.h>
+#include <aws/common/atomics.h>
 #include <aws/common/byte_order.h>
 #include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/encoding.h>
+#include <aws/io/event_loop.h>
+#include <aws/s3/private/s3_default_buffer_pool.h>
 #include <aws/s3/private/s3_util.h>
 #include <aws/testing/aws_test_harness.h>
 
@@ -24,10 +27,25 @@ struct asyncwrite_tester {
     struct aws_byte_buf source_buf;
 };
 
-static int s_asyncwrite_tester_init(
+/* Optional knobs for s_asyncwrite_tester_init_ex(). Zero-initialized means "defaults". */
+struct asyncwrite_tester_options {
+    /* If set, the client uses this custom buffer pool factory (e.g. to exercise deferred
+     * ticket reservations in the async-write path). NULL uses the default pool. */
+    aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
+    void *buffer_pool_user_data;
+};
+
+static int s_asyncwrite_tester_init_ex(
     struct asyncwrite_tester *tester,
     struct aws_allocator *allocator,
-    size_t object_size) {
+    size_t object_size,
+    const struct asyncwrite_tester_options *options) {
+
+    struct asyncwrite_tester_options local_options;
+    AWS_ZERO_STRUCT(local_options);
+    if (options != NULL) {
+        local_options = *options;
+    }
 
     AWS_ZERO_STRUCT(*tester);
     tester->allocator = allocator;
@@ -37,6 +55,8 @@ static int s_asyncwrite_tester_init(
     /* Create S3 client */
     struct aws_s3_client_config client_config = {
         .part_size = PART_SIZE,
+        .buffer_pool_factory_fn = local_options.buffer_pool_factory_fn,
+        .buffer_pool_user_data = local_options.buffer_pool_user_data,
     };
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester->s3_tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -89,6 +109,13 @@ static int s_asyncwrite_tester_init(
     aws_byte_buf_clean_up(&object_path);
     aws_http_message_release(message);
     return 0;
+}
+
+static int s_asyncwrite_tester_init(
+    struct asyncwrite_tester *tester,
+    struct aws_allocator *allocator,
+    size_t object_size) {
+    return s_asyncwrite_tester_init_ex(tester, allocator, object_size, NULL /*options*/);
 }
 
 static int s_asyncwrite_tester_validate(struct asyncwrite_tester *tester) {
@@ -572,6 +599,245 @@ static int s_test_s3_asyncwrite_cancel_sends_abort(struct aws_allocator *allocat
     aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
 
     ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, tester.test_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
+    return 0;
+}
+
+/*
+ * Custom buffer pool that DEFERS async-write ticket reservations.
+ *
+ * The async-write path reserves a part buffer with can_block=true. The default pool satisfies
+ * such reservations synchronously (with a "forced" buffer). This wrapper instead defers them:
+ * it forwards the reservation to the wrapped default pool (which hands back a done future), then
+ * returns a fresh, not-yet-done future to the caller and completes it a bit later on its own
+ * event loop. This exercises aws_s3_meta_request_poll_write()'s deferral path, where it must
+ * return result.is_pending and resume once the reservation is fulfilled.
+ *
+ * Non-blocking reservations (the regular GET/PUT path) are forwarded unchanged.
+ */
+
+/* Settings the test hands to the pool factory via buffer_pool_user_data. */
+struct deferring_pool_settings {
+    /* How long to hold each async-write reservation pending before fulfilling it. */
+    uint64_t defer_delay_ms;
+    /* Filled in by the factory: points at the pool's deferred_count so the test can assert
+     * the deferral path was exercised. */
+    struct aws_atomic_var *deferred_count_out;
+};
+
+struct deferring_pool {
+    struct aws_s3_buffer_pool base; /* must be first */
+    struct aws_allocator *allocator;
+    struct aws_s3_buffer_pool *wrapped; /* the real default pool */
+    struct aws_event_loop_group *elg;   /* owns the event loop we defer onto */
+    uint64_t defer_delay_ms;
+    /* Number of can_block reservations we actually deferred. Lets the test confirm the
+     * deferral path was exercised (and not silently bypassed). */
+    struct aws_atomic_var deferred_count;
+};
+
+/* One deferred reservation in flight. */
+struct deferring_pool_pending {
+    struct aws_allocator *allocator;
+    struct aws_task task;
+    struct aws_event_loop *event_loop;
+    /* Reference on the wrapped pool, held until this pending task releases its ticket.
+     * Default-pool tickets don't ref-count their pool, so we must keep the pool alive until
+     * the wrapped_future (which owns the ticket) is released, even during shutdown. */
+    struct aws_s3_buffer_pool *wrapped;
+    /* The done future from the wrapped pool, holding the real ticket. */
+    struct aws_future_s3_buffer_ticket *wrapped_future;
+    /* The not-yet-done future we handed back to the caller. */
+    struct aws_future_s3_buffer_ticket *deferred_future;
+};
+
+static void s_deferring_pool_complete_task(struct aws_task *task, void *arg, enum aws_task_status status) {
+    (void)task;
+    struct deferring_pool_pending *pending = arg;
+
+    if (status == AWS_TASK_STATUS_RUN_READY) {
+        /* Move the real ticket out of the wrapped future and into the deferred future. */
+        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(pending->wrapped_future);
+        aws_future_s3_buffer_ticket_set_result_by_move(pending->deferred_future, &ticket);
+    } else {
+        /* Shutting down: just error the deferred future so it doesn't hang. */
+        aws_future_s3_buffer_ticket_set_error(pending->deferred_future, AWS_ERROR_S3_CANCELED);
+    }
+
+    /* Release the ticket (via wrapped_future) BEFORE releasing our pool reference, so the ticket's
+     * destructor still sees a live pool. */
+    aws_future_s3_buffer_ticket_release(pending->wrapped_future);
+    aws_future_s3_buffer_ticket_release(pending->deferred_future);
+    aws_s3_buffer_pool_release(pending->wrapped);
+    aws_mem_release(pending->allocator, pending);
+}
+
+static struct aws_future_s3_buffer_ticket *s_deferring_pool_reserve(
+    struct aws_s3_buffer_pool *pool_wrapper,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+
+    struct deferring_pool *pool = pool_wrapper->impl;
+
+    /* Forward to the real pool. */
+    struct aws_future_s3_buffer_ticket *wrapped_future = aws_s3_buffer_pool_reserve(pool->wrapped, meta);
+
+    /* Only defer the async-write (can_block) reservations, and only when the wrapped pool
+     * actually granted one synchronously (it always does for can_block). Everything else is
+     * forwarded unchanged. */
+    if (!meta.can_block || !aws_future_s3_buffer_ticket_is_done(wrapped_future) ||
+        aws_future_s3_buffer_ticket_get_error(wrapped_future) != AWS_ERROR_SUCCESS) {
+        return wrapped_future;
+    }
+
+    /* Hand back a fresh, not-yet-done future and complete it later on our event loop. */
+    struct deferring_pool_pending *pending = aws_mem_calloc(pool->allocator, 1, sizeof(struct deferring_pool_pending));
+    pending->allocator = pool->allocator;
+    pending->wrapped = aws_s3_buffer_pool_acquire(pool->wrapped); /* keep pool alive until ticket released */
+    pending->wrapped_future = wrapped_future;                     /* take ownership of the reference */
+    pending->deferred_future = aws_future_s3_buffer_ticket_new(pool->allocator);
+    pending->event_loop = aws_event_loop_group_get_next_loop(pool->elg);
+
+    struct aws_future_s3_buffer_ticket *deferred_future = aws_future_s3_buffer_ticket_acquire(pending->deferred_future);
+
+    aws_atomic_fetch_add(&pool->deferred_count, 1);
+
+    aws_task_init(&pending->task, s_deferring_pool_complete_task, pending, "deferring_pool_complete");
+    uint64_t now = 0;
+    aws_event_loop_current_clock_time(pending->event_loop, &now);
+    /* Delay so the reservation is genuinely pending when poll_write() first sees it. */
+    uint64_t run_at =
+        now + aws_timestamp_convert(pool->defer_delay_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+    aws_event_loop_schedule_task_future(pending->event_loop, &pending->task, run_at);
+
+    return deferred_future;
+}
+
+static void s_deferring_pool_trim(struct aws_s3_buffer_pool *pool_wrapper) {
+    struct deferring_pool *pool = pool_wrapper->impl;
+    aws_s3_buffer_pool_trim(pool->wrapped);
+}
+
+static void s_deferring_pool_destroy(void *arg) {
+    struct aws_s3_buffer_pool *pool_wrapper = arg;
+    struct deferring_pool *pool = pool_wrapper->impl;
+    aws_s3_buffer_pool_release(pool->wrapped);
+    aws_event_loop_group_release(pool->elg);
+    struct aws_allocator *allocator = pool->allocator;
+    aws_mem_release(allocator, pool);
+}
+
+static struct aws_s3_buffer_pool_vtable s_deferring_pool_vtable = {
+    .reserve = s_deferring_pool_reserve,
+    .trim = s_deferring_pool_trim,
+};
+
+static struct aws_s3_buffer_pool *s_deferring_pool_factory(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
+
+    struct deferring_pool_settings *settings = user_data;
+
+    struct deferring_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct deferring_pool));
+    pool->allocator = allocator;
+    pool->wrapped = aws_s3_default_buffer_pool_new(allocator, config);
+    AWS_FATAL_ASSERT(pool->wrapped != NULL);
+    pool->elg = aws_event_loop_group_new_default(allocator, 1, NULL);
+    AWS_FATAL_ASSERT(pool->elg != NULL);
+    pool->defer_delay_ms = (settings != NULL && settings->defer_delay_ms > 0) ? settings->defer_delay_ms : 20;
+    aws_atomic_init_int(&pool->deferred_count, 0);
+
+    /* Let the test observe how many reservations we deferred. */
+    if (settings != NULL) {
+        settings->deferred_count_out = &pool->deferred_count;
+    }
+
+    pool->base.impl = pool;
+    pool->base.vtable = &s_deferring_pool_vtable;
+    aws_ref_count_init(&pool->base.ref_count, &pool->base, s_deferring_pool_destroy);
+
+    return &pool->base;
+}
+
+/* Verifies the buffer pool can DEFER async-write ticket reservations: the write path must wait on
+ * the reservation future instead of failing when it isn't fulfilled immediately.
+ * Uses a custom pool that defers every async-write reservation; the upload must still succeed. */
+AWS_TEST_CASE(test_s3_asyncwrite_deferred_buffer_reservation, s_test_s3_asyncwrite_deferred_buffer_reservation)
+static int s_test_s3_asyncwrite_deferred_buffer_reservation(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct asyncwrite_tester tester;
+    struct deferring_pool_settings pool_settings = {.defer_delay_ms = 20};
+    struct asyncwrite_tester_options options = {
+        .buffer_pool_factory_fn = s_deferring_pool_factory,
+        .buffer_pool_user_data = &pool_settings,
+    };
+
+    const size_t part_count = 3;
+    ASSERT_SUCCESS(s_asyncwrite_tester_init_ex(&tester, allocator, PART_SIZE * part_count /*object_size*/, &options));
+
+    bool eof = false;
+    struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester.source_buf);
+    while (source_cursor.len > 0) {
+        size_t bytes_to_write = aws_min_size(PART_SIZE, source_cursor.len);
+        struct aws_byte_cursor write_cursor = aws_byte_cursor_advance(&source_cursor, bytes_to_write);
+        eof = (source_cursor.len == 0);
+        ASSERT_SUCCESS(s_write(&tester, write_cursor, eof));
+    }
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_SUCCESS(s_asyncwrite_tester_validate(&tester));
+    ASSERT_NOT_NULL(pool_settings.deferred_count_out);
+    ASSERT_UINT_EQUALS(part_count, aws_atomic_load_int(pool_settings.deferred_count_out));
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
+    return 0;
+}
+
+/* Verifies the lifetime/cleanup of a DEFERRED async-write reservation when the meta request is
+ * canceled while the reservation is still pending: the pending future must be errored-out (so its
+ * completion callback fires, cleans up, and releases the ref it holds on the meta request) without
+ * leaking or use-after-free. */
+AWS_TEST_CASE(
+    test_s3_asyncwrite_cancel_while_reservation_deferred,
+    s_test_s3_asyncwrite_cancel_while_reservation_deferred)
+static int s_test_s3_asyncwrite_cancel_while_reservation_deferred(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct asyncwrite_tester tester;
+
+    /* Hold each async-write reservation pending for a good while, so we can reliably cancel
+     * the meta request while the very first part's buffer reservation is still deferred. */
+    struct deferring_pool_settings pool_settings = {.defer_delay_ms = 2000};
+    struct asyncwrite_tester_options options = {
+        .buffer_pool_factory_fn = s_deferring_pool_factory,
+        .buffer_pool_user_data = &pool_settings,
+    };
+
+    ASSERT_SUCCESS(s_asyncwrite_tester_init_ex(&tester, allocator, PART_SIZE * 2 /*object_size*/, &options));
+
+    /* Kick off a write of a full part. This reserves a buffer, which the pool defers, so the
+     * write future will be pending (not done) when we cancel below. We intentionally do NOT
+     * wait for this future to complete. */
+    struct aws_byte_cursor source_cursor = aws_byte_cursor_from_buf(&tester.source_buf);
+    struct aws_byte_cursor first_part = aws_byte_cursor_advance(&source_cursor, PART_SIZE);
+    struct aws_future_void *write_future = aws_s3_meta_request_write(tester.meta_request, first_part, false /*eof*/);
+    ASSERT_NOT_NULL(write_future);
+
+    /* Give poll_write() a moment to issue the (deferred) reservation and register its waker. */
+    aws_thread_current_sleep(aws_timestamp_convert(200, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+
+    /* Cancel while the reservation is still pending. This drives finish_default(), which must
+     * error the pending reservation future. */
+    aws_s3_meta_request_cancel(tester.meta_request);
+
+    ASSERT_TRUE(aws_future_void_wait(write_future, TIMEOUT_NANOS));
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_REQUEST_HAS_COMPLETED, aws_future_void_get_error(write_future));
+    write_future = aws_future_void_release(write_future);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester.s3_tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_CANCELED, tester.test_results.finished_error_code);
+    ASSERT_NOT_NULL(pool_settings.deferred_count_out);
+    ASSERT_UINT_EQUALS(1, aws_atomic_load_int(pool_settings.deferred_count_out));
 
     ASSERT_SUCCESS(s_asyncwrite_tester_clean_up(&tester));
     return 0;

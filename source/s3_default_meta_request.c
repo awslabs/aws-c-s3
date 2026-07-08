@@ -108,6 +108,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     }
 
     meta_request_default->content_length = (size_t)content_length;
+    meta_request_default->request_body = options->request_body;
 
     /* If request_type is unknown, look it up from operation name */
     if (request_type != AWS_S3_REQUEST_TYPE_UNKNOWN) {
@@ -283,7 +284,21 @@ static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_reques
     request_prep->request = request;
     request_prep->on_complete = aws_future_void_acquire(asyncstep_prepare_request);
 
-    if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
+    if (meta_request_default->request_body.len > 0 && request->num_times_prepared == 0) {
+        /* Zero-copy: the caller donated memory holding the entire body. Borrow it directly instead of
+         * allocating a new buffer and copying into it.
+         *
+         * `request->request_body` is a non-owning view over the caller's memory: its allocator is NULL,
+         * so aws_byte_buf clean-up is a no-op and we never free or realloc the caller's memory. The view
+         * persists on the request across any retries. The caller's memory must stay valid until the meta
+         * request is fully torn down.
+         */
+        request->request_body =
+            aws_byte_buf_from_array(meta_request_default->request_body.ptr, meta_request_default->request_body.len);
+
+        /* Body is already in memory; skip the async read and go straight to building the message. */
+        s_s3_default_prepare_request_finish(request_prep, AWS_ERROR_SUCCESS);
+    } else if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
         /* Kick off the async read */
