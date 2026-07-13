@@ -1990,7 +1990,7 @@ void aws_s3_meta_request_stream_response_body_synced(
 
     /* Parallel write: bypass priority queue entirely. Write task handles the write
      * and increments delivery counters directly. No ordering needed for offset-based writes. */
-    if (meta_request->recv_file_fd >= 0 && meta_request->recv_file_direct_io && request->part_number > 1) {
+    if (meta_request->recv_file_direct_io && request->part_number > 1) {
         ++meta_request->synced_data.num_parts_delivery_sent;
         aws_s3_request_acquire(request); /* prevent release while write task is pending */
         struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
@@ -2238,7 +2238,7 @@ static int s_deliver_body_to_sink(
 }
 
 /* Deliver events in event_delivery_array.
-/* Parallel write task -- does pwrite and handles delivery counters directly. */
+Parallel write task -- does pwrite and handles delivery counters directly. */
 static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
     struct aws_s3_request *request = arg;
@@ -2246,16 +2246,11 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
 
     if (task_status == AWS_TASK_STATUS_RUN_READY && meta_request->recv_filepath) {
         uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
-        struct aws_byte_buf *body = &request->send_data.response_body;
+
+        struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
+        s_deliver_body_to_sink(meta_request, &response_body, write_offset, request);
 
         aws_thread_id_t tid = aws_thread_current_thread_id();
-        printf("tid writting to disk is %p\n", tid);
-        int fd = open(aws_string_c_str(meta_request->recv_filepath), O_WRONLY | O_DIRECT);
-        if (fd >= 0) {
-            pwrite(fd, body->buffer, body->len, (off_t)write_offset);
-            close(fd);
-        }
-
         /* Record thread ID for test verification */
         size_t idx = (size_t)aws_atomic_fetch_add(&meta_request->parallel_write_count, 1);
         if (idx < 16) {
