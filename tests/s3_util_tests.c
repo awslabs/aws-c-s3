@@ -133,7 +133,9 @@ static int s_test_s3_replace_quote_entities(struct aws_allocator *allocator, voi
     for (size_t i = 0; i < AWS_ARRAY_SIZE(test_cases); ++i) {
         struct test_case *test_case = &test_cases[i];
 
-        struct aws_byte_buf result_byte_buf = aws_replace_quote_entities(allocator, test_case->test_string);
+        struct aws_byte_buf result_byte_buf;
+        aws_byte_buf_init(&result_byte_buf, allocator, 20);
+        ASSERT_SUCCESS(aws_byte_buf_append_unescaped_xml(allocator, test_case->test_string, &result_byte_buf));
 
         struct aws_byte_cursor result_byte_cursor = aws_byte_cursor_from_buf(&result_byte_buf);
 
@@ -1040,6 +1042,25 @@ static int s_test_s3_extract_parts_from_etag(struct aws_allocator *allocator, vo
         struct aws_byte_cursor etag = aws_byte_cursor_from_c_str("\"");
         ASSERT_FAILS(aws_s3_extract_parts_from_etag(etag, &num_parts));
     }
+
+    aws_s3_library_clean_up();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_checksum_header, s_test_s3_checksum_header)
+static int s_test_s3_checksum_header(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    aws_s3_library_init(allocator);
+
+    ASSERT_TRUE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-crc32")));
+    ASSERT_TRUE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-foo")));
+    ASSERT_TRUE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-md5")));
+
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-type")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-mode")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-checksum-algorithm")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("x-amz-cHeCKsuM-tYpE")));
+    ASSERT_FALSE(aws_s3_is_checksum_value_header_name(aws_byte_cursor_from_c_str("X-AMZ-CHECKSUM-ALGORITHM")));
 
     aws_s3_library_clean_up();
     return 0;

@@ -707,6 +707,167 @@ TEST_CASE(single_upload_unsigned_with_trailer_checksum_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* Tracks what a `request_body` test observed about the request body as it was being sent. */
+struct request_body_tester {
+    /* The caller-owned memory that was passed via `request_body`. */
+    struct aws_byte_cursor caller_body;
+    /* Set to true if, on any send attempt, the request body buffer did NOT point at the caller's exact buffer. */
+    bool saw_different_buffer;
+    /* Number of times the request was sent (initial attempt + retries). */
+    size_t send_count;
+    /* If non-zero, inject a `force_throttle` header until this many attempts have been made, to trigger retries. */
+    size_t throttle_until_attempt;
+    /* The Content-Length header value observed on the last outgoing request (SIZE_MAX if the header was absent). */
+    size_t observed_content_length;
+};
+
+/* Patched http_connection_make_request that verifies the outgoing request body points at the caller's exact buffer,
+ * and optionally injects a throttle header to force retries.
+ * This fires on every send attempt, so it verifies that retries re-use the caller's same buffer. */
+static struct aws_http_stream *s_request_body_make_request(
+    struct aws_http_connection *client_connection,
+    const struct aws_http_make_request_options *options) {
+
+    struct aws_s3_connection *connection = options->user_data;
+    struct aws_s3_request *request = connection->request;
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    /* The tester owns meta_request->user_data, so reach our body-tester via tester->user_data. */
+    struct aws_s3_tester *tester = meta_request->client->shutdown_callback_user_data;
+    struct request_body_tester *body_tester = tester->user_data;
+
+    ++body_tester->send_count;
+
+    /* The request body must point at the caller's exact buffer (same pointer and length). */
+    if (request->request_body.buffer != body_tester->caller_body.ptr ||
+        request->request_body.len != body_tester->caller_body.len) {
+        body_tester->saw_different_buffer = true;
+    }
+
+    /* Record the Content-Length the client put on the wire, so the test can verify it was derived correctly. */
+    struct aws_http_headers *headers = aws_http_message_get_headers(options->request);
+    struct aws_byte_cursor content_length_value;
+    if (aws_http_headers_get(headers, g_content_length_header_name, &content_length_value) == AWS_OP_SUCCESS) {
+        uint64_t parsed = 0;
+        if (aws_byte_cursor_utf8_parse_u64(content_length_value, &parsed) == AWS_OP_SUCCESS) {
+            body_tester->observed_content_length = (size_t)parsed;
+        }
+    } else {
+        body_tester->observed_content_length = SIZE_MAX;
+    }
+
+    /* Optionally force a throttle (503) so the client retries, re-sending the same caller-owned memory. */
+    if (body_tester->send_count <= body_tester->throttle_until_attempt) {
+        struct aws_http_header throttle_header = {
+            .name = aws_byte_cursor_from_c_str("force_throttle"),
+            .value = aws_byte_cursor_from_c_str("true"),
+        };
+        aws_http_message_add_header(options->request, throttle_header);
+    }
+
+    return aws_http_connection_make_request(client_connection, options);
+}
+
+/* Shared helper for `request_body` tests. */
+static int s_request_body_test_helper(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor body,
+    size_t throttle_until_attempt,
+    bool omit_content_length) {
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .max_active_connections_override = 1,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* Patch the client vtable to inspect the body of each outgoing request (and inject throttles). */
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->http_connection_make_request = s_request_body_make_request;
+
+    struct request_body_tester body_tester = {
+        .caller_body = body,
+        .throttle_until_attempt = throttle_until_attempt,
+        /* Sentinel: distinct from any real Content-Length (including 0) so the assertion only passes if the hook
+         * actually observed the header on the wire. */
+        .observed_content_length = SIZE_MAX,
+    };
+    tester.user_data = &body_tester;
+
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+    struct aws_byte_cursor host_cursor = *aws_uri_authority(&mock_server);
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_cursor, g_test_body_content_type, object_path, body.len, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    if (omit_content_length) {
+        aws_http_headers_erase(aws_http_message_get_headers(message), g_content_length_header_name);
+    }
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("PutObject"),
+        .message = message,
+        .endpoint = &mock_server,
+        .request_body = body,
+    };
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(
+        &tester, client, &meta_request_options, &out_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS));
+
+    if (body.len > 0) {
+        ASSERT_FALSE(body_tester.saw_different_buffer);
+    }
+    ASSERT_UINT_EQUALS(throttle_until_attempt + 1, body_tester.send_count);
+    ASSERT_UINT_EQUALS(body.len, body_tester.observed_content_length);
+
+    aws_http_message_release(message);
+    aws_uri_clean_up(&mock_server);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Happy path: a DEFAULT PutObject with `request_body` sends the body from the caller's exact buffer. */
+TEST_CASE(request_body_mock_server) {
+    (void)ctx;
+    struct aws_byte_cursor body = aws_byte_cursor_from_c_str("test_body");
+    return s_request_body_test_helper(allocator, body, 0 /*throttle_until_attempt*/, false /*omit_content_length*/);
+}
+
+/* On retry, the request body still points at the caller's same `request_body` buffer (re-used across attempts). */
+TEST_CASE(request_body_with_retry_mock_server) {
+    (void)ctx;
+    struct aws_byte_cursor body = aws_byte_cursor_from_c_str("test_body");
+    return s_request_body_test_helper(allocator, body, 2 /*throttle_until_attempt*/, false /*omit_content_length*/);
+}
+
+/* Happy path with no Content-Length header: the client must derive the length from `request_body.len`. */
+TEST_CASE(request_body_no_content_length_mock_server) {
+    (void)ctx;
+    struct aws_byte_cursor body = aws_byte_cursor_from_c_str("test_body");
+    return s_request_body_test_helper(allocator, body, 0 /*throttle_until_attempt*/, true /*omit_content_length*/);
+}
+
+/* Happy path: a zero-length `request_body` with a non-NULL pointer. */
+TEST_CASE(request_body_empty_mock_server) {
+    (void)ctx;
+    uint8_t body_storage[1];
+    struct aws_byte_cursor empty_body = {.ptr = body_storage, .len = 0};
+    return s_request_body_test_helper(
+        allocator, empty_body, 0 /*throttle_until_attempt*/, false /*omit_content_length*/);
+}
+
 TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     (void)ctx;
 #if defined(AWS_OS_WINDOWS)

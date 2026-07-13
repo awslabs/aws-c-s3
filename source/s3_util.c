@@ -333,31 +333,6 @@ void aws_s3_init_default_signing_config(
     signing_config->signed_body_value = g_aws_signed_body_value_unsigned_payload;
 }
 
-static struct aws_byte_cursor s_quote_entity_literal = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("&quot;");
-static struct aws_byte_cursor s_quote_literal = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("\"");
-
-struct aws_byte_buf aws_replace_quote_entities(struct aws_allocator *allocator, struct aws_byte_cursor src) {
-    struct aws_byte_buf out_buf;
-    aws_byte_buf_init(&out_buf, allocator, src.len);
-
-    for (size_t i = 0; i < src.len; ++i) {
-        size_t chars_remaining = src.len - i;
-
-        if (chars_remaining >= s_quote_entity_literal.len &&
-            !strncmp((const char *)&src.ptr[i], (const char *)s_quote_entity_literal.ptr, s_quote_entity_literal.len)) {
-            /* Append quote */
-            aws_byte_buf_append(&out_buf, &s_quote_literal);
-            i += s_quote_entity_literal.len - 1;
-        } else {
-            /* Append character */
-            struct aws_byte_cursor character_cursor = aws_byte_cursor_from_array(&src.ptr[i], 1);
-            aws_byte_buf_append(&out_buf, &character_cursor);
-        }
-    }
-
-    return out_buf;
-}
-
 struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur) {
 
     if (in_cur.len >= 2 && in_cur.ptr[0] == '"' && in_cur.ptr[in_cur.len - 1] == '"') {
@@ -1043,4 +1018,13 @@ int aws_s3_extract_parts_from_etag(struct aws_byte_cursor etag_header_value, uin
         AWS_BYTE_CURSOR_PRI(etag_header_value));
 
     return AWS_OP_SUCCESS;
+}
+
+static const struct aws_byte_cursor s_checksum_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-");
+
+bool aws_s3_is_checksum_value_header_name(struct aws_byte_cursor header_name) {
+    return aws_byte_cursor_starts_with_ignore_case(&header_name, &s_checksum_prefix) &&
+           !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-type") &&
+           !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-mode") &&
+           !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-algorithm");
 }

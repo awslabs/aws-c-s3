@@ -25,7 +25,8 @@ static void s_aws_s3_upload_request_checksum_context_destroy(void *context) {
 
 static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checksum_context_new_base(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
+    bool has_review_callback) {
     AWS_PRECONDITION(allocator);
 
     struct aws_s3_upload_request_checksum_context *context =
@@ -48,6 +49,7 @@ static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checks
     context->algorithm = checksum_config->checksum_algorithm;
     context->location = checksum_config->location;
     context->encoded_checksum_size = aws_get_digest_size_from_checksum_algorithm(context->algorithm);
+    context->has_review_callback = has_review_callback;
 
     /* Convert to base64 encoded size */
     size_t encoded_size = 0;
@@ -62,9 +64,10 @@ static struct aws_s3_upload_request_checksum_context *s_s3_upload_request_checks
 
 struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
+    bool has_review_callback) {
     struct aws_s3_upload_request_checksum_context *context =
-        s_s3_upload_request_checksum_context_new_base(allocator, checksum_config);
+        s_s3_upload_request_checksum_context_new_base(allocator, checksum_config, has_review_callback);
     if (context && context->encoded_checksum_size > 0) {
         /* Initial the buffer for checksum */
         aws_byte_buf_init(&context->synced_data.base64_checksum, allocator, context->encoded_checksum_size);
@@ -75,9 +78,10 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
 struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
-    struct aws_byte_cursor existing_base64_checksum) {
+    struct aws_byte_cursor existing_base64_checksum,
+    bool has_review_callback) {
     struct aws_s3_upload_request_checksum_context *context =
-        s_s3_upload_request_checksum_context_new_base(allocator, checksum_config);
+        s_s3_upload_request_checksum_context_new_base(allocator, checksum_config, has_review_callback);
     if (context) {
         /* Initial the buffer for checksum from the exist checksum */
         if (context->encoded_checksum_size != existing_base64_checksum.len) {
@@ -115,7 +119,8 @@ struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_co
 }
 
 bool aws_s3_upload_request_checksum_context_should_calculate(struct aws_s3_upload_request_checksum_context *context) {
-    if (!context || context->algorithm == AWS_SCA_NONE) {
+    if (!context || context->algorithm == AWS_SCA_NONE || context->algorithm == AWS_SCA_UNKNOWN ||
+        (context->location == AWS_SCL_NONE && !context->has_review_callback)) {
         return false;
     }
 

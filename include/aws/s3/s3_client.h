@@ -84,6 +84,11 @@ enum aws_s3_meta_request_type {
      *   source will not work
      * 3. source bucket is assumed to be in the same region as dest
      * 4. source bucket and dest bucket must both be either directory buckets or regular buckets.
+     * 5. on the multipart copy path, metadata, tags, and annotations are not
+     *   automatically copied from the source object. The caller must set
+     *   `x-amz-metadata-directive: REPLACE` and include all desired metadata
+     *   headers and `x-amz-tagging` on the request. Single-part copies (< 1GB)
+     *   are not affected as S3 CopyObject natively handles COPY directives.
      *
      * Provide the `meta_request_options.copy_source_uri` to bypass limitation 1 & 2.
      */
@@ -262,7 +267,7 @@ typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
  *         https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html#API_PutObject_RequestSyntax
  *         If an error occurs, call aws_raise_error(E) with a proper error code and return NULL.
  */
-typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request *meta_request,
+typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct aws_s3_meta_request * meta_request,
                                                                          void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
@@ -348,9 +353,16 @@ struct aws_s3_file_io_options {
     /**
      * Enable direct IO to bypass the OS cache. Helpful when the disk I/O outperforms the kernel cache.
      * Notes:
-     * - Only supported on linux for now.
+     * - Currently only Linux supports direct I/O. On unsupported platforms, the request transparently
+     *   falls back to buffered I/O and a warning is logged.
      * - Supported for both upload (send_filepath) and download (recv_filepath).
-     * - For download, O_DIRECT is not supported with AWS_S3_RECV_FILE_CREATE_OR_APPEND.
+     * - This is a BEST-EFFORT optimization. The request transparently falls back to
+     *   buffered I/O (logging a warning) if any of the following preconditions are not met:
+     *     - part_size is not page-aligned
+     *     - For AWS_S3_RECV_FILE_WRITE_TO_POSITION, recv_file_position is not page-aligned
+     *     - For AWS_S3_RECV_FILE_CREATE_OR_APPEND, the existing file size is not page-aligned
+     *     - The last part of the download has an unaligned length
+     *     - Buffer allocated is NOT page size aligned.
      * - Check NOTES for O_DIRECT for additional info https://man7.org/linux/man-pages/man2/openat.2.html
      * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
      */
@@ -435,7 +447,7 @@ typedef int(aws_s3_meta_request_upload_review_fn)(
  * @return The aws_s3express_credentials_provider.
  */
 typedef struct aws_s3express_credentials_provider *(
-    aws_s3express_provider_factory_fn)(struct aws_allocator *allocator,
+    aws_s3express_provider_factory_fn)(struct aws_allocator * allocator,
                                        struct aws_s3_client *client,
                                        aws_simple_completion_callback on_provider_shutdown_callback,
                                        void *shutdown_user_data,
@@ -745,6 +757,8 @@ struct aws_s3_checksum_config {
  * 2) If the data is on disk, set `send_filepath` for best performance.
  * 3) If the data is available, but copying each chunk is asynchronous, set `send_async_stream`.
  * 4) If you're not sure when each chunk of data will be available, use `send_using_async_writes`.
+ * 5) If the data is already in memory and you want the client to upload it with no extra copy or
+ *    allocation, set `request_body` (DEFAULT meta request only).
  */
 struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
@@ -873,6 +887,30 @@ struct aws_s3_meta_request_options {
      * Do not set if the body is being passed by other means (see note above).
      */
     bool send_using_async_writes;
+
+    /**
+     * Optional - EXPERIMENTAL/UNSTABLE
+     * If set, the request body is sent directly from this caller-owned memory, with no additional
+     * allocation or copy by the client.
+     *
+     * Use this when you already hold the entire fixed request body in memory (e.g. in a buffer from your
+     * own memory pool) and want to avoid the client allocating a new buffer and copying into it.
+     *
+     * Memory ownership / lifetime:
+     * - The client BORROWS this memory; it never copies, frees, or modifies it.
+     * - The memory MUST stay valid and unmodified until the meta request completes. The client
+     *   re-reads it on every send attempt, so it must outlive all retries. To learn when it is safe
+     *   to free or reuse the memory, use the meta request's shutdown callback (the `aws_s3_meta_request_shutdown_fn`
+     *   passed when the meta request was created); it is invoked once the meta request is fully torn
+     *   down, after the request and all its retries are done.
+     *
+     * This is currently only supported for an AWS_S3_META_REQUEST_TYPE_DEFAULT meta request, which
+     * sends the body as a single request.
+     *
+     * Do not set if the body is being passed by other means (i.e. the message body-stream,
+     * send_filepath, send_async_stream, or send_using_async_writes).
+     */
+    struct aws_byte_cursor request_body;
 
     /**
      * Optional.
