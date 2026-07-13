@@ -2027,74 +2027,12 @@ TEST_CASE(request_timeout_error_mock_server) {
 /*
  * Test: multipart upload reads input stream in part-number order even under memory pressure.
  *
- * Uses an input stream that fatally asserts if reads go backwards (which would happen
- * if buffer pool pending reserves complete out of FIFO order and the meta request
- * doesn't reorder before reading).
- *
  * Uses the mock server with minimum memory (1GB) and a 40MB upload (5 parts at 8MB).
  * Under memory pressure, pending buffer reserves can complete out of order across
  * threads. The pending_prepare_queue ensures reads stay sequential.
+ * The sanity check in aws_s3_meta_request_read_body will fail the meta request
+ * if sequential reads ever arrive out of part order.
  */
-
-struct s_ordered_input_stream_impl {
-    struct aws_input_stream base;
-    struct aws_allocator *allocator;
-    size_t length;
-    size_t position;
-};
-
-static int s_ordered_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
-    struct s_ordered_input_stream_impl *impl = AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
-
-    while (dest->len < dest->capacity && impl->position < impl->length) {
-        uint8_t val = (uint8_t)(impl->position & 0xFF);
-        aws_byte_buf_write_u8(dest, val);
-        impl->position++;
-    }
-    return AWS_OP_SUCCESS;
-}
-
-static int s_ordered_stream_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
-    struct s_ordered_input_stream_impl *impl = AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
-    status->is_end_of_stream = impl->position == impl->length;
-    status->is_valid = true;
-    return AWS_OP_SUCCESS;
-}
-
-static int s_ordered_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
-    struct s_ordered_input_stream_impl *impl = AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
-    *out_length = (int64_t)impl->length;
-    return AWS_OP_SUCCESS;
-}
-
-static int s_ordered_stream_seek(struct aws_input_stream *stream, int64_t offset, enum aws_stream_seek_basis basis) {
-    (void)stream;
-    (void)offset;
-    (void)basis;
-    return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
-}
-
-static void s_ordered_stream_destroy(struct s_ordered_input_stream_impl *impl) {
-    aws_mem_release(impl->allocator, impl);
-}
-
-static struct aws_input_stream_vtable s_ordered_stream_vtable = {
-    .seek = s_ordered_stream_seek,
-    .read = s_ordered_stream_read,
-    .get_status = s_ordered_stream_get_status,
-    .get_length = s_ordered_stream_get_length,
-};
-
-static struct aws_input_stream *s_ordered_input_stream_new(struct aws_allocator *allocator, size_t length) {
-    struct s_ordered_input_stream_impl *impl = aws_mem_calloc(allocator, 1, sizeof(struct s_ordered_input_stream_impl));
-    impl->allocator = allocator;
-    impl->length = length;
-    impl->position = 0;
-    impl->base.vtable = &s_ordered_stream_vtable;
-    aws_ref_count_init(&impl->base.ref_count, impl, (aws_simple_completion_callback *)s_ordered_stream_destroy);
-    return &impl->base;
-}
-
 TEST_CASE(multipart_upload_ordered_read_under_memory_pressure_mock_server) {
     (void)ctx;
 
@@ -2110,18 +2048,7 @@ TEST_CASE(multipart_upload_ordered_read_under_memory_pressure_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* 40MB = 5 parts of 8MB each */
-    size_t content_length = MB_TO_BYTES(40);
-    struct aws_input_stream *ordered_stream = s_ordered_input_stream_new(allocator, content_length);
-
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
-
-    struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
-    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
-
-    struct aws_http_message *message = aws_s3_test_put_object_request_new(
-        allocator, &host_cursor, object_path, g_test_body_content_type, ordered_stream, 0);
 
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
@@ -2130,20 +2057,20 @@ TEST_CASE(multipart_upload_ordered_read_under_memory_pressure_mock_server) {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
-        .message = message,
+        .put_options =
+            {
+                .object_size_mb = 40,
+                .object_path_override = object_path,
+            },
         .mock_server = true,
     };
 
-    /* If reads happen out of order, the sequential stream position will never go
-     * backwards (it advances on each read). The real verification is that the upload
-     * succeeds without hitting any assertions in the CRT. */
+    /* The read-order sanity check in aws_s3_meta_request_read_body will fail the
+     * meta request if parts are prepared out of order. */
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
-    aws_http_message_release(message);
-    aws_input_stream_release(ordered_stream);
-    aws_string_destroy(host_name);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
