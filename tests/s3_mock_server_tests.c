@@ -2044,8 +2044,7 @@ struct s_ordered_input_stream_impl {
 };
 
 static int s_ordered_stream_read(struct aws_input_stream *stream, struct aws_byte_buf *dest) {
-    struct s_ordered_input_stream_impl *impl =
-        AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
+    struct s_ordered_input_stream_impl *impl = AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
 
     while (dest->len < dest->capacity && impl->position < impl->length) {
         uint8_t val = (uint8_t)(impl->position & 0xFF);
@@ -2056,24 +2055,19 @@ static int s_ordered_stream_read(struct aws_input_stream *stream, struct aws_byt
 }
 
 static int s_ordered_stream_get_status(struct aws_input_stream *stream, struct aws_stream_status *status) {
-    struct s_ordered_input_stream_impl *impl =
-        AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
+    struct s_ordered_input_stream_impl *impl = AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
     status->is_end_of_stream = impl->position == impl->length;
     status->is_valid = true;
     return AWS_OP_SUCCESS;
 }
 
 static int s_ordered_stream_get_length(struct aws_input_stream *stream, int64_t *out_length) {
-    struct s_ordered_input_stream_impl *impl =
-        AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
+    struct s_ordered_input_stream_impl *impl = AWS_CONTAINER_OF(stream, struct s_ordered_input_stream_impl, base);
     *out_length = (int64_t)impl->length;
     return AWS_OP_SUCCESS;
 }
 
-static int s_ordered_stream_seek(
-    struct aws_input_stream *stream,
-    int64_t offset,
-    enum aws_stream_seek_basis basis) {
+static int s_ordered_stream_seek(struct aws_input_stream *stream, int64_t offset, enum aws_stream_seek_basis basis) {
     (void)stream;
     (void)offset;
     (void)basis;
@@ -2092,14 +2086,12 @@ static struct aws_input_stream_vtable s_ordered_stream_vtable = {
 };
 
 static struct aws_input_stream *s_ordered_input_stream_new(struct aws_allocator *allocator, size_t length) {
-    struct s_ordered_input_stream_impl *impl =
-        aws_mem_calloc(allocator, 1, sizeof(struct s_ordered_input_stream_impl));
+    struct s_ordered_input_stream_impl *impl = aws_mem_calloc(allocator, 1, sizeof(struct s_ordered_input_stream_impl));
     impl->allocator = allocator;
     impl->length = length;
     impl->position = 0;
     impl->base.vtable = &s_ordered_stream_vtable;
-    aws_ref_count_init(
-        &impl->base.ref_count, impl, (aws_simple_completion_callback *)s_ordered_stream_destroy);
+    aws_ref_count_init(&impl->base.ref_count, impl, (aws_simple_completion_callback *)s_ordered_stream_destroy);
     return &impl->base;
 }
 
@@ -2128,8 +2120,8 @@ TEST_CASE(multipart_upload_ordered_read_under_memory_pressure_mock_server) {
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
     struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
 
-    struct aws_http_message *message =
-        aws_s3_test_put_object_request_new(allocator, &host_cursor, object_path, g_test_body_content_type, ordered_stream, 0);
+    struct aws_http_message *message = aws_s3_test_put_object_request_new(
+        allocator, &host_cursor, object_path, g_test_body_content_type, ordered_stream, 0);
 
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);

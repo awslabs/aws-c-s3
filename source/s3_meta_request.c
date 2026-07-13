@@ -2681,12 +2681,13 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(synchronous_stream);
 
-    /* Sequential stream reads must happen in order. If they don't, it means
-     * buffer reservations completed out of part-number order. */
-    if (offset != meta_request->io_threaded_data.next_read_offset) {
+    /* Sequential stream reads must happen in increasing part order. If a read
+     * arrives with a part_range_start less than the last one seen, it means parts
+     * were prepared out of order. */
+    if (offset < meta_request->io_threaded_data.next_read_offset) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Sequential stream read out of order. Expected offset %" PRIu64 " but got %" PRIu64,
+            "id=%p: Sequential stream read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
             (void *)meta_request,
             meta_request->io_threaded_data.next_read_offset,
             offset);
@@ -2710,7 +2711,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         }
     }
 
-    meta_request->io_threaded_data.next_read_offset = offset + buffer->len;
+    meta_request->io_threaded_data.next_read_offset = offset;
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:

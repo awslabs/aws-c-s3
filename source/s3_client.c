@@ -2102,8 +2102,8 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     /* END CRITICAL SECTION */
 
     bool needs_ordered_prepare = request->part_number > 0 &&
-        meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-        !meta_request->request_body_parallel_stream;
+                                 meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+                                 !meta_request->request_body_parallel_stream;
 
     if (needs_ordered_prepare) {
         /* Insert into priority queue and drain in order to ensure sequential
