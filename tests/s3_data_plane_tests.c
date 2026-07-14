@@ -9925,7 +9925,8 @@ static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
 
     if (pool_impl->futures_count == 5) {
         for (size_t i = pool_impl->futures_count; i > 0; i--) {
-            struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(pool_impl->allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+            struct aws_s3_buffer_ticket *ticket =
+                aws_mem_calloc(pool_impl->allocator, 1, sizeof(struct aws_s3_buffer_ticket));
             pool_impl->tickets[i - 1] = ticket;
             pool_impl->tickets[i - 1]->impl = pool_impl->buffers[i - 1];
             pool_impl->tickets[i - 1]->vtable = &s_manual_ticket_vtable;
@@ -9987,7 +9988,7 @@ struct aws_s3_buffer_pool *s_manual_pool_fn(
     return pool;
 }
 
-/* Custom buffer tool test that will put first 5 buffer pool reservations into pending and then 
+/* Custom buffer tool test that will put first 5 buffer pool reservations into pending and then
     complete all of them in reverse order. */
 AWS_TEST_CASE(test_s3_upload_out_of_order_review, s_test_s3_upload_out_of_order_review)
 static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator, void *ctx) {
