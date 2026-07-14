@@ -309,7 +309,9 @@ struct aws_s3_meta_request {
         /* Priority queue of requests that have acquired their buffer ticket but must wait
          * for earlier parts to be dispatched for prepare first. This ensures sequential
          * input stream reads happen in part-number order even when buffer pool reservations
-         * complete out of order. Only used for uploads with sequential streams. */
+         * complete out of order. Only used for uploads with sequential streams.
+         * Note: each element is the pending request, callback to the next state and some user data
+         * (aws_s3_pending_prepare_entry). */
         struct aws_priority_queue pending_prepare_queue;
 
         /* Next part number that should be dispatched from pending_prepare_queue. */

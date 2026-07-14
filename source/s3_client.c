@@ -2101,29 +2101,18 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
     /* END CRITICAL SECTION */
 
-    bool needs_ordered_prepare = request->part_number > 0 &&
-                                 meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-                                 !meta_request->request_body_parallel_stream;
+    struct aws_s3_pending_prepare_entry entry = {
+        .request = request,
+        .callback = payload->callback,
+        .user_data = payload->user_data,
+    };
+    aws_priority_queue_push(&meta_request->io_threaded_data.pending_prepare_queue, &entry);
 
-    if (needs_ordered_prepare) {
-        /* Insert into priority queue and drain in order to ensure sequential
-         * stream reads happen in part-number order. */
-        struct aws_s3_pending_prepare_entry entry = {
-            .request = request,
-            .callback = payload->callback,
-            .user_data = payload->user_data,
-        };
-        aws_priority_queue_push(&meta_request->io_threaded_data.pending_prepare_queue, &entry);
+    aws_future_s3_buffer_ticket_release(payload->buffer_future);
+    aws_mem_release(payload->allocator, payload);
 
-        aws_future_s3_buffer_ticket_release(payload->buffer_future);
-        aws_mem_release(payload->allocator, payload);
+    s_drain_pending_prepare_queue(meta_request);
 
-        s_drain_pending_prepare_queue(meta_request);
-    } else {
-        aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
-        aws_future_s3_buffer_ticket_release(payload->buffer_future);
-        aws_mem_release(payload->allocator, payload);
-    }
     return;
 }
 
