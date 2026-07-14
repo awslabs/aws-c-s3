@@ -9838,11 +9838,11 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
 }
 
 /*
-* Make sure that upload reads data in sequential order.
-* Specifically this tests a case of mem pool hitting allocation limit for regular sized part, 
-* but still having enough mem for last part. for this case mem pool should not allocate last part
-* until all regular parts are done. i.e. ordering should be fifo.
-*/
+ * Make sure that upload reads data in sequential order.
+ * Specifically this tests a case of mem pool hitting allocation limit for regular sized part,
+ * but still having enough mem for last part. for this case mem pool should not allocate last part
+ * until all regular parts are done. i.e. ordering should be fifo.
+ */
 AWS_TEST_CASE(test_s3_upload_in_order_review, s_test_s3_upload_in_order_review)
 static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -9850,9 +9850,7 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     struct aws_s3_tester_client_options client_options = {
-        .part_size = MB_TO_BYTES(250),
-        .memory_limit_in_bytes = GB_TO_BYTES(1)
-    };
+        .part_size = MB_TO_BYTES(250), .memory_limit_in_bytes = GB_TO_BYTES(1)};
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -9918,7 +9916,7 @@ static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
 
     struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)pool->impl;
     aws_mutex_lock(&pool_impl->mutex);
-    
+
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(pool_impl->allocator);
     pool_impl->futures[pool_impl->futures_count] = future;
 
@@ -9928,12 +9926,14 @@ static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
         for (size_t i = pool_impl->futures_count; i > 0; i--) {
             struct aws_s3_buffer_ticket *ticket_wrapper =
                 aws_mem_calloc(pool_impl->allocator, 1, sizeof(struct aws_s3_buffer_ticket));
-            ticket_wrapper->impl = pool_impl->buffers[i-1];
+            ticket_wrapper->impl = pool_impl->buffers[i - 1];
             ticket_wrapper->vtable = &s_manual_ticket_vtable;
             aws_ref_count_init(
-                &ticket_wrapper->ref_count, ticket_wrapper, (aws_simple_completion_callback *)s_aws_ticket_wrapper_destroy);
-        
-            aws_future_s3_buffer_ticket_set_result_by_move(pool_impl->futures[i-1], &ticket_wrapper);
+                &ticket_wrapper->ref_count,
+                ticket_wrapper,
+                (aws_simple_completion_callback *)s_aws_ticket_wrapper_destroy);
+
+            aws_future_s3_buffer_ticket_set_result_by_move(pool_impl->futures[i - 1], &ticket_wrapper);
         }
     }
 
@@ -9969,7 +9969,7 @@ struct aws_s3_buffer_pool *s_manual_pool_fn(
 
     pool->impl = pool_impl;
     pool->vtable = &s_manual_pool_vtable;
-    
+
     aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)s_manual_pool_destroy);
 
     return pool;
@@ -9981,9 +9981,7 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
     struct aws_s3_meta_request_test_results test_results;
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
-    struct aws_s3_tester_client_options client_options = {
-        .buffer_pool_factory_fn = s_manual_pool_fn
-    };
+    struct aws_s3_tester_client_options client_options = {.buffer_pool_factory_fn = s_manual_pool_fn};
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
