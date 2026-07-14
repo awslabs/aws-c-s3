@@ -2103,13 +2103,13 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     /* END CRITICAL SECTION */
 
     /*
-    * Note: on why following check excludes everything, but put object type.
-    * Specific problem is with get object, which has complex logic of sometimes trying with bad range and 
-    * if that fails trying with part number, etc... that can throw off the counter for which part num is expected next
-    * and hang the meta request. 
-    * Lets play safe for now and only include puts in this logic. 
-    * We can revisit whether it makes sense for get and add it later.
-    */
+     * Note: on why following check excludes everything, but put object type.
+     * Specific problem is with get object, which has complex logic of sometimes trying with bad range and
+     * if that fails trying with part number, etc... that can throw off the counter for which part num is expected next
+     * and hang the meta request.
+     * Lets play safe for now and only include puts in this logic.
+     * We can revisit whether it makes sense for get and add it later.
+     */
 
     bool needs_ordered_prepare = request->part_number > 0 &&
                                  meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
