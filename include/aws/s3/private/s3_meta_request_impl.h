@@ -312,10 +312,10 @@ struct aws_s3_meta_request {
          * complete out of order.
          * Note: each element is the pending request, callback to the next state and some user data
          * (aws_s3_pending_prepare_entry). */
-        struct aws_priority_queue pending_prepare_queue;
+        struct aws_priority_queue pending_put_prepare_queue;
 
-        /* Next part number that should be dispatched from pending_prepare_queue. */
-        uint32_t next_part_to_prepare;
+        /* Next part number that should be dispatched from pending_put_prepare_queue. */
+        uint32_t next_put_part_to_prepare;
 
         /* Expected offset for the next sequential stream read. Used to detect out-of-order reads. */
         uint64_t next_read_offset;
