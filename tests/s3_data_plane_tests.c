@@ -9898,6 +9898,7 @@ struct s_manual_pool_impl {
     struct aws_allocator *allocator;
 
     struct aws_future_s3_buffer_ticket *futures[10];
+    struct aws_s3_buffer_ticket *tickets[10];
     size_t futures_count;
 
     uint8_t buffers[10][8 * 1024 * 1024];
@@ -9924,16 +9925,16 @@ static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
 
     if (pool_impl->futures_count == 5) {
         for (size_t i = pool_impl->futures_count; i > 0; i--) {
-            struct aws_s3_buffer_ticket *ticket_wrapper =
-                aws_mem_calloc(pool_impl->allocator, 1, sizeof(struct aws_s3_buffer_ticket));
-            ticket_wrapper->impl = pool_impl->buffers[i - 1];
-            ticket_wrapper->vtable = &s_manual_ticket_vtable;
+            struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(pool_impl->allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+            pool_impl->tickets[i - 1] = ticket;
+            pool_impl->tickets[i - 1]->impl = pool_impl->buffers[i - 1];
+            pool_impl->tickets[i - 1]->vtable = &s_manual_ticket_vtable;
             aws_ref_count_init(
-                &ticket_wrapper->ref_count,
-                ticket_wrapper,
+                &pool_impl->tickets[i - 1]->ref_count,
+                pool_impl->tickets[i - 1],
                 (aws_simple_completion_callback *)s_aws_ticket_wrapper_destroy);
 
-            aws_future_s3_buffer_ticket_set_result_by_move(pool_impl->futures[i - 1], &ticket_wrapper);
+            aws_future_s3_buffer_ticket_set_result_by_move(pool_impl->futures[i - 1], &ticket);
         }
     }
 
@@ -9952,7 +9953,18 @@ static struct aws_s3_buffer_pool_vtable s_manual_pool_vtable = {
 
 static void s_manual_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
     struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)buffer_pool->impl;
+
+    for (size_t i = 0; i < 10; ++i) {
+        if (pool_impl->futures[i]) {
+            aws_future_s3_buffer_ticket_release(pool_impl->futures[i]);
+        }
+        if (pool_impl->tickets[i]) {
+            aws_mem_release(pool_impl->allocator, pool_impl->tickets[i]);
+        }
+    }
+
     aws_mem_release(pool_impl->allocator, buffer_pool);
+    aws_mem_release(pool_impl->allocator, pool_impl);
 }
 
 struct aws_s3_buffer_pool *s_manual_pool_fn(
@@ -9975,6 +9987,8 @@ struct aws_s3_buffer_pool *s_manual_pool_fn(
     return pool;
 }
 
+/* Custom buffer tool test that will put first 5 buffer pool reservations into pending and then 
+    complete all of them in reverse order. */
 AWS_TEST_CASE(test_s3_upload_out_of_order_review, s_test_s3_upload_out_of_order_review)
 static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
