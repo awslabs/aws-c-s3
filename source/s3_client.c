@@ -2036,9 +2036,9 @@ static void s_s3_prepare_acquire_mem_callback_and_destroy(
     aws_mem_release(payload->allocator, payload);
 }
 
-/* Drain the pending_prepare_queue in part-number order. Only dispatches requests
+/* Drain the pending_put_prepare_queue in part-number order. Only dispatches requests
  * whose part_number matches next_part_to_prepare. Called on io_event_loop thread. */
-static void s_drain_pending_prepare_queue(struct aws_s3_meta_request *meta_request) {
+static void s_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_request) {
     struct aws_priority_queue *queue = &meta_request->io_threaded_data.pending_put_prepare_queue;
 
     while (aws_priority_queue_size(queue) > 0) {
@@ -2128,7 +2128,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
         aws_future_s3_buffer_ticket_release(payload->buffer_future);
         aws_mem_release(payload->allocator, payload);
 
-        s_drain_pending_prepare_queue(meta_request);
+        s_drain_pending_put_prepare_queue(meta_request);
     } else {
         aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
         aws_future_s3_buffer_ticket_release(payload->buffer_future);

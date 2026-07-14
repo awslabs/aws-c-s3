@@ -352,7 +352,7 @@ struct aws_s3_meta_request {
     struct aws_s3_file_io_options fio_opts;
 };
 
-/* Entry in the pending_prepare_queue. Holds a request that has acquired its buffer
+/* Entry in the pending_put_prepare_queue. Holds a request that has acquired its buffer
  * ticket but must wait for earlier parts to dispatch for prepare first. */
 struct aws_s3_pending_prepare_entry {
     struct aws_s3_request *request;

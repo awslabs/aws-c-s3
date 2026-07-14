@@ -260,12 +260,12 @@ int aws_s3_meta_request_init_base(
         sizeof(struct aws_s3_meta_request_event));
 
     aws_priority_queue_init_dynamic(
-        &meta_request->io_threaded_data.pending_prepare_queue,
+        &meta_request->io_threaded_data.pending_put_prepare_queue,
         meta_request->allocator,
         0,
         sizeof(struct aws_s3_pending_prepare_entry),
         s_s3_pending_prepare_entry_pred);
-    meta_request->io_threaded_data.next_part_to_prepare = 1;
+    meta_request->io_threaded_data.next_put_part_to_prepare = 1;
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
@@ -680,8 +680,8 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
 
-    AWS_ASSERT(aws_priority_queue_size(&meta_request->io_threaded_data.pending_prepare_queue) == 0);
-    aws_priority_queue_clean_up(&meta_request->io_threaded_data.pending_prepare_queue);
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->io_threaded_data.pending_put_prepare_queue) == 0);
+    aws_priority_queue_clean_up(&meta_request->io_threaded_data.pending_put_prepare_queue);
 
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
