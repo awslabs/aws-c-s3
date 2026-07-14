@@ -599,15 +599,6 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     struct aws_s3_default_buffer_ticket *ticket = NULL;
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
-    /**
-     * Reserving when there are other reservations pending is not not always guaranteed to be safe.
-     * Even if pool can fit the size, reserving out of order might not be expected by client.
-     * Lets play on the safe side and preserve order in which things are reserved.
-     **/
-    if (!aws_linked_list_empty(&buffer_pool->pending_reserves)) {
-        return NULL;
-    }
-
     size_t overall_taken = buffer_pool->primary_used + buffer_pool->primary_reserved + buffer_pool->secondary_used +
                            buffer_pool->secondary_reserved + buffer_pool->special_blocks_reserved +
                            buffer_pool->special_blocks_used;
