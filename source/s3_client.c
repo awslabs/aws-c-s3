@@ -2058,6 +2058,24 @@ static void s_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_r
     }
 }
 
+/* Force-drain all entries from pending_put_prepare_queue regardless of ordering.
+ * Called when a buffer reservation fails and the missing part will never arrive,
+ * which would otherwise leave queued requests stuck forever. Releases tickets and
+ * fails each request through the normal callback. */
+static void s_force_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_request, int error_code) {
+    struct aws_priority_queue *queue = &meta_request->io_threaded_data.pending_put_prepare_queue;
+
+    while (aws_priority_queue_size(queue) > 0) {
+        struct aws_s3_pending_prepare_entry entry;
+        aws_priority_queue_pop(queue, &entry);
+
+        aws_s3_buffer_ticket_release(entry.request->ticket);
+        entry.request->ticket = NULL;
+
+        entry.callback(meta_request, entry.request, error_code, entry.user_data);
+    }
+}
+
 static void s_on_pool_buffer_reserved(void *user_data) {
     struct aws_s3_reserve_memory_payload *payload = user_data;
     AWS_PRECONDITION(payload);
@@ -2087,6 +2105,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
             request->request_tag);
 
         s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
         return;
     }
 

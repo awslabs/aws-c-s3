@@ -2681,9 +2681,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(synchronous_stream);
 
-    /* Sequential stream reads must happen in increasing part order. If a read
-     * arrives with a part_range_start less than the last one seen, it means parts
-     * were prepared out of order. */
+    /* Non-parallel body sources require reads in increasing offset order.
+     * If a read arrives below the last offset seen, parts were prepared out of order. */
     if (offset < meta_request->io_threaded_data.next_read_offset) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
