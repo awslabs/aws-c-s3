@@ -9907,6 +9907,7 @@ struct s_manual_pool_impl {
 };
 
 static void s_aws_ticket_wrapper_destroy(void *data) {
+    (void)data;
 }
 
 static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
