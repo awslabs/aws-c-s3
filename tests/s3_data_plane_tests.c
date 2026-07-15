@@ -9956,9 +9956,6 @@ static void s_manual_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
     struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)buffer_pool->impl;
 
     for (size_t i = 0; i < 10; ++i) {
-        if (pool_impl->futures[i]) {
-            aws_future_s3_buffer_ticket_release(pool_impl->futures[i]);
-        }
         if (pool_impl->tickets[i]) {
             aws_mem_release(pool_impl->allocator, pool_impl->tickets[i]);
         }
