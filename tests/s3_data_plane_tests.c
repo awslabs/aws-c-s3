@@ -9837,6 +9837,192 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
     return 0;
 }
 
+/*
+ * Make sure that upload reads data in sequential order.
+ * Specifically this tests a case of mem pool hitting allocation limit for regular sized part,
+ * but still having enough mem for last part. for this case mem pool should not allocate last part
+ * until all regular parts are done. i.e. ordering should be fifo.
+ */
+AWS_TEST_CASE(test_s3_upload_in_order_review, s_test_s3_upload_in_order_review)
+static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(250), .memory_limit_in_bytes = GB_TO_BYTES(1)};
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .client_options = &client_options,
+        .put_options =
+            {
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_1040MB_CRC32.txt"),
+                .object_size_mb = 1040,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    /* The tester always registers an upload_review_callback.
+     * Check that it got what we expect */
+    ASSERT_UINT_EQUALS(1, test_results.upload_review.invoked_count);
+    ASSERT_UINT_EQUALS(5, test_results.upload_review.part_count);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[0]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[1]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[2]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[3]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(40), test_results.upload_review.part_sizes_array[4]);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, test_results.upload_review.checksum_algorithm);
+    ASSERT_STR_EQUALS("RYd3Aw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
+    ASSERT_STR_EQUALS("v5Or2w==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
+    ASSERT_STR_EQUALS("9kntaA==", aws_string_c_str(test_results.upload_review.part_checksums_array[2]));
+    ASSERT_STR_EQUALS("w6wh3A==", aws_string_c_str(test_results.upload_review.part_checksums_array[3]));
+    ASSERT_STR_EQUALS("jwpwGA==", aws_string_c_str(test_results.upload_review.part_checksums_array[4]));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
+struct aws_byte_buf s_manual_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
+    return aws_byte_buf_from_empty_array((uint8_t *)ticket->impl, MB_TO_BYTES(8));
+}
+
+struct aws_s3_buffer_ticket_vtable s_manual_ticket_vtable = {
+    .claim = s_manual_ticket_claim,
+};
+
+struct s_manual_pool_impl {
+    struct aws_allocator *allocator;
+
+    struct aws_future_s3_buffer_ticket *futures[10];
+    struct aws_s3_buffer_ticket tickets[10];
+    size_t futures_count;
+
+    uint8_t buffers[10][8 * 1024 * 1024];
+};
+
+static void s_aws_ticket_wrapper_destroy(void *data) {
+    (void)data;
+}
+
+static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+    (void)meta;
+
+    struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)pool->impl;
+
+    struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(pool_impl->allocator);
+    aws_future_s3_buffer_ticket_acquire(future);
+    pool_impl->futures[pool_impl->futures_count] = future;
+
+    pool_impl->futures_count++;
+
+    if (pool_impl->futures_count == 5) {
+        for (size_t i = pool_impl->futures_count; i > 0; i--) {
+            struct aws_s3_buffer_ticket *ticket = &pool_impl->tickets[i - 1];
+            pool_impl->tickets[i - 1].impl = pool_impl->buffers[i - 1];
+            pool_impl->tickets[i - 1].vtable = &s_manual_ticket_vtable;
+            aws_ref_count_init(
+                &pool_impl->tickets[i - 1].ref_count,
+                &pool_impl->tickets[i - 1],
+                (aws_simple_completion_callback *)s_aws_ticket_wrapper_destroy);
+
+            aws_future_s3_buffer_ticket_set_result_by_move(pool_impl->futures[i - 1], &ticket);
+        }
+    }
+
+    return future;
+}
+
+static void s_manual_pool_trim(struct aws_s3_buffer_pool *pool) {
+    (void)pool;
+}
+
+static struct aws_s3_buffer_pool_vtable s_manual_pool_vtable = {
+    .reserve = s_manual_pool_reserve,
+    .trim = s_manual_pool_trim,
+};
+
+static void s_manual_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
+    struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)buffer_pool->impl;
+
+    for (size_t i = 0; i < 10; ++i) {
+        if (pool_impl->futures[i]) {
+            aws_future_s3_buffer_ticket_release(pool_impl->futures[i]);
+        }
+    }
+
+    aws_mem_release(pool_impl->allocator, buffer_pool);
+    aws_mem_release(pool_impl->allocator, pool_impl);
+}
+
+struct aws_s3_buffer_pool *s_manual_pool_fn(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
+    (void)config;
+    (void)user_data;
+    struct s_manual_pool_impl *pool_impl = aws_mem_calloc(allocator, 1, sizeof(struct s_manual_pool_impl));
+    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+
+    pool_impl->allocator = allocator;
+
+    pool->impl = pool_impl;
+    pool->vtable = &s_manual_pool_vtable;
+
+    aws_ref_count_init(&pool->ref_count, pool, (aws_simple_completion_callback *)s_manual_pool_destroy);
+
+    return pool;
+}
+
+/* Custom buffer tool test that will put first 5 buffer pool reservations into pending and then
+    complete all of them in reverse order. */
+AWS_TEST_CASE(test_s3_upload_out_of_order_review, s_test_s3_upload_out_of_order_review)
+static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+
+    struct aws_s3_tester_client_options client_options = {.buffer_pool_factory_fn = s_manual_pool_fn};
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .client_options = &client_options,
+        .put_options =
+            {
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_16MB_CRC32.txt"),
+                .object_size_mb = 39,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &put_options, &test_results));
+
+    /* The tester always registers an upload_review_callback.
+     * Check that it got what we expect */
+    ASSERT_UINT_EQUALS(1, test_results.upload_review.invoked_count);
+    ASSERT_UINT_EQUALS(5, test_results.upload_review.part_count);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(8), test_results.upload_review.part_sizes_array[0]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(8), test_results.upload_review.part_sizes_array[1]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(8), test_results.upload_review.part_sizes_array[2]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(8), test_results.upload_review.part_sizes_array[3]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(7), test_results.upload_review.part_sizes_array[4]);
+    ASSERT_INT_EQUALS(AWS_SCA_CRC32, test_results.upload_review.checksum_algorithm);
+    ASSERT_STR_EQUALS("9J8ZNA==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
+    ASSERT_STR_EQUALS("KtQF9Q==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
+    ASSERT_STR_EQUALS("yagJog==", aws_string_c_str(test_results.upload_review.part_checksums_array[2]));
+    ASSERT_STR_EQUALS("a5Y5pw==", aws_string_c_str(test_results.upload_review.part_checksums_array[3]));
+    ASSERT_STR_EQUALS("XkcCkw==", aws_string_c_str(test_results.upload_review.part_checksums_array[4]));
+
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    return 0;
+}
+
 /* Test upload_review_callback when Content-Length is not declared */
 AWS_TEST_CASE(test_s3_upload_review_no_content_length, s_test_s3_upload_review_no_content_length)
 static int s_test_s3_upload_review_no_content_length(struct aws_allocator *allocator, void *ctx) {

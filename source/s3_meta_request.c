@@ -37,6 +37,7 @@ static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
+static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static void s_s3_meta_request_destroy(void *user_data);
 
 static void s_s3_meta_request_init_signing_date_time(
@@ -257,6 +258,14 @@ int aws_s3_meta_request_init_base(
         meta_request->allocator,
         s_default_event_delivery_array_size,
         sizeof(struct aws_s3_meta_request_event));
+
+    aws_priority_queue_init_dynamic(
+        &meta_request->io_threaded_data.pending_put_prepare_queue,
+        meta_request->allocator,
+        0,
+        sizeof(struct aws_s3_pending_prepare_entry),
+        s_s3_pending_prepare_entry_pred);
+    meta_request->io_threaded_data.next_put_part_to_prepare = 1;
 
     *((size_t *)&meta_request->part_size) = part_size;
     *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
@@ -671,6 +680,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
 
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->io_threaded_data.pending_put_prepare_queue) == 0);
+    aws_priority_queue_clean_up(&meta_request->io_threaded_data.pending_put_prepare_queue);
+
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
 
@@ -700,6 +712,12 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     AWS_PRECONDITION(*request_b);
 
     return (*request_a)->part_number > (*request_b)->part_number;
+}
+
+static int s_s3_pending_prepare_entry_pred(const void *a, const void *b) {
+    const struct aws_s3_pending_prepare_entry *entry_a = a;
+    const struct aws_s3_pending_prepare_entry *entry_b = b;
+    return entry_a->request->part_number > entry_b->request->part_number;
 }
 
 bool aws_s3_meta_request_update(
@@ -2653,7 +2671,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If using async-writes, call function which fills the buffer and/or hits EOF  */
     if (meta_request->request_body_using_async_writes == true) {
+        if (offset < meta_request->io_threaded_data.next_read_offset) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Async-write read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+                (void *)meta_request,
+                meta_request->io_threaded_data.next_read_offset,
+                offset);
+            aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+            return synchronous_read_future;
+        }
+
         bool eof = s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer);
+        meta_request->io_threaded_data.next_read_offset = offset + buffer->len;
         aws_future_bool_set_result(synchronous_read_future, eof);
         return synchronous_read_future;
     }
@@ -2662,6 +2692,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_input_stream *synchronous_stream =
         aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(synchronous_stream);
+
+    /* Non-parallel body sources require reads in increasing offset order.
+     * If a read arrives below the last offset seen, parts were prepared out of order. */
+    if (offset < meta_request->io_threaded_data.next_read_offset) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Sequential stream read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+            (void *)meta_request,
+            meta_request->io_threaded_data.next_read_offset,
+            offset);
+        aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+        return synchronous_read_future;
+    }
 
     /* Keep calling read() until we fill the buffer, or hit EOF */
     struct aws_stream_status status = {.is_end_of_stream = false, .is_valid = true};
@@ -2679,6 +2722,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         }
     }
 
+    meta_request->io_threaded_data.next_read_offset = offset;
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:
