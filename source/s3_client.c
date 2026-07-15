@@ -2047,6 +2047,14 @@ static void s_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_r
         aws_priority_queue_top(queue, (void **)&top);
 
         if (top->request->part_number != meta_request->io_threaded_data.next_put_part_to_prepare) {
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Exiting put prepare queue drain early because top part number %" PRIu32
+                " is different from next part %" PRIu32 ".",
+                (void *)meta_request,
+                top->request->part_number,
+                meta_request->io_threaded_data.next_put_part_to_prepare);
+
             break;
         }
 
