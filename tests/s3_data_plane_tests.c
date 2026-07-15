@@ -9970,7 +9970,6 @@ struct aws_s3_buffer_pool *s_manual_pool_fn(
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
 
     pool_impl->allocator = allocator;
-    aws_mutex_init(&pool_impl->mutex);
 
     pool->impl = pool_impl;
     pool->vtable = &s_manual_pool_vtable;
