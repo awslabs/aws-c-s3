@@ -9902,8 +9902,6 @@ struct s_manual_pool_impl {
     size_t futures_count;
 
     uint8_t buffers[10][8 * 1024 * 1024];
-
-    struct aws_mutex mutex;
 };
 
 static void s_aws_ticket_wrapper_destroy(void *data) {
@@ -9916,9 +9914,9 @@ static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
     (void)meta;
 
     struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)pool->impl;
-    aws_mutex_lock(&pool_impl->mutex);
 
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(pool_impl->allocator);
+    aws_future_s3_buffer_ticket_acquire(future);
     pool_impl->futures[pool_impl->futures_count] = future;
 
     pool_impl->futures_count++;
@@ -9937,7 +9935,6 @@ static struct aws_future_s3_buffer_ticket *s_manual_pool_reserve(
         }
     }
 
-    aws_mutex_unlock(&pool_impl->mutex);
     return future;
 }
 
@@ -9952,6 +9949,12 @@ static struct aws_s3_buffer_pool_vtable s_manual_pool_vtable = {
 
 static void s_manual_pool_destroy(struct aws_s3_buffer_pool *buffer_pool) {
     struct s_manual_pool_impl *pool_impl = (struct s_manual_pool_impl *)buffer_pool->impl;
+
+    for (size_t i = 0; i < 10; ++i) {
+        if (pool_impl->futures[i]) {
+            aws_future_s3_buffer_ticket_release(pool_impl->futures[i]);
+        }
+    }
 
     aws_mem_release(pool_impl->allocator, buffer_pool);
     aws_mem_release(pool_impl->allocator, pool_impl);
