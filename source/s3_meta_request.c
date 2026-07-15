@@ -2671,7 +2671,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If using async-writes, call function which fills the buffer and/or hits EOF  */
     if (meta_request->request_body_using_async_writes == true) {
+        if (offset < meta_request->io_threaded_data.next_read_offset) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Async-write read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+                (void *)meta_request,
+                meta_request->io_threaded_data.next_read_offset,
+                offset);
+            aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+            return synchronous_read_future;
+        }
+
         bool eof = s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer);
+        meta_request->io_threaded_data.next_read_offset = offset + buffer->len;
         aws_future_bool_set_result(synchronous_read_future, eof);
         return synchronous_read_future;
     }
