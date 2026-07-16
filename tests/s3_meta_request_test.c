@@ -230,8 +230,7 @@ TEST_CASE(download_resume_token_create_and_getters) {
         .total_num_parts = 13,
         .completed_parts = completed_parts,
         .num_completed_parts = 6,
-        .total_bytes_transferred = 48 * 1024 * 1024,
-        .checksum_algorithm = AWS_SCA_CRC32,
+        .file_last_modified_epoch_ns = 1728511680000000000ULL,
     };
 
     struct aws_s3_meta_request_resume_token *token =
@@ -257,8 +256,6 @@ TEST_CASE(download_resume_token_create_and_getters) {
     ASSERT_UINT_EQUALS(99999999, aws_s3_meta_request_resume_token_object_range_end(token));
     ASSERT_UINT_EQUALS(100000000, aws_s3_meta_request_resume_token_object_size(token));
     ASSERT_UINT_EQUALS(13, aws_s3_meta_request_resume_token_total_num_parts(token));
-    ASSERT_UINT_EQUALS(48 * 1024 * 1024, aws_s3_meta_request_resume_token_total_bytes_transferred(token));
-    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, aws_s3_meta_request_resume_token_checksum_algorithm(token));
 
     /* Verify completed parts bitmap */
     struct aws_byte_cursor bitmap = aws_s3_meta_request_resume_token_completed_parts_bitmap(token);
@@ -333,6 +330,75 @@ TEST_CASE(s3_bitmap_set_and_get) {
     aws_s3_bitmap_set(&bitmap, 0);
     aws_s3_bitmap_set(&bitmap, 17);
 
+    aws_byte_buf_clean_up(&bitmap);
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(s3_bitmap_init_from_array) {
+    (void)ctx;
+
+    struct aws_byte_buf bitmap;
+
+    /* Valid array with gaps */
+    uint32_t parts[] = {1, 3, 5, 13};
+    ASSERT_SUCCESS(aws_s3_bitmap_init_from_array(&bitmap, allocator, 13, parts, AWS_ARRAY_SIZE(parts)));
+    ASSERT_TRUE(aws_s3_bitmap_get(&bitmap, 1));
+    ASSERT_FALSE(aws_s3_bitmap_get(&bitmap, 2));
+    ASSERT_TRUE(aws_s3_bitmap_get(&bitmap, 3));
+    ASSERT_FALSE(aws_s3_bitmap_get(&bitmap, 4));
+    ASSERT_TRUE(aws_s3_bitmap_get(&bitmap, 5));
+    ASSERT_TRUE(aws_s3_bitmap_get(&bitmap, 13));
+    aws_byte_buf_clean_up(&bitmap);
+
+    /* Empty array produces an all-zero bitmap */
+    ASSERT_SUCCESS(aws_s3_bitmap_init_from_array(&bitmap, allocator, 8, NULL, 0));
+    for (uint32_t i = 1; i <= 8; ++i) {
+        ASSERT_FALSE(aws_s3_bitmap_get(&bitmap, i));
+    }
+    aws_byte_buf_clean_up(&bitmap);
+
+    /* Index 0 is invalid */
+    uint32_t zero_part[] = {0};
+    ASSERT_ERROR(
+        AWS_ERROR_INVALID_ARGUMENT, aws_s3_bitmap_init_from_array(&bitmap, allocator, 8, zero_part, 1));
+
+    /* Index above capacity is invalid */
+    uint32_t oob_part[] = {9};
+    ASSERT_ERROR(
+        AWS_ERROR_INVALID_ARGUMENT, aws_s3_bitmap_init_from_array(&bitmap, allocator, 8, oob_part, 1));
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(s3_bitmap_to_array_round_trip) {
+    (void)ctx;
+
+    struct aws_byte_buf bitmap;
+    uint32_t parts[] = {1, 2, 3, 6, 7, 10};
+    ASSERT_SUCCESS(aws_s3_bitmap_init_from_array(&bitmap, allocator, 13, parts, AWS_ARRAY_SIZE(parts)));
+
+    /* Convert back to an array and expect the same 1-based indices in ascending order */
+    struct aws_array_list out_parts;
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&out_parts, allocator, 0, sizeof(uint32_t)));
+    ASSERT_SUCCESS(aws_s3_bitmap_to_array(&bitmap, 13, &out_parts));
+
+    ASSERT_UINT_EQUALS(AWS_ARRAY_SIZE(parts), aws_array_list_length(&out_parts));
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(parts); ++i) {
+        uint32_t part_num = 0;
+        ASSERT_SUCCESS(aws_array_list_get_at(&out_parts, &part_num, i));
+        ASSERT_UINT_EQUALS(parts[i], part_num);
+    }
+
+    aws_array_list_clean_up(&out_parts);
+    aws_byte_buf_clean_up(&bitmap);
+
+    /* Empty bitmap converts to an empty array */
+    ASSERT_SUCCESS(aws_s3_bitmap_init(&bitmap, allocator, 8));
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&out_parts, allocator, 0, sizeof(uint32_t)));
+    ASSERT_SUCCESS(aws_s3_bitmap_to_array(&bitmap, 8, &out_parts));
+    ASSERT_UINT_EQUALS(0, aws_array_list_length(&out_parts));
+
+    aws_array_list_clean_up(&out_parts);
     aws_byte_buf_clean_up(&bitmap);
     return AWS_OP_SUCCESS;
 }

@@ -444,6 +444,8 @@ add_net_test_case(meta_request_auto_ranged_put_new_error_handling)
 add_test_case(download_resume_token_create_and_getters)
 add_test_case(download_resume_token_invalid_inputs)
 add_test_case(s3_bitmap_set_and_get)
+add_test_case(s3_bitmap_init_from_array)
+add_test_case(s3_bitmap_to_array_round_trip)
 add_net_test_case(bad_request_error_handling)
 add_net_test_case(make_meta_request_error_handling)
 

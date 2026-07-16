@@ -475,12 +475,8 @@ struct aws_s3_meta_request_resume_token {
     uint64_t object_range_start;
     uint64_t object_range_end;
     uint64_t object_size;
-    uint64_t total_bytes_transferred;
-    /* TODO: check with Java SDK team if checksum_algorithm is still needed in the resume token.
-     * Currently unused during resume — we rely on If-Match + If-Unmodified-Since for integrity. */
-    enum aws_s3_checksum_algorithm checksum_algorithm;
     struct aws_byte_buf completed_parts_bitmap; /* bit N = part N+1 is completed */
-    int64_t file_last_modified_epoch_secs;      /* local file mtime at pause, for tamper detection on resume */
+    uint64_t file_last_modified_epoch_ns;       /* local file mtime (nanos since epoch) at pause, for tamper detection on resume */
 };
 
 void aws_s3_client_notify_connection_finished(

@@ -2904,6 +2904,14 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_do
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+    if (options->num_completed_parts > 0 && options->completed_parts == NULL) {
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+    if (options->file_last_modified_epoch_ns == 0) {
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
 
     struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(allocator);
     token->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
@@ -2920,15 +2928,16 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_do
     token->object_range_end = options->object_range_end;
     token->object_size = options->object_size;
     token->total_num_parts = options->total_num_parts;
-    token->total_bytes_transferred = options->total_bytes_transferred;
-    token->checksum_algorithm = options->checksum_algorithm;
+    token->file_last_modified_epoch_ns = options->file_last_modified_epoch_ns;
 
-    aws_s3_bitmap_init(&token->completed_parts_bitmap, allocator, (uint32_t)options->total_num_parts);
-    for (size_t i = 0; i < options->num_completed_parts; ++i) {
-        uint32_t part_num = options->completed_parts[i];
-        if (part_num > 0 && part_num <= options->total_num_parts) {
-            aws_s3_bitmap_set(&token->completed_parts_bitmap, part_num);
-        }
+    if (aws_s3_bitmap_init_from_array(
+            &token->completed_parts_bitmap,
+            allocator,
+            (uint32_t)options->total_num_parts,
+            options->completed_parts,
+            options->num_completed_parts)) {
+        aws_s3_meta_request_resume_token_release(token);
+        return NULL;
     }
 
     return token;
@@ -2985,22 +2994,16 @@ uint64_t aws_s3_meta_request_resume_token_first_part_size(
     return (uint64_t)resume_token->first_part_size;
 }
 
-uint64_t aws_s3_meta_request_resume_token_total_bytes_transferred(
-    const struct aws_s3_meta_request_resume_token *resume_token) {
-    AWS_FATAL_PRECONDITION(resume_token);
-    return resume_token->total_bytes_transferred;
-}
-
-enum aws_s3_checksum_algorithm aws_s3_meta_request_resume_token_checksum_algorithm(
-    const struct aws_s3_meta_request_resume_token *resume_token) {
-    AWS_FATAL_PRECONDITION(resume_token);
-    return resume_token->checksum_algorithm;
-}
-
 struct aws_byte_cursor aws_s3_meta_request_resume_token_completed_parts_bitmap(
     const struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
     return aws_byte_cursor_from_buf(&resume_token->completed_parts_bitmap);
+}
+
+uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->file_last_modified_epoch_ns;
 }
 
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */
