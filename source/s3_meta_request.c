@@ -537,11 +537,36 @@ int aws_s3_meta_request_pause_async(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(on_complete);
 
-    if (!meta_request->vtable->pause_async) {
+    if (!meta_request->vtable->build_resume_token_synced) {
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
 
-    return meta_request->vtable->pause_async(meta_request, on_complete, user_data);
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (meta_request->synced_data.pause_requested) {
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* Invoke callback immediately — pause already in progress */
+        on_complete(meta_request, NULL, AWS_ERROR_INVALID_STATE, user_data);
+        return AWS_OP_SUCCESS;
+    }
+
+    meta_request->synced_data.pause_requested = true;
+    meta_request->synced_data.pause_complete_callback = on_complete;
+    meta_request->synced_data.pause_complete_user_data = user_data;
+
+    /* Stop scheduling new work and cancel in-flight HTTP streams and pending buffer reservations */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_PAUSED);
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Schedule work processing so the update loop can wind down and finish */
+    aws_s3_client_schedule_process_work(meta_request->client);
+
+    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -2508,6 +2533,10 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request) {
     meta_request->vtable->finish(meta_request);
 }
 
+/* Used to reopen recv_filepath in read-only mode after the write handle has been closed, solely to
+ * query its last-modified time for the resume token (see aws_s3_meta_request_finish_default). */
+AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_reopen_mode, "rb");
+
 void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
@@ -2517,6 +2546,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_simple_completion_callback *pending_async_write_waker = NULL;
     void *pending_async_write_waker_user_data = NULL;
+
+    bool is_async_paused = false;
+    bool is_error = false;
+    aws_s3_meta_request_pause_complete_fn *pause_callback = NULL;
+    void *pause_user_data = NULL;
+    struct aws_s3_meta_request_resume_token *token = NULL;
 
     struct aws_s3_meta_request_result finish_result;
     AWS_ZERO_STRUCT(finish_result);
@@ -2531,6 +2566,22 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         }
 
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
+
+        /* Read pause state and build a resume token while still holding the lock. */
+        if (meta_request->synced_data.pause_requested) {
+            is_async_paused = true;
+            pause_callback = meta_request->synced_data.pause_complete_callback;
+            pause_user_data = meta_request->synced_data.pause_complete_user_data;
+        } else if (
+            meta_request->synced_data.finish_result.error_code != AWS_ERROR_SUCCESS &&
+            meta_request->synced_data.finish_result.error_code != AWS_ERROR_S3_PAUSED) {
+            is_error = true;
+        }
+
+        if ((is_async_paused || (is_error && meta_request->on_error_resume_token)) &&
+            meta_request->vtable->build_resume_token_synced != NULL) {
+            token = meta_request->vtable->build_resume_token_synced(meta_request);
+        }
 
         /* Clean out the pending-stream-to-caller priority queue*/
         while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
@@ -2580,11 +2631,40 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
-        if (finish_result.error_code && finish_result.error_code != AWS_ERROR_S3_PAUSED &&
-            meta_request->recv_file_delete_on_failure) {
+
+        bool delete_on_failure = finish_result.error_code && finish_result.error_code != AWS_ERROR_S3_PAUSED &&
+                                 meta_request->recv_file_delete_on_failure;
+
+        /* Capture the file's last-modified time for the resume token. This must happen after the
+         * write handle is closed: on Windows the last-write-time is only guaranteed correct once all
+         * write handles are closed (see aws_file_get_last_modified_epoch()), so reopen a fresh
+         * read-only handle by path solely to query the timestamp. */
+        if (token != NULL && !delete_on_failure) {
+            FILE *reopened_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_reopen_mode);
+            if (reopened_file != NULL) {
+                uint64_t last_modified_ns = 0;
+                if (aws_file_get_last_modified_epoch(reopened_file, &last_modified_ns) == AWS_OP_SUCCESS) {
+                    token->file_last_modified_epoch_ns = last_modified_ns;
+                }
+                fclose(reopened_file);
+            }
+        }
+
+        if (delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
     }
+
+    /* Fire pause/error resume-token callbacks before the general finish callback below,
+     * so callers see the resume token before the operation is reported as complete. */
+    if (is_error && meta_request->on_error_resume_token && token != NULL) {
+        meta_request->on_error_resume_token(meta_request, token, finish_result.error_code, meta_request->user_data);
+    }
+    if (is_async_paused && pause_callback != NULL) {
+        /* Token may be NULL if the request type has no resumable state — resume restarts from the beginning. */
+        pause_callback(meta_request, token, AWS_ERROR_SUCCESS, pause_user_data);
+    }
+    token = aws_s3_meta_request_resume_token_release(token);
 
     while (!aws_linked_list_empty(&release_request_list)) {
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);

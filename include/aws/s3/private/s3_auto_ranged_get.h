@@ -76,11 +76,6 @@ struct aws_s3_auto_ranged_get {
         uint32_t head_object_sent : 1;
         uint32_t head_object_completed : 1;
         uint32_t read_window_warning_issued : 1;
-
-        /* Pause state */
-        uint32_t pause_requested : 1;
-        aws_s3_meta_request_pause_complete_fn *pause_complete_callback;
-        void *pause_complete_user_data;
     } synced_data;
 
     uint32_t initial_message_has_range_header : 1;

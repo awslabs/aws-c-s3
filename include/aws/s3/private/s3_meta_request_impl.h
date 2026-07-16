@@ -124,11 +124,12 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
-    /* Async pause for download requests (waits for writes to flush before producing token) */
-    int (*pause_async)(
-        struct aws_s3_meta_request *meta_request,
-        aws_s3_meta_request_pause_complete_fn *on_complete,
-        void *user_data);
+    /* Optional. Build a resume token from current synced state; called with the synced-data lock held
+     * during finish when a pause was requested (or an error occurred and on_error_resume_token is set).
+     * May return NULL to indicate no resumable state (caller must restart from the beginning).
+     * A NULL function pointer means this request type doesn't support pause_async at all
+     * (aws_s3_meta_request_pause_async() fails with AWS_ERROR_UNSUPPORTED_OPERATION). */
+    struct aws_s3_meta_request_resume_token *(*build_resume_token_synced)(struct aws_s3_meta_request *meta_request);
 
 #ifdef AWS_C_S3_ENABLE_TEST_STUBS
     /********************* TEST ONLY STUB **************************/
@@ -253,6 +254,12 @@ struct aws_s3_meta_request {
 
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
+
+        /* Pause state (see aws_s3_meta_request_pause_async). Set once when a pause is requested;
+         * consumed during finish to build a resume token and fire the pause callback. */
+        uint32_t pause_requested : 1;
+        aws_s3_meta_request_pause_complete_fn *pause_complete_callback;
+        void *pause_complete_user_data;
 
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;

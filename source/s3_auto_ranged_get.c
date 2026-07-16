@@ -9,7 +9,6 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
-#include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <inttypes.h>
@@ -36,12 +35,8 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
-static int s_s3_auto_ranged_get_pause_async(
-    struct aws_s3_meta_request *meta_request,
-    aws_s3_meta_request_pause_complete_fn *on_complete,
-    void *user_data);
-
-static void s_s3_auto_ranged_get_finish(struct aws_s3_meta_request *meta_request);
+static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_synced(
+    struct aws_s3_meta_request *meta_request);
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
@@ -51,8 +46,8 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .sign_request = aws_s3_meta_request_sign_request_default,
     .finished_request = s_s3_auto_ranged_get_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
-    .finish = s_s3_auto_ranged_get_finish,
-    .pause_async = s_s3_auto_ranged_get_pause_async,
+    .finish = aws_s3_meta_request_finish_default,
+    .build_resume_token_synced = s_build_download_resume_token_synced,
 };
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
@@ -1257,128 +1252,4 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
     return token;
 }
 
-/* Used to reopen recv_filepath in read-only mode after the write handle has been closed, solely to
- * query its last-modified time for the resume token (see s_s3_auto_ranged_get_finish). */
-AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_reopen_mode, "rb");
 
-/*
- * Custom finish override for pause/resume support.
- * Handles: fsync before fclose, building the resume token, and firing pause/error callbacks.
- *
- * Alternative considered: add a `build_resume_token` vtable function and move callback
- * invocation into finish_default. That would reduce duplication when multiple types support
- * pause_async, but makes finish_default more complex with type-specific conditionals.
- * Revisit if PUT duplicates this pattern.
- */
-static void s_s3_auto_ranged_get_finish(struct aws_s3_meta_request *meta_request) {
-    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
-
-    bool is_paused = false;
-    bool is_error = false;
-    int error_code = AWS_ERROR_SUCCESS;
-    aws_s3_meta_request_pause_complete_fn *pause_callback = NULL;
-    void *pause_user_data = NULL;
-    struct aws_s3_meta_request_resume_token *token = NULL;
-
-    /* Single lock acquisition: read state and build token while holding lock */
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if (auto_ranged_get->synced_data.pause_requested) {
-        is_paused = true;
-        pause_callback = auto_ranged_get->synced_data.pause_complete_callback;
-        pause_user_data = auto_ranged_get->synced_data.pause_complete_user_data;
-    } else if (meta_request->synced_data.finish_result.error_code != AWS_ERROR_SUCCESS) {
-        is_error = true;
-        error_code = meta_request->synced_data.finish_result.error_code;
-    }
-
-    if (is_paused || (is_error && meta_request->on_error_resume_token)) {
-        token = s_build_download_resume_token_synced(meta_request);
-    }
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-
-    /*
-     * Close (and capture the last-modified time of) recv_file here, ahead of
-     * aws_s3_meta_request_finish_default() below, for two reasons:
-     * 1. We want the pause/error callbacks (which receive the resume token) to fire before the
-     *    general finish_callback that finish_default() invokes, so callers see the resume token
-     *    before the operation is reported as complete.
-     * 2. aws_file_get_last_modified_epoch() requires the write handle to be closed first: on
-     *    POSIX the timestamp is visible as soon as write(2) has been called, but on Windows the
-     *    last-write-time is only guaranteed correct once all write handles on the file have been
-     *    closed (see aws_file_get_last_modified_epoch()'s doc comment). So recv_file is closed
-     *    below, then a fresh read-only handle is reopened by path solely to query the timestamp.
-     *
-     * This duplicates finish_default()'s own recv_file close/delete-on-failure logic; NULLing
-     * recv_file here makes that block in finish_default() a no-op, so there's no double-close.
-     */
-    if (meta_request->recv_file) {
-        fclose(meta_request->recv_file);
-        meta_request->recv_file = NULL;
-
-        bool delete_on_failure = is_error && meta_request->recv_file_delete_on_failure;
-
-        if (token != NULL && !delete_on_failure) {
-            FILE *reopened_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_reopen_mode);
-            if (reopened_file != NULL) {
-                uint64_t last_modified_ns = 0;
-                if (aws_file_get_last_modified_epoch(reopened_file, &last_modified_ns) == AWS_OP_SUCCESS) {
-                    token->file_last_modified_epoch_ns = last_modified_ns;
-                }
-                fclose(reopened_file);
-            }
-        }
-
-        if (delete_on_failure) {
-            aws_file_delete(meta_request->recv_filepath);
-        }
-    }
-
-    /* Fire callbacks */
-    if (is_error && meta_request->on_error_resume_token && token) {
-        meta_request->on_error_resume_token(meta_request, token, error_code, meta_request->user_data);
-    }
-    if (is_paused && pause_callback) {
-        pause_callback(meta_request, token, AWS_ERROR_SUCCESS, pause_user_data);
-    }
-
-    /* Call the default finish path (finish_callback, cleanup); recv_file is already closed above */
-    aws_s3_meta_request_finish_default(meta_request);
-
-    aws_s3_meta_request_resume_token_release(token);
-}
-
-static int s_s3_auto_ranged_get_pause_async(
-    struct aws_s3_meta_request *meta_request,
-    aws_s3_meta_request_pause_complete_fn *on_complete,
-    void *user_data) {
-
-    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
-
-    /* BEGIN CRITICAL SECTION */
-    aws_s3_meta_request_lock_synced_data(meta_request);
-
-    if (auto_ranged_get->synced_data.pause_requested) {
-        aws_s3_meta_request_unlock_synced_data(meta_request);
-        /* Invoke callback immediately — pause already in progress */
-        on_complete(meta_request, NULL, AWS_ERROR_INVALID_STATE, user_data);
-        return AWS_OP_SUCCESS;
-    }
-
-    auto_ranged_get->synced_data.pause_requested = true;
-    auto_ranged_get->synced_data.pause_complete_callback = on_complete;
-    auto_ranged_get->synced_data.pause_complete_user_data = user_data;
-
-    /* Stop scheduling new work and cancel in-flight HTTP streams */
-    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
-    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
-
-    aws_s3_meta_request_unlock_synced_data(meta_request);
-    /* END CRITICAL SECTION */
-
-    /* Schedule work processing so the update loop can wind down and finish */
-    aws_s3_client_schedule_process_work(meta_request->client);
-
-    return AWS_OP_SUCCESS;
-}

@@ -37,6 +37,14 @@ static void s_s3_meta_request_default_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+/* Default meta requests have no resumable state. Returning NULL means pause is supported,
+ * but resuming must restart the request from the beginning. */
+static struct aws_s3_meta_request_resume_token *s_s3_meta_request_default_build_resume_token_synced(
+    struct aws_s3_meta_request *meta_request) {
+    (void)meta_request;
+    return NULL;
+}
+
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .update = s_s3_meta_request_default_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -46,6 +54,7 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .finished_request = s_s3_meta_request_default_request_finished,
     .destroy = s_s3_meta_request_default_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .build_resume_token_synced = s_s3_meta_request_default_build_resume_token_synced,
 };
 
 /* Allocate a new default meta request. */
