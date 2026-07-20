@@ -46,7 +46,10 @@ AWS_STATIC_IMPL void aws_s3_bitmap_set(struct aws_byte_buf *bitmap, uint32_t ind
     }
 }
 
-AWS_STATIC_IMPL int aws_s3_bitmap_init(struct aws_byte_buf *bitmap, struct aws_allocator *allocator, uint32_t capacity) {
+AWS_STATIC_IMPL int aws_s3_bitmap_init(
+    struct aws_byte_buf *bitmap,
+    struct aws_allocator *allocator,
+    uint32_t capacity) {
     size_t bitmap_bytes = (capacity + 7) / 8;
     if (aws_byte_buf_init(bitmap, allocator, bitmap_bytes)) {
         return AWS_OP_ERR;

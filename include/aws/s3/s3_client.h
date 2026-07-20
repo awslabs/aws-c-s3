@@ -323,6 +323,19 @@ enum aws_s3_recv_file_options {
      * file (byte 0).
      */
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+
+    /**
+     * Resume a paused download into the partially-downloaded file.
+     * Requires `aws_s3_meta_request_options.resume_token` to be set; existing file content is
+     * preserved and only the missing parts are written, at their absolute offsets.
+     * This is the only option compatible with a download resume token: providing a resume token
+     * together with a file path and any other recv_file_option fails meta request creation with
+     * AWS_ERROR_INVALID_ARGUMENT (other options would truncate or append, silently corrupting the
+     * partially-downloaded file).
+     * If the local file is missing or was modified since pause, the resume state is discarded and
+     * the download restarts from the beginning (the file is replaced).
+     */
+    AWS_S3_RECV_FILE_RESUME,
 };
 
 /**
@@ -1433,18 +1446,21 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
  * Options to construct download resume token.
  */
 struct aws_s3_download_resume_token_options {
-    struct aws_byte_cursor etag;                /* Required */
-    struct aws_byte_cursor version_id;          /* Optional */
+    struct aws_byte_cursor etag;                    /* Required */
+    struct aws_byte_cursor version_id;              /* Optional */
     struct aws_byte_cursor s3_object_last_modified; /* HTTP-date format string. Optional */
-    uint64_t part_size;                         /* Required */
-    uint64_t first_part_size;                   /* Required */
-    uint64_t object_range_start;                /* Optional. Required only if original request used Range header */
-    uint64_t object_range_end;                  /* Optional. Required only if original request used Range header */
-    uint64_t object_size;                       /* Required */
-    size_t total_num_parts;                     /* Required */
-    const uint32_t *completed_parts;            /* Array of completed part numbers. Required */
-    size_t num_completed_parts;                 /* Length of completed_parts array. Required */
-    uint64_t file_last_modified_epoch_ns;       /* Local file mtime (nanos since epoch) at pause. Required */
+    uint64_t part_size;                             /* Required */
+    uint64_t first_part_size;                       /* Required */
+    uint64_t object_range_start;                    /* Optional. Required only if original request used Range header */
+    uint64_t object_range_end;                      /* Optional. Required only if original request used Range header */
+    uint64_t object_size;                           /* Required */
+    size_t total_num_parts;                         /* Required */
+    const uint32_t *completed_parts;                /* Array of completed part numbers. Required */
+    size_t num_completed_parts;                     /* Length of completed_parts array. Required */
+    /* Local file mtime (nanos since epoch) at pause. Required when resuming a download to a file
+     * (recv_filepath + AWS_S3_RECV_FILE_RESUME); a value of 0 means unknown and forces a restart
+     * from the beginning. Optional (pass 0) when the download delivers via body callback. */
+    uint64_t file_last_modified_epoch_ns;
 };
 
 /**
@@ -1481,8 +1497,7 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
  * Object size (content-length) of the download.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_object_size(
-    const struct aws_s3_meta_request_resume_token *resume_token);
+uint64_t aws_s3_meta_request_resume_token_object_size(const struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
  * Object range start for the download.
@@ -1495,15 +1510,13 @@ uint64_t aws_s3_meta_request_resume_token_object_range_start(
  * Object range end (inclusive) for the download.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_object_range_end(
-    const struct aws_s3_meta_request_resume_token *resume_token);
+uint64_t aws_s3_meta_request_resume_token_object_range_end(const struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
  * First part size used for the download (may differ from part_size).
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_first_part_size(
-    const struct aws_s3_meta_request_resume_token *resume_token);
+uint64_t aws_s3_meta_request_resume_token_first_part_size(const struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
  * Get the bitmap of completed part numbers.
@@ -1517,6 +1530,7 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_completed_parts_bitmap(
 /**
  * Local file mtime (nanoseconds since Unix epoch) captured at pause time.
  * Used for tamper detection on resume — compare against current file mtime.
+ * Returns 0 if not set (download did not write to a file).
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(

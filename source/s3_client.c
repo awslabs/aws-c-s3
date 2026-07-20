@@ -5,8 +5,8 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
-#include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_bitmap.h"
+#include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_default_meta_request.h"
@@ -2896,6 +2896,11 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_do
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+    if (options->object_size == 0) {
+        /* A zero-byte download has nothing to resume. */
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
     if (options->object_range_end < options->object_range_start) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
@@ -2905,10 +2910,6 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_do
         return NULL;
     }
     if (options->num_completed_parts > 0 && options->completed_parts == NULL) {
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
-    }
-    if (options->file_last_modified_epoch_ns == 0) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -2924,8 +2925,15 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_do
     }
     token->part_size = (size_t)options->part_size;
     token->first_part_size = (size_t)options->first_part_size;
-    token->object_range_start = options->object_range_start;
-    token->object_range_end = options->object_range_end;
+    if (options->object_range_start == 0 && options->object_range_end == 0) {
+        /* Range not set (original request had no Range header): normalize to the full object,
+         * so the token always carries the resolved absolute range. */
+        token->object_range_start = 0;
+        token->object_range_end = options->object_size - 1;
+    } else {
+        token->object_range_start = options->object_range_start;
+        token->object_range_end = options->object_range_end;
+    }
     token->object_size = options->object_size;
     token->total_num_parts = options->total_num_parts;
     token->file_last_modified_epoch_ns = options->file_last_modified_epoch_ns;
@@ -2970,8 +2978,7 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
     return aws_byte_cursor_from_c_str("");
 }
 
-uint64_t aws_s3_meta_request_resume_token_object_size(
-    const struct aws_s3_meta_request_resume_token *resume_token) {
+uint64_t aws_s3_meta_request_resume_token_object_size(const struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
     return resume_token->object_size;
 }
@@ -2988,8 +2995,7 @@ uint64_t aws_s3_meta_request_resume_token_object_range_end(
     return resume_token->object_range_end;
 }
 
-uint64_t aws_s3_meta_request_resume_token_first_part_size(
-    const struct aws_s3_meta_request_resume_token *resume_token) {
+uint64_t aws_s3_meta_request_resume_token_first_part_size(const struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
     return (uint64_t)resume_token->first_part_size;
 }

@@ -372,6 +372,21 @@ int aws_s3_meta_request_init_base(
                 }
                 break;
 
+            case AWS_S3_RECV_FILE_RESUME:
+                /* Resume writing into the partially-downloaded file: content must be preserved,
+                 * missing parts are written at their absolute offsets (base position 0). The
+                 * download type validates the resume token + file state before we get here. */
+                if (!aws_path_exists(meta_request->recv_filepath)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Cannot receive file via RESUME: file not found.",
+                        (void *)meta_request);
+                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
+                    goto error;
+                }
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                break;
+
             default:
                 AWS_ASSERT(false);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
