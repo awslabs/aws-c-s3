@@ -9901,6 +9901,30 @@ static void s_put_async_pause_finished_request(
     original->finished_request(meta_request, request, error_code);
 }
 
+/* Progress callback for GET async pause tests: triggers pause_async after N parts have been
+ * DELIVERED to the caller. Progress events fire on the io thread right after the part's body
+ * is streamed, so pausing here guarantees the resume token marks those parts as completed
+ * (unlike triggering from finished_request, which fires on network completion — possibly
+ * before the body was ever delivered). */
+static void s_get_async_pause_progress_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+    (void)progress;
+    struct aws_s3_tester *tester = user_data;
+    struct async_pause_resume_test_data *test_data = tester->user_data;
+
+    size_t delivered = (size_t)aws_atomic_fetch_add(&test_data->parts_completed, 1) + 1;
+    size_t pause_threshold = aws_atomic_load_int(&test_data->pause_after_n_parts);
+
+    if (delivered >= pause_threshold) {
+        size_t expected = false;
+        if (aws_atomic_compare_exchange_int(&test_data->pause_initiated, &expected, true)) {
+            aws_s3_meta_request_pause_async(meta_request, s_async_pause_complete_callback, test_data);
+        }
+    }
+}
+
 /* Patched finished_request for GET async pause: triggers pause_async after N range-GET parts */
 static void s_get_async_pause_finished_request(
     struct aws_s3_meta_request *meta_request,
@@ -10112,7 +10136,10 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
 
 /* ---- Test 8: GET async pause/resume to file ---- */
 
-static const size_t s_get_async_pause_object_size = 40 * 1024 * 1024; /* 40 MiB -> 5 parts with 8MiB part_size */
+/* These tests download the pre-existing 10MiB object with a 5MiB part size (the client minimum),
+ * giving 2 range-GET parts: pause after part 1, resume downloads part 2. */
+static const size_t s_get_async_pause_object_size = 10 * 1024 * 1024;
+static const size_t s_get_async_pause_part_size = 5 * 1024 * 1024;
 
 AWS_TEST_CASE(test_s3_get_pause_resume_async_to_file, s_test_s3_get_pause_resume_async_to_file)
 static int s_test_s3_get_pause_resume_async_to_file(struct aws_allocator *allocator, void *ctx) {
@@ -10121,37 +10148,21 @@ static int s_test_s3_get_pause_resume_async_to_file(struct aws_allocator *alloca
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor object_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_get_async_pause_resume_40MB.bin");
+    struct aws_byte_cursor object_key = g_pre_existing_object_10MB;
 
-    /* Step 1: Upload a 40MB object so we have something to download */
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options =
-            {
-                .object_size_mb = 40,
-                .object_path_override = object_key,
-            },
-    };
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
-
-    /* Step 2: Download with pause_async after 2 parts */
+    /* Step 1: Download with pause_async after 1 part */
     struct async_pause_resume_test_data test_data;
     s_async_pause_test_data_init(&test_data);
-    aws_atomic_store_int(&test_data.pause_after_n_parts, 2); /* pause after 2 parts received */
+    aws_atomic_store_int(&test_data.pause_after_n_parts, 1); /* pause after 1 part received */
     tester.user_data = &test_data;
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
+    client_config.part_size = s_get_async_pause_part_size;
     client_config.max_active_connections_override = 1; /* serialize to ensure deterministic pause */
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_meta_request_factory_get_async_pause;
 
     const char *download_filepath = "test_get_async_pause_resume_tmp";
 
@@ -10163,6 +10174,7 @@ static int s_test_s3_get_pause_resume_async_to_file(struct aws_allocator *alloca
     struct aws_s3_meta_request_options get_options = {
         .user_data = &tester,
         .finish_callback = s_async_pause_meta_request_finish,
+        .progress_callback = s_get_async_pause_progress_callback,
         .message = message,
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         .recv_filepath = aws_byte_cursor_from_c_str(download_filepath),
@@ -10204,8 +10216,6 @@ static int s_test_s3_get_pause_resume_async_to_file(struct aws_allocator *alloca
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
     client = aws_s3_client_new(allocator, &client_config);
-    patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_meta_request_factory_get_async_pause;
 
     host_name = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
     host_cursor = aws_byte_cursor_from_string(host_name);
@@ -10239,12 +10249,166 @@ static int s_test_s3_get_pause_resume_async_to_file(struct aws_allocator *alloca
     aws_s3_tester_wait_for_client_shutdown(&tester);
     tester.bound_to_client = false;
 
-    /* Step 4: Verify the downloaded file is byte-correct */
+    /* Step 4: Verify the downloaded file is byte-correct. The pre-existing test objects are
+     * all zero bytes (test_helper.py create_bytes), so verify size and that every byte is 0. */
     FILE *verify_file = aws_fopen(download_filepath, "rb");
     ASSERT_NOT_NULL(verify_file);
     fseek(verify_file, 0, SEEK_END);
     size_t file_size = (size_t)ftell(verify_file);
     ASSERT_UINT_EQUALS(s_get_async_pause_object_size, file_size);
+    fseek(verify_file, 0, SEEK_SET);
+    uint8_t verify_buffer[64 * 1024];
+    size_t total_read = 0;
+    size_t read_len = 0;
+    while ((read_len = fread(verify_buffer, 1, sizeof(verify_buffer), verify_file)) > 0) {
+        for (size_t i = 0; i < read_len; ++i) {
+            ASSERT_UINT_EQUALS(0, verify_buffer[i]);
+        }
+        total_read += read_len;
+    }
+    ASSERT_UINT_EQUALS(s_get_async_pause_object_size, total_read);
+    fclose(verify_file);
+
+    remove(download_filepath);
+    s_async_pause_test_data_clean_up(&test_data);
+    s_async_pause_test_data_clean_up(&resume_data);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* ---- Test 8b: ranged GET async pause/resume to file ----
+ * The download starts with a Range header, so file offset 0 corresponds to the range start.
+ * Verifies that resumed writes seek relative to the range start, not to absolute object offsets. */
+
+AWS_TEST_CASE(test_s3_get_pause_resume_async_ranged_to_file, s_test_s3_get_pause_resume_async_ranged_to_file)
+static int s_test_s3_get_pause_resume_async_ranged_to_file(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_key = g_pre_existing_object_10MB;
+
+    /* Range: 2MiB..(9MiB-1) inclusive -> 7MiB of data. With 5MiB part_size: part 1 = 5MiB,
+     * part 2 = 2MiB. Pause after part 1, resume downloads part 2. */
+    const uint64_t range_start = 2 * 1024 * 1024;
+    const uint64_t range_end = 9 * 1024 * 1024 - 1; /* inclusive */
+    const size_t range_length = (size_t)(range_end - range_start + 1);
+    struct aws_byte_cursor range_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=2097152-9437183");
+
+    const char *download_filepath = "test_get_async_pause_resume_ranged_tmp";
+
+    /* --- Pause leg --- */
+    struct async_pause_resume_test_data test_data;
+    s_async_pause_test_data_init(&test_data);
+    aws_atomic_store_int(&test_data.pause_after_n_parts, 1);
+    tester.user_data = &test_data;
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+    client_config.part_size = s_get_async_pause_part_size;
+    client_config.max_active_connections_override = 1;
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_key);
+    struct aws_http_header range_header = {
+        .name = g_range_header_name,
+        .value = range_header_value,
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
+
+    struct aws_s3_meta_request_options get_options = {
+        .user_data = &tester,
+        .finish_callback = s_async_pause_meta_request_finish,
+        .progress_callback = s_get_async_pause_progress_callback,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .recv_filepath = aws_byte_cursor_from_c_str(download_filepath),
+    };
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &get_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&test_data.mutex);
+    aws_condition_variable_wait_pred(&test_data.c_var, &test_data.mutex, s_async_pause_completion_predicate, &test_data);
+    aws_mutex_unlock(&test_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_PAUSED, test_data.meta_request_error_code);
+    ASSERT_TRUE(test_data.pause_callback_invoked);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, test_data.pause_error_code);
+    ASSERT_NOT_NULL(test_data.resume_token);
+    ASSERT_TRUE(aws_s3_meta_request_resume_token_num_parts_completed(test_data.resume_token) >= 1);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    client = aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    /* --- Resume leg: same Range header, RESUME into the same file --- */
+    struct async_pause_resume_test_data resume_data;
+    s_async_pause_test_data_init(&resume_data);
+    aws_atomic_store_int(&resume_data.pause_after_n_parts, SIZE_MAX);
+    tester.user_data = &resume_data;
+
+    AWS_ZERO_STRUCT(client_config);
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    client = aws_s3_client_new(allocator, &client_config);
+
+    host_name = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    host_cursor = aws_byte_cursor_from_string(host_name);
+    message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_key);
+    ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
+
+    struct aws_s3_meta_request_options resume_get_options = {
+        .user_data = &tester,
+        .finish_callback = s_async_pause_meta_request_finish,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .recv_filepath = aws_byte_cursor_from_c_str(download_filepath),
+        .recv_file_option = AWS_S3_RECV_FILE_RESUME,
+        .resume_token = test_data.resume_token,
+    };
+
+    meta_request = aws_s3_client_make_meta_request(client, &resume_get_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&resume_data.mutex);
+    aws_condition_variable_wait_pred(
+        &resume_data.c_var, &resume_data.mutex, s_async_pause_completion_predicate, &resume_data);
+    aws_mutex_unlock(&resume_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    client = aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    /* Verify: file holds exactly the 7MiB range, all zero bytes. A regression that writes the
+     * resumed part at its absolute object offset would grow the file past the range length. */
+    FILE *verify_file = aws_fopen(download_filepath, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    fseek(verify_file, 0, SEEK_END);
+    size_t file_size = (size_t)ftell(verify_file);
+    ASSERT_UINT_EQUALS(range_length, file_size);
+    fseek(verify_file, 0, SEEK_SET);
+    uint8_t verify_buffer[64 * 1024];
+    size_t read_len = 0;
+    while ((read_len = fread(verify_buffer, 1, sizeof(verify_buffer), verify_file)) > 0) {
+        for (size_t i = 0; i < read_len; ++i) {
+            ASSERT_UINT_EQUALS(0, verify_buffer[i]);
+        }
+    }
     fclose(verify_file);
 
     remove(download_filepath);
@@ -10287,40 +10451,24 @@ static int s_test_s3_get_pause_resume_async_body_callback(struct aws_allocator *
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor object_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_get_async_pause_resume_body_cb_40MB.bin");
+    struct aws_byte_cursor object_key = g_pre_existing_object_10MB;
 
-    /* Upload a 40MB object */
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options =
-            {
-                .object_size_mb = 40,
-                .object_path_override = object_key,
-            },
-    };
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
-
-    /* --- Pause leg: download via body callback, pause after 2 parts --- */
+    /* --- Pause leg: download via body callback, pause after 1 part --- */
     struct get_async_body_callback_combined_data pause_combined;
     AWS_ZERO_STRUCT(pause_combined);
     s_async_pause_test_data_init(&pause_combined.pause_data);
-    aws_atomic_store_int(&pause_combined.pause_data.pause_after_n_parts, 2);
-    aws_byte_buf_init(&pause_combined.received_body, allocator, MB_TO_BYTES(20));
+    aws_atomic_store_int(&pause_combined.pause_data.pause_after_n_parts, 1);
+    aws_byte_buf_init(&pause_combined.received_body, allocator, s_get_async_pause_object_size);
     aws_mutex_init(&pause_combined.body_mutex);
     tester.user_data = &pause_combined;
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
+    client_config.part_size = s_get_async_pause_part_size;
     client_config.max_active_connections_override = 1;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-
-    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_meta_request_factory_get_async_pause;
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -10330,6 +10478,7 @@ static int s_test_s3_get_pause_resume_async_body_callback(struct aws_allocator *
     struct aws_s3_meta_request_options get_options = {
         .user_data = &tester,
         .finish_callback = s_async_pause_meta_request_finish,
+        .progress_callback = s_get_async_pause_progress_callback,
         .body_callback = s_get_async_body_callback,
         .message = message,
         .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
@@ -10371,7 +10520,7 @@ static int s_test_s3_get_pause_resume_async_body_callback(struct aws_allocator *
     AWS_ZERO_STRUCT(resume_combined);
     s_async_pause_test_data_init(&resume_combined.pause_data);
     aws_atomic_store_int(&resume_combined.pause_data.pause_after_n_parts, SIZE_MAX);
-    aws_byte_buf_init(&resume_combined.received_body, allocator, MB_TO_BYTES(40));
+    aws_byte_buf_init(&resume_combined.received_body, allocator, s_get_async_pause_object_size);
     aws_mutex_init(&resume_combined.body_mutex);
     tester.user_data = &resume_combined;
 
@@ -10379,8 +10528,6 @@ static int s_test_s3_get_pause_resume_async_body_callback(struct aws_allocator *
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
     client = aws_s3_client_new(allocator, &client_config);
-    patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_meta_request_factory_get_async_pause;
 
     host_name = aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
     host_cursor = aws_byte_cursor_from_string(host_name);
@@ -10442,21 +10589,7 @@ static int s_test_s3_get_pause_async_twice(struct aws_allocator *allocator, void
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor object_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_get_pause_async_twice_40MB.bin");
-
-    /* Upload object */
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options =
-            {
-                .object_size_mb = 40,
-                .object_path_override = object_key,
-            },
-    };
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+    struct aws_byte_cursor object_key = g_pre_existing_object_10MB;
 
     /* Use a special finished_request that calls pause_async TWICE on the same part completion.
      * The second call should invoke the callback with AWS_ERROR_INVALID_STATE. */
@@ -10471,6 +10604,7 @@ static int s_test_s3_get_pause_async_twice(struct aws_allocator *allocator, void
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
+    client_config.part_size = s_get_async_pause_part_size;
     client_config.max_active_connections_override = 1;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -10536,31 +10670,18 @@ static int s_test_s3_get_resume_file_modified_restart_e2e(struct aws_allocator *
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor object_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_get_resume_file_modified_40MB.bin");
+    struct aws_byte_cursor object_key = g_pre_existing_object_10MB;
     const char *download_filepath = "test_get_resume_file_modified_restart_tmp";
 
-    /* Upload a 40MB object */
-    struct aws_s3_tester_meta_request_options put_options = {
-        .allocator = allocator,
-        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
-        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
-        .put_options =
-            {
-                .object_size_mb = 40,
-                .object_path_override = object_key,
-            },
-    };
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
-
-    /* --- Pause leg: download to file, pause after 2 parts --- */
+    /* --- Pause leg: download to file, pause after 1 part --- */
     struct async_pause_resume_test_data test_data;
     s_async_pause_test_data_init(&test_data);
-    aws_atomic_store_int(&test_data.pause_after_n_parts, 2);
+    aws_atomic_store_int(&test_data.pause_after_n_parts, 1);
     tester.user_data = &test_data;
 
     struct aws_s3_client_config client_config;
     AWS_ZERO_STRUCT(client_config);
+    client_config.part_size = s_get_async_pause_part_size;
     client_config.max_active_connections_override = 1;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -10644,7 +10765,8 @@ static int s_test_s3_get_resume_file_modified_restart_e2e(struct aws_allocator *
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
     ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, resume_data.response_status_code);
 
-    /* Verify file is byte-correct: full 40MB (the extra byte was overwritten by the full re-download) */
+    /* Verify file is byte-correct: full object size (the appended extra byte region was
+     * overwritten / superseded by the resumed download) */
     FILE *verify_file = aws_fopen(download_filepath, "rb");
     ASSERT_NOT_NULL(verify_file);
     fseek(verify_file, 0, SEEK_END);

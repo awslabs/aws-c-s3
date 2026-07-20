@@ -2023,3 +2023,738 @@ TEST_CASE(request_timeout_error_mock_server) {
 
     return AWS_OP_SUCCESS;
 }
+
+/**
+ * Pause/resume tests against the mock server: /get_object_pause_resume serves a 1MiB object
+ * (Content-Range total). With 64KB part_size that's 16 range-GET parts. The mock generates
+ * every body as 'a' bytes of the requested range length.
+ */
+
+#include "aws/s3/private/s3_bitmap.h"
+
+#define PAUSE_RESUME_MOCK_OBJECT_SIZE (1024 * 1024)
+#define PAUSE_RESUME_MOCK_PART_SIZE (64 * 1024)
+#define PAUSE_RESUME_MOCK_TOTAL_PARTS (PAUSE_RESUME_MOCK_OBJECT_SIZE / PAUSE_RESUME_MOCK_PART_SIZE)
+
+struct pause_resume_mock_test_data {
+    struct aws_mutex mutex;
+    struct aws_condition_variable c_var;
+    bool execution_completed;
+    bool pause_callback_invoked;
+    struct aws_s3_meta_request_resume_token *resume_token;
+    int pause_error_code;
+    int meta_request_error_code;
+
+    /* Delivery-side tracking */
+    struct aws_atomic_var bytes_delivered;
+    struct aws_atomic_var parts_delivered;
+    struct aws_atomic_var num_telemetry_requests;
+    size_t pause_after_n_parts;
+    struct aws_atomic_var pause_initiated;
+};
+
+static void s_pause_resume_mock_test_data_init(struct pause_resume_mock_test_data *test_data) {
+    AWS_ZERO_STRUCT(*test_data);
+    test_data->c_var = (struct aws_condition_variable)AWS_CONDITION_VARIABLE_INIT;
+    aws_mutex_init(&test_data->mutex);
+    aws_atomic_init_int(&test_data->bytes_delivered, 0);
+    aws_atomic_init_int(&test_data->parts_delivered, 0);
+    aws_atomic_init_int(&test_data->num_telemetry_requests, 0);
+    aws_atomic_init_int(&test_data->pause_initiated, false);
+    test_data->pause_after_n_parts = SIZE_MAX;
+}
+
+static void s_pause_resume_mock_test_data_clean_up(struct pause_resume_mock_test_data *test_data) {
+    aws_s3_meta_request_resume_token_release(test_data->resume_token);
+    aws_mutex_clean_up(&test_data->mutex);
+}
+
+static void s_pause_resume_mock_finish(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_result *meta_request_result,
+    void *user_data) {
+    (void)meta_request;
+    struct pause_resume_mock_test_data *test_data = user_data;
+    aws_mutex_lock(&test_data->mutex);
+    test_data->meta_request_error_code = meta_request_result->error_code;
+    test_data->execution_completed = true;
+    aws_mutex_unlock(&test_data->mutex);
+    aws_condition_variable_notify_one(&test_data->c_var);
+}
+
+static bool s_pause_resume_mock_completion_predicate(void *arg) {
+    struct pause_resume_mock_test_data *test_data = arg;
+    return test_data->execution_completed;
+}
+
+static void s_pause_resume_mock_pause_complete(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_resume_token *resume_token,
+    int error_code,
+    void *user_data) {
+    (void)meta_request;
+    struct pause_resume_mock_test_data *test_data = user_data;
+    aws_mutex_lock(&test_data->mutex);
+    test_data->pause_callback_invoked = true;
+    test_data->pause_error_code = error_code;
+    if (resume_token != NULL) {
+        test_data->resume_token =
+            aws_s3_meta_request_resume_token_acquire((struct aws_s3_meta_request_resume_token *)resume_token);
+    }
+    aws_mutex_unlock(&test_data->mutex);
+}
+
+static int s_pause_resume_mock_body_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+    (void)meta_request;
+    (void)range_start;
+    struct pause_resume_mock_test_data *test_data = user_data;
+    aws_atomic_fetch_add(&test_data->bytes_delivered, body->len);
+    return AWS_OP_SUCCESS;
+}
+
+/* Progress fires after a part's body was delivered: trigger pause once the threshold is reached. */
+static void s_pause_resume_mock_progress_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+    (void)progress;
+    struct pause_resume_mock_test_data *test_data = user_data;
+
+    size_t delivered = (size_t)aws_atomic_fetch_add(&test_data->parts_delivered, 1) + 1;
+    if (delivered >= test_data->pause_after_n_parts) {
+        size_t expected = false;
+        if (aws_atomic_compare_exchange_int(&test_data->pause_initiated, &expected, true)) {
+            aws_s3_meta_request_pause_async(meta_request, s_pause_resume_mock_pause_complete, test_data);
+        }
+    }
+}
+
+/* Pause a mock-server download after N delivered parts; assert the resume token marks EXACTLY
+ * the delivered bytes (truthful token), then resume and assert the remaining bytes are delivered
+ * exactly once (pause bytes + resume bytes == object size, no overlap or loss). */
+TEST_CASE(get_pause_resume_exact_part_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_pause_resume");
+
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+
+    /* --- Pause leg --- */
+    struct pause_resume_mock_test_data pause_data;
+    s_pause_resume_mock_test_data_init(&pause_data);
+    pause_data.pause_after_n_parts = 3;
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .max_active_connections_override = 1, /* serialize parts for a deterministic pause point */
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options get_options = {
+        .user_data = &pause_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .progress_callback = s_pause_resume_mock_progress_callback,
+        .body_callback = s_pause_resume_mock_body_callback,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+    };
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &get_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&pause_data.mutex);
+    aws_condition_variable_wait_pred(
+        &pause_data.c_var, &pause_data.mutex, s_pause_resume_mock_completion_predicate, &pause_data);
+    aws_mutex_unlock(&pause_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_PAUSED, pause_data.meta_request_error_code);
+    ASSERT_TRUE(pause_data.pause_callback_invoked);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, pause_data.pause_error_code);
+    ASSERT_NOT_NULL(pause_data.resume_token);
+
+    uint64_t pause_leg_bytes = (uint64_t)aws_atomic_load_int(&pause_data.bytes_delivered);
+    size_t num_completed = aws_s3_meta_request_resume_token_num_parts_completed(pause_data.resume_token);
+
+    /* Paused at (or shortly after) the requested part */
+    ASSERT_TRUE(num_completed >= pause_data.pause_after_n_parts);
+    ASSERT_TRUE(num_completed < PAUSE_RESUME_MOCK_TOTAL_PARTS);
+
+    /* Token truthfulness: marked parts must be a contiguous prefix that matches EXACTLY the bytes
+     * delivered to the caller. A part whose network request finished but whose body was never
+     * delivered must not be marked. */
+    ASSERT_UINT_EQUALS(num_completed * (uint64_t)PAUSE_RESUME_MOCK_PART_SIZE, pause_leg_bytes);
+    for (uint32_t part = 1; part <= PAUSE_RESUME_MOCK_TOTAL_PARTS; ++part) {
+        bool expected_set = part <= num_completed;
+        ASSERT_INT_EQUALS(expected_set, aws_s3_bitmap_get(&pause_data.resume_token->completed_parts_bitmap, part));
+    }
+
+    ASSERT_UINT_EQUALS(PAUSE_RESUME_MOCK_OBJECT_SIZE, aws_s3_meta_request_resume_token_object_size(pause_data.resume_token));
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    client = NULL;
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    /* --- Resume leg: exactly the missing bytes are delivered --- */
+    struct pause_resume_mock_test_data resume_data;
+    s_pause_resume_mock_test_data_init(&resume_data);
+
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    message = aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options resume_options = {
+        .user_data = &resume_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .body_callback = s_pause_resume_mock_body_callback,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+        .resume_token = pause_data.resume_token,
+    };
+
+    meta_request = aws_s3_client_make_meta_request(client, &resume_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&resume_data.mutex);
+    aws_condition_variable_wait_pred(
+        &resume_data.c_var, &resume_data.mutex, s_pause_resume_mock_completion_predicate, &resume_data);
+    aws_mutex_unlock(&resume_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
+
+    uint64_t resume_leg_bytes = (uint64_t)aws_atomic_load_int(&resume_data.bytes_delivered);
+    ASSERT_UINT_EQUALS((uint64_t)PAUSE_RESUME_MOCK_OBJECT_SIZE - pause_leg_bytes, resume_leg_bytes);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    aws_uri_clean_up(&mock_server);
+    s_pause_resume_mock_test_data_clean_up(&pause_data);
+    s_pause_resume_mock_test_data_clean_up(&resume_data);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Resume from a HAND-CRAFTED token with a gap in the middle: every part completed except part 2.
+ * A local file is pre-created with correct content everywhere except part 2's region. The resume
+ * must download ONLY part 2 and write it at the correct file offset.
+ * TODO: general gap support (multiple scattered gaps interleaved with large completed runs) needs
+ * broader coverage once officially supported; this exercises the single-gap case end to end. */
+TEST_CASE(get_resume_gap_token_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_pause_resume");
+    const char *download_filepath = "test_get_resume_gap_token_tmp";
+
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+
+    /* Pre-create the local file: 'a' everywhere (matching the mock's generated bodies),
+     * except part 2's region which is zeroed -- the "gap". */
+    FILE *seed_file = aws_fopen(download_filepath, "wb");
+    ASSERT_NOT_NULL(seed_file);
+    for (uint32_t part = 1; part <= PAUSE_RESUME_MOCK_TOTAL_PARTS; ++part) {
+        char fill = (part == 2) ? '\0' : 'a';
+        for (size_t i = 0; i < PAUSE_RESUME_MOCK_PART_SIZE; ++i) {
+            fputc(fill, seed_file);
+        }
+    }
+    fclose(seed_file);
+
+    /* Hand-craft the token: all parts completed except part 2. */
+    uint32_t completed_parts[PAUSE_RESUME_MOCK_TOTAL_PARTS - 1];
+    size_t num_completed = 0;
+    for (uint32_t part = 1; part <= PAUSE_RESUME_MOCK_TOTAL_PARTS; ++part) {
+        if (part != 2) {
+            completed_parts[num_completed++] = part;
+        }
+    }
+    struct aws_s3_download_resume_token_options token_options = {
+        .etag = aws_byte_cursor_from_c_str("b54357faf0632cce46e942fa68356b30"),
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .first_part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .object_size = PAUSE_RESUME_MOCK_OBJECT_SIZE,
+        .total_num_parts = PAUSE_RESUME_MOCK_TOTAL_PARTS,
+        .completed_parts = completed_parts,
+        .num_completed_parts = num_completed,
+        .file_last_modified_epoch_ns = 1, /* nonzero: mtime validation is not currently enforced */
+    };
+    struct aws_s3_meta_request_resume_token *token =
+        aws_s3_meta_request_resume_token_new_download(allocator, &token_options);
+    ASSERT_NOT_NULL(token);
+
+    struct pause_resume_mock_test_data resume_data;
+    s_pause_resume_mock_test_data_init(&resume_data);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options resume_options = {
+        .user_data = &resume_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+        .recv_filepath = aws_byte_cursor_from_c_str(download_filepath),
+        .recv_file_option = AWS_S3_RECV_FILE_RESUME,
+        .resume_token = token,
+    };
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &resume_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&resume_data.mutex);
+    aws_condition_variable_wait_pred(
+        &resume_data.c_var, &resume_data.mutex, s_pause_resume_mock_completion_predicate, &resume_data);
+    aws_mutex_unlock(&resume_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
+
+    /* Verify the gap is filled and everything else untouched: whole file must now be 'a'. */
+    FILE *verify_file = aws_fopen(download_filepath, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    fseek(verify_file, 0, SEEK_END);
+    ASSERT_UINT_EQUALS(PAUSE_RESUME_MOCK_OBJECT_SIZE, (size_t)ftell(verify_file));
+    fseek(verify_file, 0, SEEK_SET);
+    uint8_t verify_buffer[64 * 1024];
+    size_t total_read = 0;
+    size_t read_len = 0;
+    while ((read_len = fread(verify_buffer, 1, sizeof(verify_buffer), verify_file)) > 0) {
+        for (size_t i = 0; i < read_len; ++i) {
+            ASSERT_UINT_EQUALS('a', verify_buffer[i]);
+        }
+        total_read += read_len;
+    }
+    ASSERT_UINT_EQUALS(PAUSE_RESUME_MOCK_OBJECT_SIZE, total_read);
+    fclose(verify_file);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    remove(download_filepath);
+    aws_s3_meta_request_resume_token_release(token);
+    aws_uri_clean_up(&mock_server);
+    s_pause_resume_mock_test_data_clean_up(&resume_data);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* ---- Re-pause a resumed download: pause -> resume -> pause -> resume to completion ---- */
+TEST_CASE(get_pause_resume_repause_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_pause_resume");
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .max_active_connections_override = 1,
+    };
+
+    struct pause_resume_mock_test_data legs[3];
+    struct aws_s3_meta_request_resume_token *tokens[2] = {NULL, NULL};
+    uint64_t leg_bytes[3] = {0, 0, 0};
+    size_t leg_pause_thresholds[3] = {3, 2, SIZE_MAX}; /* leg 3 runs to completion */
+
+    for (size_t leg = 0; leg < 3; ++leg) {
+        s_pause_resume_mock_test_data_init(&legs[leg]);
+        legs[leg].pause_after_n_parts = leg_pause_thresholds[leg];
+
+        struct aws_s3_client *client = NULL;
+        ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+        struct aws_http_message *message =
+            aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+        struct aws_s3_meta_request_options options = {
+            .user_data = &legs[leg],
+            .finish_callback = s_pause_resume_mock_finish,
+            .progress_callback = s_pause_resume_mock_progress_callback,
+            .body_callback = s_pause_resume_mock_body_callback,
+            .message = message,
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .endpoint = &mock_server,
+            .resume_token = leg > 0 ? tokens[leg - 1] : NULL,
+        };
+
+        struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+        ASSERT_NOT_NULL(meta_request);
+
+        aws_mutex_lock(&legs[leg].mutex);
+        aws_condition_variable_wait_pred(
+            &legs[leg].c_var, &legs[leg].mutex, s_pause_resume_mock_completion_predicate, &legs[leg]);
+        aws_mutex_unlock(&legs[leg].mutex);
+
+        leg_bytes[leg] = (uint64_t)aws_atomic_load_int(&legs[leg].bytes_delivered);
+
+        if (leg < 2) {
+            ASSERT_INT_EQUALS(AWS_ERROR_S3_PAUSED, legs[leg].meta_request_error_code);
+            ASSERT_NOT_NULL(legs[leg].resume_token);
+            tokens[leg] = legs[leg].resume_token;
+        } else {
+            ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, legs[leg].meta_request_error_code);
+        }
+
+        aws_s3_meta_request_release(meta_request);
+        aws_http_message_release(message);
+        aws_s3_client_release(client);
+        aws_s3_tester_wait_for_client_shutdown(&tester);
+        tester.bound_to_client = false;
+    }
+
+    size_t completed_1 = aws_s3_meta_request_resume_token_num_parts_completed(tokens[0]);
+    size_t completed_2 = aws_s3_meta_request_resume_token_num_parts_completed(tokens[1]);
+
+    /* Each leg delivered exactly the parts its token claims. Token 2 must be the union of
+     * token 1's restored parts and leg 2's newly streamed parts. */
+    ASSERT_UINT_EQUALS(completed_1 * (uint64_t)PAUSE_RESUME_MOCK_PART_SIZE, leg_bytes[0]);
+    ASSERT_UINT_EQUALS((completed_2 - completed_1) * (uint64_t)PAUSE_RESUME_MOCK_PART_SIZE, leg_bytes[1]);
+    ASSERT_TRUE(completed_2 > completed_1);
+    ASSERT_TRUE(completed_2 < PAUSE_RESUME_MOCK_TOTAL_PARTS);
+    for (uint32_t part = 1; part <= PAUSE_RESUME_MOCK_TOTAL_PARTS; ++part) {
+        ASSERT_INT_EQUALS(part <= completed_2, aws_s3_bitmap_get(&tokens[1]->completed_parts_bitmap, part));
+    }
+
+    /* Across all three legs, every byte was delivered exactly once. */
+    ASSERT_UINT_EQUALS(PAUSE_RESUME_MOCK_OBJECT_SIZE, leg_bytes[0] + leg_bytes[1] + leg_bytes[2]);
+
+    aws_uri_clean_up(&mock_server);
+    for (size_t leg = 0; leg < 3; ++leg) {
+        s_pause_resume_mock_test_data_clean_up(&legs[leg]);
+    }
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Telemetry counter: counts every HTTP request the meta request makes. */
+static void s_pause_resume_mock_count_telemetry(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request_metrics *metrics,
+    void *user_data) {
+    (void)meta_request;
+    (void)metrics;
+    struct pause_resume_mock_test_data *test_data = user_data;
+    aws_atomic_fetch_add(&test_data->num_telemetry_requests, 1);
+}
+
+/* Resume from a token that says ALL parts are complete: the meta request must finish
+ * successfully right away, delivering zero bytes and sending zero HTTP requests. */
+TEST_CASE(get_resume_all_parts_complete_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_pause_resume");
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+
+    uint32_t completed_parts[PAUSE_RESUME_MOCK_TOTAL_PARTS];
+    for (uint32_t part = 1; part <= PAUSE_RESUME_MOCK_TOTAL_PARTS; ++part) {
+        completed_parts[part - 1] = part;
+    }
+    struct aws_s3_download_resume_token_options token_options = {
+        .etag = aws_byte_cursor_from_c_str("b54357faf0632cce46e942fa68356b30"),
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .first_part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .object_size = PAUSE_RESUME_MOCK_OBJECT_SIZE,
+        .total_num_parts = PAUSE_RESUME_MOCK_TOTAL_PARTS,
+        .completed_parts = completed_parts,
+        .num_completed_parts = PAUSE_RESUME_MOCK_TOTAL_PARTS,
+    };
+    struct aws_s3_meta_request_resume_token *token =
+        aws_s3_meta_request_resume_token_new_download(allocator, &token_options);
+    ASSERT_NOT_NULL(token);
+
+    struct pause_resume_mock_test_data resume_data;
+    s_pause_resume_mock_test_data_init(&resume_data);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options resume_options = {
+        .user_data = &resume_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .body_callback = s_pause_resume_mock_body_callback,
+        .telemetry_callback = s_pause_resume_mock_count_telemetry,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+        .resume_token = token,
+    };
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &resume_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&resume_data.mutex);
+    aws_condition_variable_wait_pred(
+        &resume_data.c_var, &resume_data.mutex, s_pause_resume_mock_completion_predicate, &resume_data);
+    aws_mutex_unlock(&resume_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
+    ASSERT_UINT_EQUALS(0, (uint64_t)aws_atomic_load_int(&resume_data.bytes_delivered));
+    /* No HTTP requests were needed: everything was already complete. */
+    ASSERT_UINT_EQUALS(0, (uint64_t)aws_atomic_load_int(&resume_data.num_telemetry_requests));
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    aws_s3_meta_request_resume_token_release(token);
+    aws_uri_clean_up(&mock_server);
+    s_pause_resume_mock_test_data_clean_up(&resume_data);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Resume from a token with ZERO completed parts: full re-download of every byte. */
+TEST_CASE(get_resume_zero_completed_token_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_pause_resume");
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+
+    struct aws_s3_download_resume_token_options token_options = {
+        .etag = aws_byte_cursor_from_c_str("b54357faf0632cce46e942fa68356b30"),
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .first_part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .object_size = PAUSE_RESUME_MOCK_OBJECT_SIZE,
+        .total_num_parts = PAUSE_RESUME_MOCK_TOTAL_PARTS,
+        .completed_parts = NULL,
+        .num_completed_parts = 0,
+    };
+    struct aws_s3_meta_request_resume_token *token =
+        aws_s3_meta_request_resume_token_new_download(allocator, &token_options);
+    ASSERT_NOT_NULL(token);
+
+    struct pause_resume_mock_test_data resume_data;
+    s_pause_resume_mock_test_data_init(&resume_data);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options resume_options = {
+        .user_data = &resume_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .body_callback = s_pause_resume_mock_body_callback,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+        .resume_token = token,
+    };
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &resume_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&resume_data.mutex);
+    aws_condition_variable_wait_pred(
+        &resume_data.c_var, &resume_data.mutex, s_pause_resume_mock_completion_predicate, &resume_data);
+    aws_mutex_unlock(&resume_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
+    ASSERT_UINT_EQUALS(PAUSE_RESUME_MOCK_OBJECT_SIZE, (uint64_t)aws_atomic_load_int(&resume_data.bytes_delivered));
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    aws_s3_meta_request_resume_token_release(token);
+    aws_uri_clean_up(&mock_server);
+    s_pause_resume_mock_test_data_clean_up(&resume_data);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Body callback used by the backpressure test: pause once the read window's worth of bytes
+ * has been delivered (mid part 2). */
+static int s_pause_backpressure_body_callback(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t range_start,
+    void *user_data) {
+    (void)range_start;
+    struct pause_resume_mock_test_data *test_data = user_data;
+    size_t total = aws_atomic_fetch_add(&test_data->bytes_delivered, body->len) + body->len;
+
+    if (total >= test_data->pause_after_n_parts /* reused as byte threshold */) {
+        size_t expected = false;
+        if (aws_atomic_compare_exchange_int(&test_data->pause_initiated, &expected, true)) {
+            aws_s3_meta_request_pause_async(meta_request, s_pause_resume_mock_pause_complete, test_data);
+        }
+    }
+    return AWS_OP_SUCCESS;
+}
+
+/* Backpressure + pause: with a read window of 1.5 parts and no window increments, part 1 is
+ * fully delivered and part 2 only half delivered when the pause fires. The token must mark
+ * ONLY part 1 (a partially delivered part is not resumable), so the resume re-delivers part 2
+ * in full: the half-part delivered before the pause is the expected, documented overlap. */
+TEST_CASE(get_pause_backpressure_partial_part_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_pause_resume");
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+
+    const size_t window_size = PAUSE_RESUME_MOCK_PART_SIZE + PAUSE_RESUME_MOCK_PART_SIZE / 2;
+
+    /* --- Pause leg: backpressure client, window = 1.5 parts, never incremented --- */
+    struct pause_resume_mock_test_data pause_data;
+    s_pause_resume_mock_test_data_init(&pause_data);
+    pause_data.pause_after_n_parts = window_size; /* byte threshold for the body-callback trigger */
+
+    struct aws_s3_client_config client_config = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_mode = AWS_MR_TLS_DISABLED,
+        .enable_read_backpressure = true,
+        .initial_read_window = window_size,
+        .max_active_connections_override = 1,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options get_options = {
+        .user_data = &pause_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .body_callback = s_pause_backpressure_body_callback,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+    };
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &get_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&pause_data.mutex);
+    aws_condition_variable_wait_pred(
+        &pause_data.c_var, &pause_data.mutex, s_pause_resume_mock_completion_predicate, &pause_data);
+    aws_mutex_unlock(&pause_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_PAUSED, pause_data.meta_request_error_code);
+    ASSERT_NOT_NULL(pause_data.resume_token);
+
+    uint64_t pause_leg_bytes = (uint64_t)aws_atomic_load_int(&pause_data.bytes_delivered);
+    ASSERT_UINT_EQUALS(window_size, pause_leg_bytes); /* 1.5 parts delivered */
+    /* Only the FULLY delivered part is marked */
+    ASSERT_UINT_EQUALS(1, aws_s3_meta_request_resume_token_num_parts_completed(pause_data.resume_token));
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    /* --- Resume leg: normal client, no backpressure --- */
+    struct pause_resume_mock_test_data resume_data;
+    s_pause_resume_mock_test_data_init(&resume_data);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = PAUSE_RESUME_MOCK_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *resume_client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &resume_client));
+    message = aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+
+    struct aws_s3_meta_request_options resume_options = {
+        .user_data = &resume_data,
+        .finish_callback = s_pause_resume_mock_finish,
+        .body_callback = s_pause_resume_mock_body_callback,
+        .message = message,
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .endpoint = &mock_server,
+        .resume_token = pause_data.resume_token,
+    };
+
+    meta_request = aws_s3_client_make_meta_request(resume_client, &resume_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_mutex_lock(&resume_data.mutex);
+    aws_condition_variable_wait_pred(
+        &resume_data.c_var, &resume_data.mutex, s_pause_resume_mock_completion_predicate, &resume_data);
+    aws_mutex_unlock(&resume_data.mutex);
+
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, resume_data.meta_request_error_code);
+
+    /* Resume re-delivers all 15 unmarked parts in full. The half of part 2 that was delivered
+     * before the pause is delivered again: overlap == pause_bytes - 1 full part. */
+    uint64_t resume_leg_bytes = (uint64_t)aws_atomic_load_int(&resume_data.bytes_delivered);
+    ASSERT_UINT_EQUALS(
+        (uint64_t)(PAUSE_RESUME_MOCK_TOTAL_PARTS - 1) * PAUSE_RESUME_MOCK_PART_SIZE, resume_leg_bytes);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_http_message_release(message);
+    aws_s3_client_release(resume_client);
+    aws_s3_tester_wait_for_client_shutdown(&tester);
+    tester.bound_to_client = false;
+
+    aws_uri_clean_up(&mock_server);
+    s_pause_resume_mock_test_data_clean_up(&pause_data);
+    s_pause_resume_mock_test_data_clean_up(&resume_data);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}

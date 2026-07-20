@@ -232,6 +232,11 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
+        /* Number of parts whose bodies were fully and successfully delivered to the caller (file or body
+         * callback). Since delivery is strictly in-order, this is the count of a contiguous prefix of the
+         * parts this meta request streams. Used to build a truthful download resume token. */
+        uint32_t num_parts_delivery_succeeded;
+
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
          * If `event_delivery_task_scheduled` is true, then this task is scheduled.
@@ -337,6 +342,14 @@ struct aws_s3_meta_request {
     FILE *recv_file;
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
+    /* True when recv_file was opened with AWS_S3_RECV_FILE_RESUME: parts already delivered by the
+     * paused request are skipped, so buffered writes must seek to each part's absolute offset
+     * instead of relying on sequential appends. */
+    bool recv_file_seek_writes;
+    /* Object offset that corresponds to file offset 0. 0 for a whole-object download; the request's
+     * range-start for a download that began with a Range header (the file holds only the range).
+     * Restored from the resume token. Only meaningful when recv_file_seek_writes is true. */
+    uint64_t recv_file_resume_base_offset;
     /* When true, use O_DIRECT for writing received data to file */
     bool recv_file_direct_io;
     /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
@@ -351,6 +364,11 @@ struct aws_s3_meta_request {
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
+
+    /* For a download resumed from a token: bitmap of parts already delivered by the paused request
+     * (bit N = part N). Body streaming skips these parts. Immutable after init; empty when not
+     * resuming. */
+    struct aws_byte_buf resume_delivered_parts_bitmap;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */

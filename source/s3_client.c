@@ -2947,6 +2947,7 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_do
         aws_s3_meta_request_resume_token_release(token);
         return NULL;
     }
+    token->num_parts_completed = options->num_completed_parts;
 
     return token;
 }

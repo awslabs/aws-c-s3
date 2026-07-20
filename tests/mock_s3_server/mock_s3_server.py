@@ -57,6 +57,11 @@ class ResponseConfig:
     force_retry: bool = False
     should_skip_wait: bool = False
     request_headers: Optional[List[Tuple[bytes, bytes]]] = None
+    # When set (GetObject), any "<request-range>" placeholder in a response header value is
+    # replaced with "{range_start}-{range_end}" from the request's Range header, so a single
+    # json file can serve correct Content-Range headers for every part of a ranged download.
+    range_start: Optional[int] = None
+    range_end: Optional[int] = None
 
     def __post_init__(self):
         """Called automatically after the dataclass __init__"""
@@ -112,7 +117,11 @@ class ResponseConfig:
 
         content_length_set = False
         for header in data['headers'].items():
-            headers.append((header[0], str(header[1])))
+            header_value = str(header[1])
+            if self.range_start is not None:
+                header_value = header_value.replace(
+                    "<request-range>", f"{self.range_start}-{self.range_end}")
+            headers.append((header[0], header_value))
             if header[0].lower() == "content-length":
                 content_length_set = True
 
@@ -431,6 +440,8 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
 
+    response_config.range_start = start_range
+    response_config.range_end = end_range
     response_config.generate_body_size = data_length
     return response_config
 

@@ -5,6 +5,7 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
+#include "aws/s3/private/s3_bitmap.h"
 #include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
@@ -385,6 +386,12 @@ int aws_s3_meta_request_init_base(
                     goto error;
                 }
                 meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                meta_request->recv_file_seek_writes = true;
+                /* File offset 0 corresponds to the start of the downloaded range: 0 for a
+                 * whole-object download, the Range header's start for a ranged download. */
+                if (options->resume_token != NULL) {
+                    meta_request->recv_file_resume_base_offset = options->resume_token->object_range_start;
+                }
                 break;
 
             default:
@@ -461,6 +468,18 @@ int aws_s3_meta_request_init_base(
     }
 
     meta_request->synced_data.next_streaming_part = 1;
+
+    /* For a resumed download, parts delivered by the paused request are never re-requested, so
+     * body streaming must skip over them. */
+    if (options->resume_token != NULL && options->resume_token->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+        options->resume_token->completed_parts_bitmap.len > 0) {
+        aws_byte_buf_init_copy(
+            &meta_request->resume_delivered_parts_bitmap, allocator, &options->resume_token->completed_parts_bitmap);
+        while (aws_s3_bitmap_get(
+            &meta_request->resume_delivered_parts_bitmap, meta_request->synced_data.next_streaming_part)) {
+            ++meta_request->synced_data.next_streaming_part;
+        }
+    }
 
     meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
@@ -621,6 +640,11 @@ void aws_s3_meta_request_set_fail_synced(
 
         aws_s3_meta_request_result_setup(meta_request, &meta_request->synced_data.finish_result, NULL, 0, error_code);
     }
+
+    /* If body-delivery events are stalled waiting for read window (backpressure), wake the
+     * delivery task so it can drain them as canceled; otherwise wind-down would wait on their
+     * completion forever, since the window will never grow for a finishing meta request. */
+    aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
 }
 
 void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status) {
@@ -705,6 +729,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
         }
     }
     aws_string_destroy(meta_request->recv_filepath);
+    aws_byte_buf_clean_up(&meta_request->resume_delivered_parts_bitmap);
 
     /* Client may be NULL if meta request failed mid-creation (or this some weird testing mock with no client) */
     if (meta_request->client != NULL) {
@@ -2202,7 +2227,12 @@ static int s_write_body_to_file(
         /* Fallback to buffered write */
     }
 
-    /* Regular FILE* path — no seek needed, events arrive in order. */
+    /* Regular FILE* path. For a resumed download, previously-delivered parts are skipped, so seek
+     * each write to its absolute offset. Otherwise no seek is needed — events arrive in order. */
+    if (meta_request->recv_file_seek_writes &&
+        aws_fseek(meta_request->recv_file, (int64_t)file_offset, SEEK_SET) != AWS_OP_SUCCESS) {
+        return AWS_OP_ERR;
+    }
     return s_buffered_write_to_recv_file(meta_request, body);
 }
 
@@ -2218,7 +2248,9 @@ static int s_deliver_body_to_sink(
     if (meta_request->recv_file_direct_io || meta_request->recv_file) {
         uint64_t file_offset = meta_request->recv_file_direct_io
                                    ? meta_request->recv_file_direct_io_base_position + delivery_range_start
-                                   : 0; /* unused — sequential FILE* path doesn't seek */
+                                   /* Used only when seek_writes is set (RESUME). File offset 0 maps
+                                    * to the range start for a download that used a Range header. */
+                                   : delivery_range_start - meta_request->recv_file_resume_base_offset;
         error_code = s_write_body_to_file(meta_request, body, file_offset);
         if (meta_request->client->enable_read_backpressure) {
             aws_s3_meta_request_increment_read_window(meta_request, body->len);
@@ -2284,6 +2316,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
+    uint32_t num_parts_delivered_ok = 0;
     uint64_t bytes_allowed_to_deliver = 0;
 
     /* BEGIN CRITICAL SECTION */
@@ -2325,6 +2358,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 if (response_body.len == 0) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
+                    if (error_code == AWS_ERROR_SUCCESS) {
+                        ++num_parts_delivered_ok;
+                    }
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
                     aws_s3_request_release(request);
@@ -2343,8 +2379,11 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
                 }
 
-                /* Nothing to deliver after backpressure — re-queue and move on */
-                if (response_body.len == 0) {
+                /* Nothing to deliver after backpressure — re-queue and move on. But if the meta
+                 * request is finishing (canceled/paused/failed), fall through instead so the
+                 * event completes: the read window will never grow again, and wind-down waits
+                 * for every sent delivery to complete. */
+                if (response_body.len == 0 && error_code == AWS_ERROR_SUCCESS) {
                     aws_array_list_push_front(&incomplete_deliver_events_array, &event);
                     break;
                 }
@@ -2354,8 +2393,15 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 AWS_ASSERT(request->part_number >= 1);
                 if (request->part_number == 1) {
                     meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
+                } else if (
+                    meta_request->resume_delivered_parts_bitmap.len > 0 && bytes_delivered_for_request == 0) {
+                    /* Resumed download: parts delivered by the paused request are skipped, so the
+                     * delivery offset can jump forward at part boundaries. Re-sync the expected
+                     * offset; in-order delivery is still enforced by next_streaming_part. */
+                    meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
                 }
-                if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
+                if (error_code == AWS_ERROR_SUCCESS &&
+                    delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p: Unexpected code error. Please report the error to the team, "
@@ -2404,6 +2450,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
+                    if (!delivery_incomplete && error_code == AWS_ERROR_SUCCESS) {
+                        ++num_parts_delivered_ok;
+                    }
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
                     aws_s3_request_release(request);
@@ -2483,10 +2532,17 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
             if (bytes_allowed_to_deliver > 0 && error_code == AWS_ERROR_SUCCESS) {
                 /* We have more space now, let's try another delivery now. */
                 aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
+            } else if (aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+                /* The meta request is finishing (canceled/paused/failed) while deliveries are
+                 * stalled on the read window. The window will never grow again, so schedule
+                 * another run to drain the stalled events as canceled; otherwise wind-down
+                 * would wait on their completion forever. */
+                aws_s3_meta_request_add_event_for_delivery_synced(meta_request, NULL);
             }
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
+        meta_request->synced_data.num_parts_delivery_succeeded += num_parts_delivered_ok;
         meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
@@ -2536,6 +2592,12 @@ static struct aws_s3_request *s_s3_meta_request_body_streaming_pop_next_synced(
     aws_priority_queue_pop(&meta_request->synced_data.pending_body_streaming_requests, (void **)&request);
 
     ++meta_request->synced_data.next_streaming_part;
+    /* For a resumed download, skip past parts already delivered by the paused request. */
+    while (meta_request->resume_delivered_parts_bitmap.len > 0 &&
+           aws_s3_bitmap_get(
+               &meta_request->resume_delivered_parts_bitmap, meta_request->synced_data.next_streaming_part)) {
+        ++meta_request->synced_data.next_streaming_part;
+    }
 
     return request;
 }
