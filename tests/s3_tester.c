@@ -1554,6 +1554,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .object_size_hint = options->object_size_hint,
         .fio_opts = options->fio_opts,
         .part_size = options->part_size,
+        .on_error_resume_token = options->on_error_resume_token,
     };
 
     if (options->mock_server) {

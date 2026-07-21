@@ -232,6 +232,13 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
+        /* Total number of response-body bytes successfully delivered to the caller's sink
+         * (file or body callback), in order with no gaps. Used to build the download resume
+         * token on pause/error. Note: delivery is strictly sequential today, so this is both
+         * the contiguous prefix and the total; a future parallel-write delivery path will need
+         * to track the two separately. */
+        uint64_t num_bytes_delivered;
+
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
          * If `event_delivery_task_scheduled` is true, then this task is scheduled.

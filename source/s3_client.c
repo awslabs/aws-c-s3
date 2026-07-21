@@ -5,7 +5,6 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
-#include "aws/s3/private/s3_bitmap.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_default_buffer_pool.h"

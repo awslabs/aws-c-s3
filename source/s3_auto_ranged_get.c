@@ -4,7 +4,6 @@
  */
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
-#include "aws/s3/private/s3_bitmap.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
@@ -144,7 +143,6 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
     aws_string_destroy(auto_ranged_get->s3_object_last_modified);
-    aws_byte_buf_clean_up(&auto_ranged_get->delivered_parts_bitmap);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -1014,14 +1012,6 @@ update_synced_data:
                     auto_ranged_get->synced_data.first_part_size,
                     object_range_start,
                     object_range_end);
-
-                /* Init delivered_parts_bitmap for tracking pause state */
-                if (auto_ranged_get->delivered_parts_bitmap.len == 0) {
-                    aws_s3_bitmap_init(
-                        &auto_ranged_get->delivered_parts_bitmap,
-                        meta_request->allocator,
-                        auto_ranged_get->synced_data.total_num_parts);
-                }
             }
         }
 
@@ -1069,9 +1059,6 @@ update_synced_data:
                         ++auto_ranged_get->synced_data.num_parts_checksum_validated;
                     }
                     ++auto_ranged_get->synced_data.num_parts_successful;
-
-                    /* Mark part as delivered in bitmap (used by token builder on pause) */
-                    aws_s3_bitmap_set(&auto_ranged_get->delivered_parts_bitmap, request->part_number);
 
                     /* Send progress_callback for delivery on io_event_loop thread */
                     if (meta_request->progress_callback != NULL) {
@@ -1137,10 +1124,14 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
     token->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
     token->part_size = meta_request->part_size;
     token->total_num_parts = auto_ranged_get->synced_data.total_num_parts;
-    token->object_range_start = auto_ranged_get->synced_data.object_range_start;
-    token->object_range_end = auto_ranged_get->synced_data.object_range_end;
-    token->object_size = auto_ranged_get->synced_data.object_range_end + 1 -
-                         auto_ranged_get->synced_data.object_range_start;
+    /* Range fields stay 0 when the object size was never discovered (paused before the
+     * first response) or the object is empty. */
+    if (auto_ranged_get->synced_data.object_range_known && !auto_ranged_get->synced_data.object_range_empty) {
+        token->object_range_start = auto_ranged_get->synced_data.object_range_start;
+        token->object_range_end = auto_ranged_get->synced_data.object_range_end;
+        token->object_size = auto_ranged_get->synced_data.object_range_end + 1 -
+                             auto_ranged_get->synced_data.object_range_start;
+    }
     token->num_parts_completed = auto_ranged_get->synced_data.num_parts_successful;
 
     if (auto_ranged_get->etag) {
@@ -1152,40 +1143,11 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
             aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
-    /* Compute continues_transferred_bytes (contiguous prefix) and total_bytes_transferred
-     * from the delivered_parts_bitmap. */
-    uint64_t first_part_size = auto_ranged_get->synced_data.first_part_size;
-    uint64_t part_size = meta_request->part_size;
-    uint32_t total_parts = auto_ranged_get->synced_data.total_num_parts;
-
-    uint64_t continues_bytes = 0;
-    uint64_t total_bytes = 0;
-    bool contiguous = true;
-
-    for (uint32_t i = 1; i <= total_parts; ++i) {
-        uint64_t this_part_size = (i == 1) ? first_part_size : part_size;
-        /* Last part may be smaller */
-        if (i == total_parts) {
-            uint64_t object_len = auto_ranged_get->synced_data.object_range_end + 1 -
-                                  auto_ranged_get->synced_data.object_range_start;
-            uint64_t bytes_before = first_part_size + (uint64_t)(total_parts - 2) * part_size;
-            if (total_parts > 1 && object_len > bytes_before) {
-                this_part_size = object_len - bytes_before;
-            }
-        }
-
-        if (aws_s3_bitmap_get(&auto_ranged_get->delivered_parts_bitmap, i)) {
-            total_bytes += this_part_size;
-            if (contiguous) {
-                continues_bytes += this_part_size;
-            }
-        } else {
-            contiguous = false;
-        }
-    }
-
-    token->continues_transferred_bytes = continues_bytes;
-    token->total_bytes_transferred = total_bytes;
+    /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
+     * prefix and the total. A parallel-write delivery path will need to track the two
+     * separately, diverging total (may have gaps) from continues (gap-free prefix). */
+    token->continues_transferred_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->total_bytes_transferred = meta_request->synced_data.num_bytes_delivered;
 
     return token;
 }

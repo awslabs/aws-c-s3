@@ -452,6 +452,35 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_size = data_length
         return response_config
 
+    if parsed_path.path == "/get_object_pause_delay_part_3":
+        # Same 256 KiB object, but part 3 (offset 131072) is delayed: parts 1 and 2
+        # deliver sequentially, so a pause produces a gap-free 2-part token.
+        if start_range == 131072:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_pause_delay_first_part":
+        # Same 256 KiB object with the discovery part (offset 0) delayed, so a pause
+        # issued right after the request starts always lands before size discovery.
+        if start_range == 0:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_error_part_3":
+        # Same 256 KiB object, but part 3 (offset 131072) fails with 403 after a short
+        # delay (long enough for parts 1 and 2 to be delivered first).
+        if start_range == 131072:
+            return ResponseConfig("/get_object_error_part", request=request)
+        response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     response_config.generate_body_size = data_length
     return response_config
 

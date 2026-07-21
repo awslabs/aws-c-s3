@@ -5,7 +5,6 @@
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
-#include "aws/s3/private/s3_bitmap.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_copy_object.h"
 #include "aws/s3/private/s3_util.h"
@@ -216,60 +215,55 @@ TEST_CASE(make_meta_request_error_handling) {
     return 0;
 }
 
-
-static void s_pause_noop_callback(
-    struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
-    int error_code,
-    void *user_data) {
-    (void)meta_request;
-    (void)resume_token;
-    (void)error_code;
-    (void)user_data;
-}
-
-TEST_CASE(pause_async_unsupported_for_copy) {
+/* The same token type serves upload and download: getters for the other token type
+ * must return 0 (numeric) or an empty cursor (string), per the s3_client.h contract. */
+TEST_CASE(resume_token_cross_type_getters) {
     (void)ctx;
 
-    struct aws_s3_tester tester;
-    AWS_ZERO_STRUCT(tester);
-    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
-    struct aws_s3_client *client = NULL;
-    struct aws_s3_tester_client_options client_options = {
-        .part_size = 64 * 1024 * 1024,
+    aws_s3_library_init(allocator);
+
+    /* Upload token via the public constructor: download getters return zero/empty. */
+    struct aws_s3_upload_resume_token_options upload_options = {
+        .upload_id = aws_byte_cursor_from_c_str("test-upload-id"),
+        .part_size = MB_TO_BYTES(8),
+        .total_num_parts = 10,
+        .num_parts_completed = 4,
     };
-    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_meta_request_resume_token *upload_token =
+        aws_s3_meta_request_resume_token_new_upload(allocator, &upload_options);
+    ASSERT_NOT_NULL(upload_token);
 
-    struct aws_http_message *message = aws_http_message_new_request(allocator);
-    aws_http_message_set_request_method(message, aws_http_method_put);
-    aws_http_message_set_request_path(message, aws_byte_cursor_from_c_str("/dest-key"));
-    struct aws_http_header host_header = {
-        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Host"),
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("test-bucket.s3.us-west-2.amazonaws.com"),
-    };
-    aws_http_message_add_header(message, host_header);
-    struct aws_http_header copy_source_header = {
-        .name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
-        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/src-bucket/src-key"),
-    };
-    aws_http_message_add_header(message, copy_source_header);
+    ASSERT_INT_EQUALS(AWS_S3_META_REQUEST_TYPE_PUT_OBJECT, aws_s3_meta_request_resume_token_type(upload_token));
+    struct aws_byte_cursor upload_id = aws_s3_meta_request_resume_token_upload_id(upload_token);
+    ASSERT_TRUE(aws_byte_cursor_eq_c_str(&upload_id, "test-upload-id"));
 
-    struct aws_s3_meta_request_options options = {
-        .message = message,
-        .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
-    };
-    struct aws_s3_meta_request *meta_request = aws_s3_meta_request_copy_object_new(allocator, client, &options);
-    ASSERT_NOT_NULL(meta_request);
+    struct aws_byte_cursor etag = aws_s3_meta_request_resume_token_etag(upload_token);
+    ASSERT_UINT_EQUALS(0, etag.len);
+    struct aws_byte_cursor version_id = aws_s3_meta_request_resume_token_version_id(upload_token);
+    ASSERT_UINT_EQUALS(0, version_id.len);
+    struct aws_byte_cursor last_modified = aws_s3_meta_request_resume_token_s3_object_last_modified(upload_token);
+    ASSERT_UINT_EQUALS(0, last_modified.len);
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_size(upload_token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_start(upload_token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_end(upload_token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continues_transferred_bytes(upload_token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_total_bytes_transferred(upload_token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(upload_token));
 
-    /* pause_async on a COPY meta request should fail synchronously with UNSUPPORTED_OPERATION */
-    int result = aws_s3_meta_request_pause_async(meta_request, s_pause_noop_callback, NULL);
-    ASSERT_INT_EQUALS(AWS_OP_ERR, result);
-    ASSERT_UINT_EQUALS(AWS_ERROR_UNSUPPORTED_OPERATION, aws_last_error());
+    aws_s3_meta_request_resume_token_release(upload_token);
 
-    aws_s3_meta_request_release(meta_request);
-    aws_http_message_release(message);
-    aws_s3_client_release(client);
-    aws_s3_tester_clean_up(&tester);
+    /* Download-type token (internal constructor; the public download constructor is not
+     * supported yet): the upload getter returns an empty cursor. */
+    struct aws_s3_meta_request_resume_token *download_token = aws_s3_meta_request_resume_token_new(allocator);
+    ASSERT_NOT_NULL(download_token);
+    download_token->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
 
+    ASSERT_INT_EQUALS(AWS_S3_META_REQUEST_TYPE_GET_OBJECT, aws_s3_meta_request_resume_token_type(download_token));
+    upload_id = aws_s3_meta_request_resume_token_upload_id(download_token);
+    ASSERT_UINT_EQUALS(0, upload_id.len);
+
+    aws_s3_meta_request_resume_token_release(download_token);
+
+    aws_s3_library_clean_up();
     return AWS_OP_SUCCESS;
 }

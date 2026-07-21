@@ -2284,6 +2284,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
+    uint64_t num_bytes_delivered = 0;
     uint64_t bytes_allowed_to_deliver = 0;
 
     /* BEGIN CRITICAL SECTION */
@@ -2400,6 +2401,10 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 /* 6. Completion tracking */
                 event.u.response_body.bytes_delivered += response_body.len;
                 meta_request->io_threaded_data.num_bytes_delivery_completed += response_body.len;
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    /* Only count bytes the sink actually accepted. */
+                    num_bytes_delivered += response_body.len;
+                }
 
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
@@ -2487,6 +2492,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
+        meta_request->synced_data.num_bytes_delivered += num_bytes_delivered;
         meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
