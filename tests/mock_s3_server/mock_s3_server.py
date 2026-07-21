@@ -112,7 +112,18 @@ class ResponseConfig:
 
         content_length_set = False
         for header in data['headers'].items():
-            headers.append((header[0], str(header[1])))
+            header_value = str(header[1])
+            if "<request-range>" in header_value and self.request_headers is not None:
+                # Build the range part of a Content-Range header from the request's Range
+                # header ("bytes=A-B" -> "bytes A-B"), so one response file can serve
+                # correct Content-Range headers for every part.
+                for h in self.request_headers:
+                    if h[0].lower() == b"range":
+                        request_range = h[1].decode("utf-8").split("=")[1]
+                        header_value = header_value.replace(
+                            "<request-range>", "bytes " + request_range)
+                        break
+            headers.append((header[0], header_value))
             if header[0].lower() == "content-length":
                 content_length_set = True
 
@@ -430,6 +441,16 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
 
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
+
+    if parsed_path.path == "/get_object_pause_delay_part":
+        # 256 KiB object served in 64 KiB parts (4 parts). The part at offset 65536
+        # (part 2) is delayed so the test can pause while parts 1, 3, 4 have completed.
+        if start_range == 65536:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
 
     response_config.generate_body_size = data_length
     return response_config

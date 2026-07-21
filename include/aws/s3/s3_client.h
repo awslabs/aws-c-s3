@@ -1409,128 +1409,142 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_releas
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Type of resume token.
+ * A resume token is produced by pausing a meta request (aws_s3_meta_request_pause_async(),
+ * or the on_error_resume_token callback) and describes how far the operation got.
+ * The same opaque type is used for both upload (PUT) and download (GET) tokens; use
+ * aws_s3_meta_request_resume_token_type() to tell them apart. The getters below note
+ * which token type populates each field. Getters read from the other token type return
+ * 0 (numeric) or an empty cursor (string).
+ */
+
+/*
+ * Type of the operation this token was created from.
+ * Valid for all tokens: AWS_S3_META_REQUEST_TYPE_PUT_OBJECT for upload tokens,
+ * AWS_S3_META_REQUEST_TYPE_GET_OBJECT for download tokens.
  */
 AWS_S3_API
 enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Part size associated with operation.
+ * Part size the operation was using. Always set for upload and download tokens.
+ * Upload: the size of each uploaded part.
+ * Download: the nominal size of each ranged GET (the first and last parts may be
+ * smaller).
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Total num parts associated with operation.
+ * Total number of parts the operation was split into. Always set for upload and
+ * download tokens.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Num parts completed.
+ * Number of parts that completed before the pause.
+ * Upload: number of parts uploaded. During resume it is used for sanity checking
+ * against uploads on the S3 side: if the upload id no longer exists (already resumed
+ * using this token, or pause was called after the upload completed) and this equals
+ * total_num_parts, resume becomes a noop.
+ * Download: number of parts successfully fetched at pause time.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Upload id associated with operation.
- * Only valid for tokens returned from upload operation. For all other operations
- * this will return empty.
+ * Multipart upload id of the paused upload.
+ * Upload tokens only; empty cursor for download tokens.
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
 
+/* TODO: support create the resume token for download so that client can resume from external provided token. */
+
 /*
- * Options to construct download resume token.
- */
-struct aws_s3_download_resume_token_options {
-    struct aws_byte_cursor etag;                    /* Required */
-    struct aws_byte_cursor version_id;              /* Optional */
-    struct aws_byte_cursor s3_object_last_modified; /* HTTP-date format string. Optional */
-    uint64_t part_size;                             /* Required */
-    uint64_t first_part_size;                       /* Required */
-    uint64_t object_range_start;                    /* Optional. Required only if original request used Range header */
-    uint64_t object_range_end;                      /* Optional. Required only if original request used Range header */
-    uint64_t object_size;                           /* Required */
-    size_t total_num_parts;                         /* Required */
-    const uint32_t *completed_parts;                /* Array of completed part numbers. Required */
-    size_t num_completed_parts;                     /* Length of completed_parts array. Required */
-    /* Local file mtime (nanos since epoch) at pause. Required when resuming a download to a file
-     * (recv_filepath + AWS_S3_RECV_FILE_RESUME); a value of 0 means unknown and forces a restart
-     * from the beginning. Optional (pass 0) when the download delivers via body callback. */
-    uint64_t file_last_modified_epoch_ns;
-};
-
-/**
- * Create download resume token from persisted data.
- */
-AWS_S3_API
-struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new_download(
-    struct aws_allocator *allocator,
-    const struct aws_s3_download_resume_token_options *options);
-
-/**
- * ETag of the S3 object at time of pause.
+ * ETag of the S3 object being downloaded, captured from the first response.
+ * Download tokens only; empty cursor for upload tokens.
+ * Also empty if the download was paused before the first response arrived.
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_etag(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * Version ID of the S3 object. May be empty if not versioned.
+/*
+ * Version ID of the S3 object being downloaded.
+ * Download tokens only; empty cursor for upload tokens.
+ * Optional: empty when the bucket is unversioned or the version id was not captured.
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_version_id(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * Last-Modified value of the S3 object at time of pause (HTTP-date format).
- * May be empty if not available.
+/*
+ * Last-Modified of the S3 object being downloaded (HTTP-date format,
+ * for example "Wed, 09 Oct 2024 22:28:00 GMT"), captured from the first response.
+ * Download tokens only; empty cursor for upload tokens.
+ * Optional: empty if the value was not captured before the pause.
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * Object size (content-length) of the download.
+/*
+ * Length in bytes of the object range being downloaded
+ * (object_range_end + 1 - object_range_start). For a download without a Range
+ * header this equals the total object size.
+ * Download tokens only; 0 for upload tokens.
+ * 0 if the download was paused before the object size was discovered.
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_object_size(const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * Object range start for the download.
+/*
+ * Absolute byte offset in the object where the download's range starts.
+ * 0 for a download without a Range header.
+ * Download tokens only; 0 for upload tokens.
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_object_range_start(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * Object range end (inclusive) for the download.
+/*
+ * Absolute byte offset in the object where the download's range ends (inclusive).
+ * For a download without a Range header this is object size - 1.
+ * Download tokens only; 0 for upload tokens.
+ * 0 if the download was paused before the object size was discovered.
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_object_range_end(const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * First part size used for the download (may differ from part_size).
+/*
+ * Number of bytes transferred contiguously from the start of the range, with no
+ * gaps. Everything before this offset (relative to object_range_start) has been
+ * transferred.
+ * Download tokens only; 0 for upload tokens.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_first_part_size(const struct aws_s3_meta_request_resume_token *resume_token);
-
-/**
- * Get the bitmap of completed part numbers.
- * Bit N corresponds to part N+1 (0-indexed bits, 1-indexed parts).
- * Use total_num_parts to know the valid range.
- */
-AWS_S3_API
-struct aws_byte_cursor aws_s3_meta_request_resume_token_completed_parts_bitmap(
+uint64_t aws_s3_meta_request_resume_token_continues_transferred_bytes(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
-/**
- * Local file mtime (nanoseconds since Unix epoch) captured at pause time.
- * Used for tamper detection on resume — compare against current file mtime.
- * Returns 0 if not set (download did not write to a file).
+/*
+ * Total number of bytes transferred before the pause. May be greater than
+ * continues_transferred_bytes when parts completed out of order, leaving gaps.
+ * Equals continues_transferred_bytes when delivery was strictly in order.
+ * Download tokens only; 0 for upload tokens.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_total_bytes_transferred(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Last-modified time of the local receive file (nanoseconds since the Unix epoch),
+ * captured after the file handle was closed during the pause.
+ * Download tokens only, and only when the download was writing to a file
+ * (recv_filepath); 0 for upload tokens, downloads that deliver via body callback,
+ * or when the timestamp could not be queried.
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(

@@ -9,10 +9,8 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
-#include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
-#include <aws/common/uri.h>
 #include <inttypes.h>
 
 /* Dont use buffer pool when we know response size, and its below this number,
@@ -65,211 +63,6 @@ static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_
     return AWS_HTTP_STATUS_CODE_200_OK;
 }
 
-/**
- * Initialize auto_ranged_get state from a resume token.
- */
-static int s_s3_auto_ranged_get_init_from_resume_token(
-    struct aws_allocator *allocator,
-    struct aws_s3_auto_ranged_get *auto_ranged_get,
-    const struct aws_s3_meta_request_resume_token *resume_token) {
-
-    auto_ranged_get->resume_token =
-        aws_s3_meta_request_resume_token_acquire((struct aws_s3_meta_request_resume_token *)resume_token);
-
-    /* part_size is already set correctly via init_base */
-    auto_ranged_get->synced_data.first_part_size = resume_token->first_part_size;
-    auto_ranged_get->synced_data.object_range_start = resume_token->object_range_start;
-    auto_ranged_get->synced_data.object_range_end = resume_token->object_range_end;
-    auto_ranged_get->synced_data.total_num_parts = (uint32_t)resume_token->total_num_parts;
-    auto_ranged_get->synced_data.object_range_known = true;
-
-    /* Set ETag from token for If-Match */
-    if (resume_token->etag) {
-        auto_ranged_get->etag = aws_string_clone_or_reuse(allocator, resume_token->etag);
-    }
-
-    /* Set Last-Modified from token for If-Unmodified-Since */
-    if (resume_token->s3_object_last_modified) {
-        auto_ranged_get->s3_object_last_modified =
-            aws_string_clone_or_reuse(allocator, resume_token->s3_object_last_modified);
-    }
-
-    /* Copy bitmap of completed parts directly from token */
-    aws_byte_buf_init_copy(&auto_ranged_get->delivered_parts_bitmap, allocator, &resume_token->completed_parts_bitmap);
-
-    /* Set counters */
-    uint32_t num_completed = (uint32_t)resume_token->num_parts_completed;
-    auto_ranged_get->synced_data.num_parts_completed = num_completed;
-    auto_ranged_get->synced_data.num_parts_successful = num_completed;
-
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p: Resuming download. %u out of %zu parts already completed.",
-        (void *)&auto_ranged_get->base,
-        num_completed,
-        resume_token->total_num_parts);
-
-    return AWS_OP_SUCCESS;
-}
-
-/* Read-only mode for opening the partially-downloaded file to verify it's unchanged since pause. */
-AWS_STATIC_STRING_FROM_LITERAL(s_file_verify_open_mode, "rb");
-
-/* Extract the versionId query parameter from a request path ("/key?versionId=abc&...").
- * Returns true and sets out_version_id if present. */
-static bool s_get_version_id_from_request_path(
-    struct aws_byte_cursor request_path,
-    struct aws_byte_cursor *out_version_id) {
-
-    struct aws_byte_cursor question_mark = aws_byte_cursor_from_c_str("?");
-    struct aws_byte_cursor query;
-    AWS_ZERO_STRUCT(query);
-    if (aws_byte_cursor_find_exact(&request_path, &question_mark, &query) != AWS_OP_SUCCESS) {
-        return false;
-    }
-    aws_byte_cursor_advance(&query, 1); /* skip the '?' */
-
-    struct aws_uri_param param;
-    AWS_ZERO_STRUCT(param);
-    while (aws_query_string_next_param(query, &param)) {
-        if (aws_byte_cursor_eq_c_str(&param.key, "versionId")) {
-            *out_version_id = param.value;
-            return true;
-        }
-    }
-    return false;
-}
-
-/* Verify the local file is unchanged since pause by comparing its current mtime against the
- * resume token's. Returns true if resuming is safe. Returns false if the file is missing,
- * unreadable, or was modified since pause — in that case the caller discards the resume state
- * and restarts the download from the beginning (matching AWS SDK for Java v2 behavior). */
-static bool s_s3_auto_ranged_get_verify_local_file_unchanged(
-    struct aws_allocator *allocator,
-    struct aws_byte_cursor recv_filepath,
-    const struct aws_s3_meta_request_resume_token *resume_token) {
-
-    struct aws_string *filepath = aws_string_new_from_cursor(allocator, &recv_filepath);
-    bool unchanged = false;
-
-    if (resume_token->file_last_modified_epoch_ns == 0) {
-        AWS_LOGF_WARN(
-            AWS_LS_S3_META_REQUEST,
-            "Cannot resume download: resume token has no recorded mtime for local file " PRInSTR ", "
-            "so the file cannot be verified as unchanged. Restarting download from the beginning.",
-            AWS_BYTE_CURSOR_PRI(recv_filepath));
-        goto cleanup;
-    }
-
-    FILE *file = aws_fopen_safe(filepath, s_file_verify_open_mode);
-    if (file == NULL) {
-        AWS_LOGF_WARN(
-            AWS_LS_S3_META_REQUEST,
-            "Cannot resume download: local file " PRInSTR " could not be opened. "
-            "Restarting download from the beginning.",
-            AWS_BYTE_CURSOR_PRI(recv_filepath));
-        goto cleanup;
-    }
-
-    uint64_t current_mtime_ns = 0;
-    if (aws_file_get_last_modified_epoch(file, &current_mtime_ns) != AWS_OP_SUCCESS) {
-        AWS_LOGF_WARN(
-            AWS_LS_S3_META_REQUEST,
-            "Cannot resume download: failed to query last-modified time of local file " PRInSTR ". "
-            "Restarting download from the beginning.",
-            AWS_BYTE_CURSOR_PRI(recv_filepath));
-        fclose(file);
-        goto cleanup;
-    }
-    fclose(file);
-
-    if (current_mtime_ns != resume_token->file_last_modified_epoch_ns) {
-        AWS_LOGF_WARN(
-            AWS_LS_S3_META_REQUEST,
-            "Cannot resume download: local file " PRInSTR " was modified since pause "
-            "(mtime %" PRIu64 " ns, expected %" PRIu64 " ns). Restarting download from the beginning.",
-            AWS_BYTE_CURSOR_PRI(recv_filepath),
-            current_mtime_ns,
-            resume_token->file_last_modified_epoch_ns);
-        goto cleanup;
-    }
-
-    unchanged = true;
-
-cleanup:
-    aws_string_destroy(filepath);
-    return unchanged;
-}
-
-/* Validate the initial request's Range header (if any) against the resume token's recorded range.
- * The token stores the resolved absolute range (inclusive offsets) plus object_size, so all three
- * Range header shapes can be checked: "bytes=A-B", "bytes=A-" (open-ended, end was resolved to
- * object_size - 1 at discovery) and "bytes=-N" (suffix of length N).
- * Returns AWS_OP_SUCCESS if consistent, otherwise raises and returns AWS_OP_ERR. */
-static int s_validate_request_range_against_resume_token(
-    struct aws_http_message *message,
-    const struct aws_s3_meta_request_resume_token *resume_token,
-    const void *log_id) {
-
-    struct aws_http_headers *headers = aws_http_message_get_headers(message);
-    uint64_t expected_start = resume_token->object_range_start;
-    uint64_t expected_end = resume_token->object_range_end;
-
-    if (!aws_http_headers_has(headers, g_range_header_name)) {
-        /* No Range header: the token must span the entire object (0 to object_size - 1).
-         * A token from a ranged download maps its parts to a subrange the request doesn't target. */
-        if (expected_start != 0 || expected_end != resume_token->object_size - 1) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Invalid configuration: resume token covers range %" PRIu64 "-%" PRIu64 " of a %" PRIu64
-                "-byte object, but the request has no Range header. The resumed request "
-                "must use the same Range as the original request.",
-                log_id,
-                expected_start,
-                expected_end,
-                resume_token->object_size);
-            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        }
-        return AWS_OP_SUCCESS;
-    }
-
-    bool has_start_range = false;
-    bool has_end_range = false;
-    uint64_t start_range = 0;
-    uint64_t end_range = 0;
-    if (aws_s3_parse_request_range_header(headers, &has_start_range, &has_end_range, &start_range, &end_range)) {
-        return AWS_OP_ERR;
-    }
-
-    bool matches = false;
-
-    if (has_start_range && has_end_range) {
-        /* "bytes=A-B" */
-        matches = (start_range == expected_start) && (end_range == expected_end);
-    } else if (has_start_range) {
-        /* "bytes=A-": end was resolved to object_size - 1 at discovery */
-        matches = (start_range == expected_start) && (expected_end == resume_token->object_size - 1);
-    } else {
-        /* "bytes=-N": suffix of length N; S3 clamps N to the object size */
-        uint64_t suffix_len = end_range;
-        uint64_t suffix_start = suffix_len >= resume_token->object_size ? 0 : resume_token->object_size - suffix_len;
-        matches = (expected_start == suffix_start) && (expected_end == resume_token->object_size - 1);
-    }
-
-    if (!matches) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Invalid configuration: request Range header does not match the resume token's range "
-            "(%" PRIu64 "-%" PRIu64 "). The resumed request must use the same Range as the original request.",
-            log_id,
-            expected_start,
-            expected_end);
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-    }
-
-    return AWS_OP_SUCCESS;
-}
-
 /* Allocate a new auto-ranged-get meta request. */
 struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_allocator *allocator,
@@ -285,114 +78,14 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     struct aws_s3_auto_ranged_get *auto_ranged_get =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_auto_ranged_get));
 
-    /* Local copy of options: the resume path may need to adjust resume_token/recv_file_option
-     * when restarting from the beginning. */
-    struct aws_s3_meta_request_options options_copy = *options;
-
-    /* If resuming from a token, gather all info from it before init_base */
-    size_t effective_part_size = part_size;
-    if (options_copy.resume_token != NULL) {
-        if (options_copy.resume_token->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Resume token type mismatch. Expected GET_OBJECT.",
-                (void *)auto_ranged_get);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            aws_mem_release(allocator, auto_ranged_get);
-            return NULL;
-        }
-
-        /* If the token pins an object version, the request must target the same version. */
-        if (options_copy.resume_token->version_id != NULL) {
-            struct aws_byte_cursor request_path;
-            AWS_ZERO_STRUCT(request_path);
-            aws_http_message_get_request_path(options_copy.message, &request_path);
-
-            struct aws_byte_cursor message_version_id;
-            AWS_ZERO_STRUCT(message_version_id);
-            struct aws_byte_cursor token_version_id =
-                aws_byte_cursor_from_string(options_copy.resume_token->version_id);
-
-            if (!s_get_version_id_from_request_path(request_path, &message_version_id) ||
-                !aws_byte_cursor_eq(&message_version_id, &token_version_id)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Invalid configuration: resume token pins object version " PRInSTR
-                    " but the request's versionId query parameter is missing or different.",
-                    (void *)auto_ranged_get,
-                    AWS_BYTE_CURSOR_PRI(token_version_id));
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                aws_mem_release(allocator, auto_ranged_get);
-                return NULL;
-            }
-        }
-
-        /* If the original request had a Range header, the resumed request must carry the same one. */
-        if (s_validate_request_range_against_resume_token(
-                options_copy.message, options_copy.resume_token, (void *)auto_ranged_get)) {
-            aws_mem_release(allocator, auto_ranged_get);
-            return NULL;
-        }
-
-        if (options_copy.recv_filepath.len > 0) {
-            /* A resume token with file delivery requires the RESUME recv_file_option. Any other
-             * option would truncate (CREATE_OR_REPLACE), append (CREATE_OR_APPEND), or reject the
-             * existing file (CREATE_NEW), silently corrupting or failing the resumed download. */
-            if (options_copy.recv_file_option != AWS_S3_RECV_FILE_RESUME) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Invalid configuration: resume_token with recv_filepath requires "
-                    "recv_file_option AWS_S3_RECV_FILE_RESUME.",
-                    (void *)auto_ranged_get);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                aws_mem_release(allocator, auto_ranged_get);
-                return NULL;
-            }
-
-            /* Tamper detection: resume only if the file is unchanged since pause. Otherwise
-             * silently discard the resume state and download from the beginning, replacing the
-             * untrusted file. */
-            if (!s_s3_auto_ranged_get_verify_local_file_unchanged(
-                    allocator, options_copy.recv_filepath, options_copy.resume_token)) {
-                aws_reset_error();
-                options_copy.resume_token = NULL;
-                options_copy.recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE;
-            }
-        }
-    } else if (options_copy.recv_file_option == AWS_S3_RECV_FILE_RESUME) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Invalid configuration: recv_file_option AWS_S3_RECV_FILE_RESUME requires a resume_token.",
-            (void *)auto_ranged_get);
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        aws_mem_release(allocator, auto_ranged_get);
-        return NULL;
-    }
-
-    if (options_copy.resume_token != NULL) {
-        if (s_s3_auto_ranged_get_init_from_resume_token(allocator, auto_ranged_get, options_copy.resume_token)) {
-            aws_mem_release(allocator, auto_ranged_get);
-            return NULL;
-        }
-        effective_part_size = options_copy.resume_token->part_size;
-        if (effective_part_size != part_size) {
-            AWS_LOGF_WARN(
-                AWS_LS_S3_META_REQUEST,
-                "Resume token part_size (%zu) differs from configured part_size (%zu). "
-                "Using token's part_size. This may affect buffer pool performance.",
-                effective_part_size,
-                part_size);
-        }
-    }
-
     /* Try to initialize the base type. */
     if (aws_s3_meta_request_init_base(
             allocator,
             client,
-            effective_part_size,
+            part_size,
             false,
             false,
-            &options_copy,
+            options,
             auto_ranged_get,
             &s_s3_auto_ranged_get_vtable,
             &auto_ranged_get->base)) {
@@ -427,9 +120,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
 
-    if (options_copy.resume_token == NULL) {
-        auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
-    }
+    auto_ranged_get->synced_data.first_part_size = auto_ranged_get->base.part_size;
     if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
@@ -453,7 +144,6 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
     aws_string_destroy(auto_ranged_get->s3_object_last_modified);
-    aws_s3_meta_request_resume_token_release(auto_ranged_get->resume_token);
     aws_byte_buf_clean_up(&auto_ranged_get->delivered_parts_bitmap);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
@@ -686,16 +376,7 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
-                /* Find next part number that hasn't been completed yet.
-                 * TODO: This skip logic needs extensive testing — especially around interactions
-                 * with num_parts_requested/num_parts_completed counters and wind-down detection.
-                 * Edge cases: all remaining parts completed, gaps at start/end, single gap, etc. */
                 uint32_t next_part = auto_ranged_get->synced_data.num_parts_requested + 1;
-                while (next_part <= auto_ranged_get->synced_data.total_num_parts &&
-                       aws_s3_bitmap_get(&auto_ranged_get->delivered_parts_bitmap, next_part)) {
-                    ++next_part;
-                    ++auto_ranged_get->synced_data.num_parts_requested;
-                }
                 if (next_part > auto_ranged_get->synced_data.total_num_parts) {
                     goto has_work_remaining;
                 }
@@ -852,14 +533,6 @@ static struct aws_future_void *s_s3_auto_ranged_get_prepare_request(struct aws_s
             aws_http_message_get_headers(message),
             g_if_match_header_name,
             aws_byte_cursor_from_string(auto_ranged_get->etag));
-    }
-    /* When resuming, add If-Unmodified-Since from the stored last-modified time */
-    if (auto_ranged_get->resume_token != NULL && auto_ranged_get->s3_object_last_modified != NULL) {
-        struct aws_byte_cursor if_unmodified_since = aws_byte_cursor_from_c_str("If-Unmodified-Since");
-        aws_http_headers_set(
-            aws_http_message_get_headers(message),
-            if_unmodified_since,
-            aws_byte_cursor_from_string(auto_ranged_get->s3_object_last_modified));
     }
 
     aws_s3_request_setup_send_data(request, message);
@@ -1342,7 +1015,7 @@ update_synced_data:
                     object_range_start,
                     object_range_end);
 
-                /* Init delivered_parts_bitmap if not already set from resume token */
+                /* Init delivered_parts_bitmap for tracking pause state */
                 if (auto_ranged_get->delivered_parts_bitmap.len == 0) {
                     aws_s3_bitmap_init(
                         &auto_ranged_get->delivered_parts_bitmap,
@@ -1397,7 +1070,7 @@ update_synced_data:
                     }
                     ++auto_ranged_get->synced_data.num_parts_successful;
 
-                    /* Mark part as delivered in bitmap */
+                    /* Mark part as delivered in bitmap (used by token builder on pause) */
                     aws_s3_bitmap_set(&auto_ranged_get->delivered_parts_bitmap, request->part_number);
 
                     /* Send progress_callback for delivery on io_event_loop thread */
@@ -1457,17 +1130,17 @@ update_synced_data:
 
 static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_synced(
     struct aws_s3_meta_request *meta_request) {
-    /* The file last modified time will need to gather after the handler closed, which will be gathered separately. */
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
 
     struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
     token->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
     token->part_size = meta_request->part_size;
-    token->first_part_size = (size_t)auto_ranged_get->synced_data.first_part_size;
     token->total_num_parts = auto_ranged_get->synced_data.total_num_parts;
     token->object_range_start = auto_ranged_get->synced_data.object_range_start;
     token->object_range_end = auto_ranged_get->synced_data.object_range_end;
+    token->object_size = auto_ranged_get->synced_data.object_range_end + 1 -
+                         auto_ranged_get->synced_data.object_range_start;
     token->num_parts_completed = auto_ranged_get->synced_data.num_parts_successful;
 
     if (auto_ranged_get->etag) {
@@ -1479,9 +1152,40 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
             aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
-    /* Copy the delivered_parts_bitmap directly into the token */
-    aws_byte_buf_init_copy(
-        &token->completed_parts_bitmap, meta_request->allocator, &auto_ranged_get->delivered_parts_bitmap);
+    /* Compute continues_transferred_bytes (contiguous prefix) and total_bytes_transferred
+     * from the delivered_parts_bitmap. */
+    uint64_t first_part_size = auto_ranged_get->synced_data.first_part_size;
+    uint64_t part_size = meta_request->part_size;
+    uint32_t total_parts = auto_ranged_get->synced_data.total_num_parts;
+
+    uint64_t continues_bytes = 0;
+    uint64_t total_bytes = 0;
+    bool contiguous = true;
+
+    for (uint32_t i = 1; i <= total_parts; ++i) {
+        uint64_t this_part_size = (i == 1) ? first_part_size : part_size;
+        /* Last part may be smaller */
+        if (i == total_parts) {
+            uint64_t object_len = auto_ranged_get->synced_data.object_range_end + 1 -
+                                  auto_ranged_get->synced_data.object_range_start;
+            uint64_t bytes_before = first_part_size + (uint64_t)(total_parts - 2) * part_size;
+            if (total_parts > 1 && object_len > bytes_before) {
+                this_part_size = object_len - bytes_before;
+            }
+        }
+
+        if (aws_s3_bitmap_get(&auto_ranged_get->delivered_parts_bitmap, i)) {
+            total_bytes += this_part_size;
+            if (contiguous) {
+                continues_bytes += this_part_size;
+            }
+        } else {
+            contiguous = false;
+        }
+    }
+
+    token->continues_transferred_bytes = continues_bytes;
+    token->total_bytes_transferred = total_bytes;
 
     return token;
 }

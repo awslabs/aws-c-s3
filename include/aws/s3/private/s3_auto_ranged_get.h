@@ -81,12 +81,8 @@ struct aws_s3_auto_ranged_get {
     uint32_t initial_message_has_range_header : 1;
     uint32_t initial_message_has_if_match_header : 1;
 
-    /* Resume token for resuming a paused download */
-    struct aws_s3_meta_request_resume_token *resume_token;
-
-    /* Bitmap tracking which parts have been delivered. Bit N = part N is done.
-     * Pre-populated from resume token on resume. Updated as parts complete.
-     * Copied directly into the token on pause/error. */
+    /* Bitmap tracking which parts have been delivered to the caller.
+     * Used to build the resume token on pause/error. Not consumed on resume (resume is unimplemented). */
     struct aws_byte_buf delivered_parts_bitmap;
 };
 

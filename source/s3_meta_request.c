@@ -2651,9 +2651,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
                                  meta_request->recv_file_delete_on_failure;
 
         /* Capture the file's last-modified time for the resume token. This must happen after the
-         * write handle is closed: on Windows the last-write-time is only guaranteed correct once all
-         * write handles are closed (see aws_file_get_last_modified_epoch()), so reopen a fresh
-         * read-only handle by path solely to query the timestamp. */
+         * write handle is closed so the mtime reflects all written data. */
         if (token != NULL && !delete_on_failure) {
             FILE *reopened_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_reopen_mode);
             if (reopened_file != NULL) {

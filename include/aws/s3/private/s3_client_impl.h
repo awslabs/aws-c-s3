@@ -467,16 +467,16 @@ struct aws_s3_meta_request_resume_token {
     request is completed instead of failing it.*/
     size_t num_parts_completed;
 
-    /* Download-specific fields */
+    /* Download-specific fields (populated by pause, not consumed on resume — resume is unimplemented) */
     struct aws_string *etag;
     struct aws_string *version_id;
     struct aws_string *s3_object_last_modified; /* HTTP-date format, e.g. "Wed, 09 Oct 2024 22:28:00 GMT" */
-    size_t first_part_size;
+    uint64_t continues_transferred_bytes;       /* contiguous prefix bytes transferred (no gaps) */
+    uint64_t total_bytes_transferred;           /* total bytes transferred (may have gaps with parallel write) */
     uint64_t object_range_start;
     uint64_t object_range_end;
     uint64_t object_size;
-    struct aws_byte_buf completed_parts_bitmap; /* bit N = part N+1 is completed */
-    uint64_t file_last_modified_epoch_ns;       /* local file mtime (nanos since epoch) at pause, for tamper detection on resume */
+    uint64_t file_last_modified_epoch_ns; /* local file mtime (nanos since epoch) at pause */
 };
 
 void aws_s3_client_notify_connection_finished(
