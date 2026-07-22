@@ -323,19 +323,6 @@ enum aws_s3_recv_file_options {
      * file (byte 0).
      */
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
-
-    /**
-     * Resume a paused download into the partially-downloaded file.
-     * Requires `aws_s3_meta_request_options.resume_token` to be set; existing file content is
-     * preserved and only the missing parts are written, at their absolute offsets.
-     * This is the only option compatible with a download resume token: providing a resume token
-     * together with a file path and any other recv_file_option fails meta request creation with
-     * AWS_ERROR_INVALID_ARGUMENT (other options would truncate or append, silently corrupting the
-     * partially-downloaded file).
-     * If the local file is missing or was modified since pause, the resume state is discarded and
-     * the download restarts from the beginning (the file is replaced).
-     */
-    AWS_S3_RECV_FILE_RESUME,
 };
 
 /**
@@ -1314,7 +1301,10 @@ AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
 
 /**
- * Note: pause is currently only supported on upload requests.
+ * Note: this synchronous pause only works for uploads; calling it on any other
+ * meta request type fails with AWS_ERROR_UNSUPPORTED_OPERATION. To pause a
+ * download, use aws_s3_meta_request_pause_async() instead (which supports both
+ * uploads and downloads).
  * In order to pause an ongoing upload, call aws_s3_meta_request_pause() that
  * will return resume token. Token can be used to query the state of operation
  * at the pausing time.
@@ -1492,9 +1482,8 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Length in bytes of the object range being downloaded
- * (object_range_end + 1 - object_range_start). For a download without a Range
- * header this equals the total object size.
+ * Total size of the S3 object being downloaded, regardless of any Range header on
+ * the request (for a ranged download this is larger than the range being fetched).
  * Download tokens only; 0 for upload tokens.
  * 0 if the download was paused before the object size was discovered.
  */
@@ -1520,23 +1509,23 @@ AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_object_range_end(const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Number of bytes transferred contiguously from the start of the range, with no
+ * Number of bytes downloaded contiguously from the start of the range, with no
  * gaps. Everything before this offset (relative to object_range_start) has been
- * transferred.
+ * downloaded.
  * Download tokens only; 0 for upload tokens.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_continues_transferred_bytes(
+uint64_t aws_s3_meta_request_resume_token_continues_downloaded_bytes(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Total number of bytes transferred before the pause. May be greater than
- * continues_transferred_bytes when parts completed out of order, leaving gaps.
- * Equals continues_transferred_bytes when delivery was strictly in order.
+ * Total number of bytes downloaded before the pause. May be greater than
+ * continues_downloaded_bytes when parts completed out of order, leaving gaps.
+ * Equals continues_downloaded_bytes when delivery was strictly in order.
  * Download tokens only; 0 for upload tokens.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_total_bytes_transferred(
+uint64_t aws_s3_meta_request_resume_token_total_downloaded_bytes(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*

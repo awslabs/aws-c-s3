@@ -374,16 +374,11 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
-                uint32_t next_part = auto_ranged_get->synced_data.num_parts_requested + 1;
-                if (next_part > auto_ranged_get->synced_data.total_num_parts) {
-                    goto has_work_remaining;
-                }
-
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    next_part /*part_number*/,
+                    auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
                     AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
 
                 aws_s3_calculate_auto_ranged_get_part_range(
@@ -792,7 +787,6 @@ static void s_s3_auto_ranged_get_request_finished(
         /* Always extract ETag header for part size estimation */
         if (!request_failed || first_part_buffer_size_mismatch) {
             struct aws_byte_cursor etag_header_value;
-            AWS_ASSERT(auto_ranged_get->etag == NULL);
             if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value) ==
                 AWS_OP_SUCCESS) {
                 AWS_LOGF_TRACE(
@@ -802,7 +796,10 @@ static void s_s3_auto_ranged_get_request_finished(
                     AWS_BYTE_CURSOR_PRI(etag_header_value));
 
                 if (!auto_ranged_get->initial_message_has_if_match_header) {
-                    /* Store ETag if needed for If-Match header */
+                    /* Store ETag if needed for If-Match header. A second discovery request can
+                     * finish after an empty-file redo: free any previously captured value so the
+                     * latest discovery wins and nothing leaks. */
+                    aws_string_destroy(auto_ranged_get->etag);
                     auto_ranged_get->etag =
                         aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
                 }
@@ -813,11 +810,14 @@ static void s_s3_auto_ranged_get_request_finished(
                 goto update_synced_data;
             }
 
-            /* Capture Last-Modified for resume token */
+            /* Capture Last-Modified for resume token. A second discovery request can finish after
+             * an empty-file redo: free any previously captured value so the latest discovery wins
+             * and nothing leaks. */
             struct aws_byte_cursor last_modified_value;
             struct aws_byte_cursor last_modified_name = aws_byte_cursor_from_c_str("Last-Modified");
             if (aws_http_headers_get(request->send_data.response_headers, last_modified_name, &last_modified_value) ==
                 AWS_OP_SUCCESS) {
+                aws_string_destroy(auto_ranged_get->s3_object_last_modified);
                 auto_ranged_get->s3_object_last_modified =
                     aws_string_new_from_cursor(meta_request->allocator, &last_modified_value);
             }
@@ -1000,6 +1000,7 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
+            auto_ranged_get->synced_data.object_size = object_size;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so
@@ -1129,25 +1130,25 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
     if (auto_ranged_get->synced_data.object_range_known && !auto_ranged_get->synced_data.object_range_empty) {
         token->object_range_start = auto_ranged_get->synced_data.object_range_start;
         token->object_range_end = auto_ranged_get->synced_data.object_range_end;
-        token->object_size = auto_ranged_get->synced_data.object_range_end + 1 -
-                             auto_ranged_get->synced_data.object_range_start;
+        /* Full object size: for a ranged download this is larger than the range being fetched. */
+        token->object_size = auto_ranged_get->synced_data.object_size;
     }
     token->num_parts_completed = auto_ranged_get->synced_data.num_parts_successful;
 
     if (auto_ranged_get->etag) {
-        token->etag = aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->etag);
+        token->etag = aws_string_new_from_string(meta_request->allocator, auto_ranged_get->etag);
     }
 
     if (auto_ranged_get->s3_object_last_modified) {
         token->s3_object_last_modified =
-            aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
+            aws_string_new_from_string(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
     /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
      * prefix and the total. A parallel-write delivery path will need to track the two
      * separately, diverging total (may have gaps) from continues (gap-free prefix). */
-    token->continues_transferred_bytes = meta_request->synced_data.num_bytes_delivered;
-    token->total_bytes_transferred = meta_request->synced_data.num_bytes_delivered;
+    token->continues_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
 
     return token;
 }

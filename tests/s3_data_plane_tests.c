@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
-#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_auto_ranged_get.h"
+#include "aws/s3/private/s3_checksums.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_default_buffer_pool.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
@@ -9079,7 +9079,7 @@ struct put_object_pause_resume_test_data {
     /* the offset where upload should be paused */
     struct aws_atomic_var request_pause_offset;
 
-    struct aws_atomic_var pause_requested;
+    struct aws_atomic_var async_pause_requested;
 
     struct aws_atomic_var pause_result;
 
@@ -9152,7 +9152,7 @@ static void s_meta_request_finished_request_patched_for_pause_resume_tests(
             /* offset of the upload at which we should pause was reached. let's pause the upload */
             /* if the meta request has already been paused previously, do nothing. */
             size_t expected = false;
-            bool request_pause = aws_atomic_compare_exchange_int(&test_data->pause_requested, &expected, true);
+            bool request_pause = aws_atomic_compare_exchange_int(&test_data->async_pause_requested, &expected, true);
             if (request_pause) {
                 struct aws_s3_meta_request_resume_token *resume_token = NULL;
                 int pause_result = aws_s3_meta_request_pause(meta_request, &resume_token);
@@ -9424,7 +9424,7 @@ static int s_test_s3_put_pause_resume_happy_path(struct aws_allocator *allocator
     /* initialize the atomic members */
     aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
     aws_atomic_init_int(&test_data.request_pause_offset, 0);
-    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.async_pause_requested, false);
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
@@ -9501,7 +9501,7 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
     /* initialize the atomic members */
     aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
     aws_atomic_init_int(&test_data.request_pause_offset, 0);
-    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.async_pause_requested, false);
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
@@ -9580,7 +9580,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_data(struct aws_allocator *
     /* initialize the atomic members */
     aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
     aws_atomic_init_int(&test_data.request_pause_offset, 0);
-    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.async_pause_requested, false);
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
@@ -9658,7 +9658,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_stream(struct aws_allocator
     /* initialize the atomic members */
     aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
     aws_atomic_init_int(&test_data.request_pause_offset, 0);
-    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.async_pause_requested, false);
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
@@ -9741,7 +9741,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
     /* initialize the atomic members */
     aws_atomic_init_int(&test_data.total_bytes_uploaded, 0);
     aws_atomic_init_int(&test_data.request_pause_offset, 0);
-    aws_atomic_init_int(&test_data.pause_requested, false);
+    aws_atomic_init_int(&test_data.async_pause_requested, false);
     aws_atomic_init_int(&test_data.pause_result, 0);
     aws_atomic_init_ptr(&test_data.persistable_state_ptr, NULL);
 
@@ -9908,8 +9908,7 @@ static struct aws_s3_meta_request *s_meta_request_factory_put_async_pause(
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
     struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
-    struct aws_s3_meta_request_vtable *patched =
-        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    struct aws_s3_meta_request_vtable *patched = aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
     patched->finished_request = s_put_async_pause_finished_request;
     return meta_request;
 }
@@ -9964,8 +9963,8 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
     struct aws_byte_cursor host = g_test_bucket_name;
     char endpoint[1024];
     snprintf(endpoint, sizeof(endpoint), "%.*s.s3.%s.amazonaws.com", (int)host.len, host.ptr, g_test_s3_region.ptr);
-    struct aws_http_message *message =
-        s_put_object_request_new(allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_stream, content_length);
+    struct aws_http_message *message = s_put_object_request_new(
+        allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_stream, content_length);
 
     struct aws_s3_checksum_config checksum_config = {
         .checksum_algorithm = AWS_SCA_CRC32,
@@ -9984,7 +9983,8 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
 
     /* Wait for paused finish */
     aws_mutex_lock(&test_data.mutex);
-    aws_condition_variable_wait_pred(&test_data.c_var, &test_data.mutex, s_async_pause_completion_predicate, &test_data);
+    aws_condition_variable_wait_pred(
+        &test_data.c_var, &test_data.mutex, s_async_pause_completion_predicate, &test_data);
     aws_mutex_unlock(&test_data.mutex);
 
     ASSERT_INT_EQUALS(AWS_ERROR_S3_PAUSED, test_data.meta_request_error_code);

@@ -1838,7 +1838,7 @@ TEST_CASE(resume_after_finished_mock_server) {
  * Mock object: 256 KiB served in 64 KiB parts (4 parts). The mock server delays part 2
  * (offset 65536), so parts 1, 3 and 4 complete on the network while part 2 is stalled.
  * Only part 1 can be delivered (in-order delivery is blocked by the part 2 gap), so pausing
- * must produce a token with continues_transferred_bytes == total_bytes_transferred == 64 KiB:
+ * must produce a token with continues_downloaded_bytes == total_downloaded_bytes == 64 KiB:
  * parts 3 and 4 were cancelled undelivered and their bytes must not be counted. */
 
 struct get_pause_token_mock_test_data {
@@ -1901,8 +1901,7 @@ static struct aws_s3_meta_request *s_get_pause_token_mock_meta_request_factory(
     struct aws_s3_client_vtable *original_client_vtable =
         aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
     struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
-    struct aws_s3_meta_request_vtable *patched =
-        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    struct aws_s3_meta_request_vtable *patched = aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
     patched->finished_request = s_get_pause_token_mock_finished_request;
     return meta_request;
 }
@@ -1958,8 +1957,8 @@ TEST_CASE(get_pause_token_mock_server) {
     /* Only part 1 was delivered; parts 3, 4 completed on the network but were cancelled
      * undelivered at pause, so they must not be counted. In-order delivery keeps the two
      * counters equal. */
-    ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_continues_transferred_bytes(token));
-    ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_total_bytes_transferred(token));
+    ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_start(token));
     ASSERT_UINT_EQUALS(256 * 1024 - 1, aws_s3_meta_request_resume_token_object_range_end(token));
     ASSERT_UINT_EQUALS(256 * 1024, aws_s3_meta_request_resume_token_object_size(token));
@@ -2072,8 +2071,8 @@ TEST_CASE(get_pause_sequential_token_mock_server) {
 
     struct aws_s3_meta_request_resume_token *token = test_data->resume_token;
     /* Parts 1 and 2 were delivered back to back: gap-free, so both counters are equal. */
-    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continues_transferred_bytes(token));
-    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_total_bytes_transferred(token));
+    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(4, aws_s3_meta_request_resume_token_total_num_parts(token));
     ASSERT_UINT_EQUALS(256 * 1024, aws_s3_meta_request_resume_token_object_size(token));
 
@@ -2130,8 +2129,7 @@ static struct aws_s3_meta_request *s_get_pause_early_mock_meta_request_factory(
     struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
     /* Pause as early as possible: before the discovery request can complete
      * (its response is delayed by the mock server). */
-    aws_s3_meta_request_pause_async(
-        meta_request, s_get_pause_early_mock_pause_complete, &s_get_pause_early_test_data);
+    aws_s3_meta_request_pause_async(meta_request, s_get_pause_early_mock_pause_complete, &s_get_pause_early_test_data);
     return meta_request;
 }
 
@@ -2187,8 +2185,8 @@ TEST_CASE(get_pause_before_discovery_mock_server) {
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_size(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_start(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_end(token));
-    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continues_transferred_bytes(token));
-    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_total_bytes_transferred(token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(token));
 
     struct aws_byte_cursor etag = aws_s3_meta_request_resume_token_etag(token);
@@ -2284,8 +2282,8 @@ TEST_CASE(get_error_token_mock_server) {
     ASSERT_INT_EQUALS(AWS_S3_META_REQUEST_TYPE_GET_OBJECT, aws_s3_meta_request_resume_token_type(token));
     /* Parts 1 and 2 were delivered before part 3's failure (its response is delayed);
      * part 4 completed but was blocked from delivery by the part 3 gap. */
-    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continues_transferred_bytes(token));
-    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_total_bytes_transferred(token));
+    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(4, aws_s3_meta_request_resume_token_total_num_parts(token));
     ASSERT_UINT_EQUALS(256 * 1024, aws_s3_meta_request_resume_token_object_size(token));
 

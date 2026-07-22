@@ -372,21 +372,6 @@ int aws_s3_meta_request_init_base(
                 }
                 break;
 
-            case AWS_S3_RECV_FILE_RESUME:
-                /* Resume writing into the partially-downloaded file: content must be preserved,
-                 * missing parts are written at their absolute offsets (base position 0). The
-                 * download type validates the resume token + file state before we get here. */
-                if (!aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via RESUME: file not found.",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                    goto error;
-                }
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
-                break;
-
             default:
                 AWS_ASSERT(false);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -559,14 +544,14 @@ int aws_s3_meta_request_pause_async(
     /* BEGIN CRITICAL SECTION */
     aws_s3_meta_request_lock_synced_data(meta_request);
 
-    if (meta_request->synced_data.pause_requested) {
+    if (meta_request->synced_data.async_pause_requested) {
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* Invoke callback immediately — pause already in progress */
         on_complete(meta_request, NULL, AWS_ERROR_INVALID_STATE, user_data);
         return AWS_OP_SUCCESS;
     }
 
-    meta_request->synced_data.pause_requested = true;
+    meta_request->synced_data.async_pause_requested = true;
     meta_request->synced_data.pause_complete_callback = on_complete;
     meta_request->synced_data.pause_complete_user_data = user_data;
 
@@ -2589,7 +2574,7 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
 
         /* Read pause state and build a resume token while still holding the lock. */
-        if (meta_request->synced_data.pause_requested) {
+        if (meta_request->synced_data.async_pause_requested) {
             is_async_paused = true;
             pause_callback = meta_request->synced_data.pause_complete_callback;
             pause_user_data = meta_request->synced_data.pause_complete_user_data;

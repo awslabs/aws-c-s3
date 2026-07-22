@@ -467,12 +467,12 @@ struct aws_s3_meta_request_resume_token {
     request is completed instead of failing it.*/
     size_t num_parts_completed;
 
-    /* Download-specific fields (populated by pause, not consumed on resume — resume is unimplemented) */
+    /* Download-specific fields */
     struct aws_string *etag;
     struct aws_string *version_id;
     struct aws_string *s3_object_last_modified; /* HTTP-date format, e.g. "Wed, 09 Oct 2024 22:28:00 GMT" */
-    uint64_t continues_transferred_bytes;       /* contiguous prefix bytes transferred (no gaps) */
-    uint64_t total_bytes_transferred;           /* total bytes transferred (may have gaps with parallel write) */
+    uint64_t continues_downloaded_bytes;        /* contiguous prefix bytes downloaded (no gaps) */
+    uint64_t total_downloaded_bytes;            /* total bytes downloaded (may have gaps with parallel write) */
     uint64_t object_range_start;
     uint64_t object_range_end;
     uint64_t object_size;

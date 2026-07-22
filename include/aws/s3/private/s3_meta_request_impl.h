@@ -125,10 +125,8 @@ struct aws_s3_meta_request_vtable {
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
     /* Optional. Build a resume token from current synced state; called with the synced-data lock held
-     * during finish when a pause was requested (or an error occurred and on_error_resume_token is set).
-     * May return NULL to indicate no resumable state (caller must restart from the beginning).
-     * A NULL function pointer means this request type doesn't support pause_async at all
-     * (aws_s3_meta_request_pause_async() fails with AWS_ERROR_UNSUPPORTED_OPERATION). */
+     * when a pause was requested (or an error occurred and on_error_resume_token is set).
+     * May return NULL to indicate no resumable state (caller must restart from the beginning). */
     struct aws_s3_meta_request_resume_token *(*build_resume_token_synced)(struct aws_s3_meta_request *meta_request);
 
 #ifdef AWS_C_S3_ENABLE_TEST_STUBS
@@ -234,9 +232,9 @@ struct aws_s3_meta_request {
 
         /* Total number of response-body bytes successfully delivered to the caller's sink
          * (file or body callback), in order with no gaps. Used to build the download resume
-         * token on pause/error. Note: delivery is strictly sequential today, so this is both
-         * the contiguous prefix and the total; a future parallel-write delivery path will need
-         * to track the two separately. */
+         * token on pause/error.
+         * TODO: delivery is strictly sequential today, so this is both the contiguous prefix and the total; a future
+         * parallel-write delivery path will need to track the two separately. */
         uint64_t num_bytes_delivered;
 
         /* Task for delivering events on the meta-request's io_event_loop thread.
@@ -264,7 +262,7 @@ struct aws_s3_meta_request {
 
         /* Pause state (see aws_s3_meta_request_pause_async). Set once when a pause is requested;
          * consumed during finish to build a resume token and fire the pause callback. */
-        uint32_t pause_requested : 1;
+        uint32_t async_pause_requested : 1;
         aws_s3_meta_request_pause_complete_fn *pause_complete_callback;
         void *pause_complete_user_data;
 

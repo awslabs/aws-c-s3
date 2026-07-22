@@ -56,6 +56,10 @@ struct aws_s3_auto_ranged_get {
          * So if begin=0 and end=0 then 1 byte is being downloaded. */
         uint64_t object_range_end;
 
+        /* Full size of the S3 object, from discovery (the Content-Range total, or Content-Length
+         * when the request had no Range header). May be larger than the range being downloaded. */
+        uint64_t object_size;
+
         uint64_t first_part_size;
 
         /* The total number of parts that are being used in downloading the object range. Note that "part" here
