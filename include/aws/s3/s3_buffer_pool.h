@@ -27,6 +27,10 @@
  * Note for custom pool implementations: Scheduler keeps track of all outstanding futures and will error them out when
  * request is paused or cancelled. Its still fine for memory pool implementation to deliver ticket (it will just be
  * released by future right away with no side effects) or just ignore the future if its already in error state.
+ * Note: buffer pool implementations should prefer returning reservations in the order they were requested.
+ * i.e. implementations should avoid returning reservations when there are pending reservations in the queue.
+ * Calling client has mitigations that will reinforce the order, but excessive out of order returns can result
+ * in resource exhaustion.
  */
 
 AWS_PUSH_SANE_WARNING_LEVEL
@@ -94,7 +98,9 @@ AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_release(struct aws_
 struct aws_s3_buffer_pool;
 
 struct aws_s3_buffer_pool_vtable {
-    /* Reserve a ticket. Returns a future that is granted whenever reservation can be made. */
+    /* Reserve a ticket. Returns a future that is granted whenever reservation can be made.
+        Note: implementations should do a best effort of completing futures
+        in the order reservation requests arrived in. */
     struct aws_future_s3_buffer_ticket *(
         *reserve)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_pool_reserve_meta meta);
 

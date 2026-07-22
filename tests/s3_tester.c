@@ -1425,6 +1425,7 @@ int aws_s3_tester_client_new(
         .max_active_connections_override = options->max_active_connections_override,
         .enable_s3express = options->s3express_provider_override_factory != NULL,
         .memory_limit_in_bytes = options->memory_limit_in_bytes,
+        .buffer_pool_factory_fn = options->buffer_pool_factory_fn,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,

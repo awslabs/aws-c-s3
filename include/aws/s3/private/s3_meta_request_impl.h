@@ -325,6 +325,20 @@ struct aws_s3_meta_request {
         /* Total number of bytes that have been attempted to be delivered. (Will equal the sum of succeeded and
          * failed.)*/
         uint64_t num_bytes_delivery_completed;
+
+        /* Priority queue of requests that have acquired their buffer ticket but must wait
+         * for earlier parts to be dispatched for prepare first. This ensures sequential
+         * input stream reads happen in part-number order even when buffer pool reservations
+         * complete out of order.
+         * Note: each element is the pending request, callback to the next state and some user data
+         * (aws_s3_pending_prepare_entry). */
+        struct aws_priority_queue pending_put_prepare_queue;
+
+        /* Next part number that should be dispatched from pending_put_prepare_queue. */
+        uint32_t next_put_part_to_prepare;
+
+        /* Expected offset for the next sequential stream read. Used to detect out-of-order reads. */
+        uint64_t next_read_offset;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
@@ -356,6 +370,14 @@ struct aws_s3_meta_request {
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
+};
+
+/* Entry in the pending_put_prepare_queue. Holds a request that has acquired its buffer
+ * ticket but must wait for earlier parts to dispatch for prepare first. */
+struct aws_s3_pending_prepare_entry {
+    struct aws_s3_request *request;
+    aws_s3_meta_request_prepare_request_callback_fn *callback;
+    void *user_data;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */
