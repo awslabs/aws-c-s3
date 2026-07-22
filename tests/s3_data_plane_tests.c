@@ -9927,10 +9927,6 @@ static void s_async_pause_test_data_clean_up(struct async_pause_resume_test_data
     aws_mutex_clean_up(&test_data->mutex);
 }
 
-/* ---- Test 7: PUT async pause/resume happy path ---- */
-
-static const size_t s_async_pause_upload_size = 128 * 1024 * 1024; /* 128 MiB */
-
 AWS_TEST_CASE(test_s3_put_pause_resume_async_happy_path, s_test_s3_put_pause_resume_async_happy_path)
 static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -9956,9 +9952,10 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
 
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_put_async_pause;
+    size_t async_pause_upload_size = 128 * 1024 * 1024; /* 128 MiB */
 
-    struct aws_input_stream *upload_stream = aws_s3_test_input_stream_new(allocator, s_async_pause_upload_size);
-    int64_t content_length = (int64_t)s_async_pause_upload_size;
+    struct aws_input_stream *upload_stream = aws_s3_test_input_stream_new(allocator, async_pause_upload_size);
+    int64_t content_length = async_pause_upload_size;
 
     struct aws_byte_cursor host = g_test_bucket_name;
     char endpoint[1024];
@@ -10017,7 +10014,7 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
     patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->meta_request_factory = s_meta_request_factory_put_async_pause;
 
-    upload_stream = aws_s3_test_input_stream_new(allocator, s_async_pause_upload_size);
+    upload_stream = aws_s3_test_input_stream_new(allocator, async_pause_upload_size);
     message = s_put_object_request_new(
         allocator, destination_key, aws_byte_cursor_from_c_str(endpoint), upload_stream, content_length);
 

@@ -1451,7 +1451,12 @@ AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
 
-/* TODO: support create the resume token for download so that client can resume from external provided token. */
+/* TODO: the download token is currently not supported to resume on (no public constructor exists to
+ * build a GET meta request from an externally-provided download resume token). Until that lands, the
+ * alternative is for the caller to issue a new ranged GET manually, using
+ * aws_s3_meta_request_resume_token_continues_downloaded_bytes() (offset from object_range_start) to the
+ * end of the original download (object_range_end, or object_size - 1 for an unranged download) as the
+ * new Range, so only the undelivered bytes are re-fetched. */
 
 /*
  * ETag of the S3 object being downloaded, captured from the first response.

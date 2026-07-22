@@ -494,6 +494,18 @@ def handle_list_parts(parsed_path):
     return ResponseConfig(parsed_path.path)
 
 
+def handle_upload_part(request, parsed_path):
+    if parsed_path.path == "/upload_part_error_part_3":
+        # Multipart upload where part 3 fails with 403 after a short delay
+        # (long enough for the other parts to complete first).
+        query = parse_qs(parsed_path.query)
+        part_number = query.get("partNumber", ["0"])[0]
+        if part_number == "3":
+            return ResponseConfig("/upload_part_error", request=request)
+        return ResponseConfig("/default", request=request)
+    return ResponseConfig(parsed_path.path, request=request)
+
+
 async def handle_mock_s3_request(wrapper, request):
     parsed_path = urlparse(request.target.decode("ascii"))
     method = request.method.decode("utf-8")
@@ -508,6 +520,7 @@ async def handle_mock_s3_request(wrapper, request):
             request_type = S3Opts.CompleteMultipartUpload
     elif method == "PUT":
         request_type = S3Opts.UploadPart
+        response_config = handle_upload_part(request, parsed_path)
     elif method == "DELETE":
         request_type = S3Opts.AbortMultipartUpload
     elif method == "GET" or method == "HEAD":

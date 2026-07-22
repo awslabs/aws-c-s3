@@ -414,6 +414,7 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(get_pause_sequential_token_mock_server)
     add_net_test_case(get_pause_before_discovery_mock_server)
     add_net_test_case(get_error_token_mock_server)
+    add_net_test_case(put_error_token_mock_server)
     add_net_test_case(multipart_upload_proxy_mock_server)
     add_net_test_case(endpoint_override_mock_server)
 
