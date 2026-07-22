@@ -2036,6 +2036,54 @@ static void s_s3_prepare_acquire_mem_callback_and_destroy(
     aws_mem_release(payload->allocator, payload);
 }
 
+/* Drain the pending_put_prepare_queue in part-number order. Only dispatches requests
+ * whose part_number matches next_part_to_prepare. Called on io_event_loop thread. */
+static void s_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_request) {
+    struct aws_priority_queue *queue = &meta_request->io_threaded_data.pending_put_prepare_queue;
+
+    while (aws_priority_queue_size(queue) > 0) {
+
+        struct aws_s3_pending_prepare_entry *top = NULL;
+        aws_priority_queue_top(queue, (void **)&top);
+
+        if (top->request->part_number != meta_request->io_threaded_data.next_put_part_to_prepare) {
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Exiting put prepare queue drain early because top part number %" PRIu32
+                " is different from next part %" PRIu32 ".",
+                (void *)meta_request,
+                top->request->part_number,
+                meta_request->io_threaded_data.next_put_part_to_prepare);
+
+            break;
+        }
+
+        struct aws_s3_pending_prepare_entry entry;
+        aws_priority_queue_pop(queue, &entry);
+        ++meta_request->io_threaded_data.next_put_part_to_prepare;
+
+        aws_s3_meta_request_prepare_request(meta_request, entry.request, entry.callback, entry.user_data);
+    }
+}
+
+/* Force-drain all entries from pending_put_prepare_queue regardless of ordering.
+ * Called when a buffer reservation fails and the missing part will never arrive,
+ * which would otherwise leave queued requests stuck forever. Releases tickets and
+ * fails each request through the normal callback. */
+static void s_force_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_request, int error_code) {
+    struct aws_priority_queue *queue = &meta_request->io_threaded_data.pending_put_prepare_queue;
+
+    while (aws_priority_queue_size(queue) > 0) {
+        struct aws_s3_pending_prepare_entry entry;
+        aws_priority_queue_pop(queue, &entry);
+
+        aws_s3_buffer_ticket_release(entry.request->ticket);
+        entry.request->ticket = NULL;
+
+        entry.callback(meta_request, entry.request, error_code, entry.user_data);
+    }
+}
+
 static void s_on_pool_buffer_reserved(void *user_data) {
     struct aws_s3_reserve_memory_payload *payload = user_data;
     AWS_PRECONDITION(payload);
@@ -2065,6 +2113,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
             request->request_tag);
 
         s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
         return;
     }
 
@@ -2080,9 +2129,39 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
     /* END CRITICAL SECTION */
 
-    aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
-    aws_future_s3_buffer_ticket_release(payload->buffer_future);
-    aws_mem_release(payload->allocator, payload);
+    /*
+     * Note: on why following check excludes everything, but put object type.
+     * Specific problem is with get object, which has complex logic of sometimes trying with bad range and
+     * if that fails trying with part number, etc... that can throw off the counter for which part num is expected next
+     * and hang the meta request.
+     * Lets play safe for now and only include puts in this logic.
+     * We can revisit whether it makes sense for get and add it later.
+     */
+
+    bool needs_ordered_prepare = request->part_number > 0 &&
+                                 meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+                                 !meta_request->request_body_parallel_stream;
+
+    if (needs_ordered_prepare) {
+        /* Insert into priority queue and drain in order to ensure sequential
+         * stream reads happen in part-number order. */
+        struct aws_s3_pending_prepare_entry entry = {
+            .request = request,
+            .callback = payload->callback,
+            .user_data = payload->user_data,
+        };
+        aws_priority_queue_push(&meta_request->io_threaded_data.pending_put_prepare_queue, &entry);
+
+        aws_future_s3_buffer_ticket_release(payload->buffer_future);
+        aws_mem_release(payload->allocator, payload);
+
+        s_drain_pending_put_prepare_queue(meta_request);
+    } else {
+        aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
+        aws_future_s3_buffer_ticket_release(payload->buffer_future);
+        aws_mem_release(payload->allocator, payload);
+    }
+
     return;
 }
 
