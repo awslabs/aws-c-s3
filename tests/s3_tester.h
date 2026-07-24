@@ -144,6 +144,7 @@ struct aws_s3_tester_client_options {
     uint32_t max_active_connections_override;
     void *factory_user_data;
     uint64_t memory_limit_in_bytes;
+    aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
