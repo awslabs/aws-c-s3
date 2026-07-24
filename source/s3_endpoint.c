@@ -157,6 +157,9 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     socket_options.type = AWS_SOCKET_STREAM;
     socket_options.domain = AWS_SOCKET_IPV4;
     socket_options.connect_timeout_ms = connect_timeout_ms == 0 ? s_connection_timeout_ms : connect_timeout_ms;
+    /* Disable Nagle's algorithm by default. S3 transfers are latency-sensitive and issue many small writes
+     * (request headers, etc.), so we want them sent immediately rather than being buffered by the OS. */
+    socket_options.tcp_nodelay = AWS_SOCKET_TCP_NODELAY_ON;
     if (tcp_keep_alive_options != NULL) {
         socket_options.keepalive = true;
         socket_options.keep_alive_interval_sec = tcp_keep_alive_options->keep_alive_interval_sec;
