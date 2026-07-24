@@ -527,8 +527,8 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
 int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
 
     *out_resume_token = NULL;
 
@@ -543,8 +543,9 @@ int aws_s3_meta_request_pause_async(
     struct aws_s3_meta_request *meta_request,
     aws_s3_meta_request_pause_complete_fn *on_complete,
     void *user_data) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(on_complete);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(on_complete);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
 
     if (!meta_request->vtable->build_resume_token_synced) {
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
