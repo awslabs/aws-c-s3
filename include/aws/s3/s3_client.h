@@ -1079,6 +1079,11 @@ struct aws_s3_meta_request_options {
      * Allows persisting state for later resume without re-transferring completed parts.
      * Supported for both upload (PUT) and download (GET) meta requests.
      * Uses the same user_data as other callbacks.
+     * The token is NULL when no resumable state was captured.
+     * WARNING: for a file download with recv_file_delete_on_failure, the deletion is
+     * respected — the partial file is deleted on error, leaving nothing to resume on,
+     * and this callback fires with a NULL token. Do not set recv_file_delete_on_failure
+     * if you intend to resume from this callback's token.
      */
     aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
 };

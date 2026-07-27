@@ -2300,6 +2300,66 @@ TEST_CASE(get_error_token_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* Same mid-download failure, but downloading to a file with recv_file_delete_on_failure:
+ * the partial file (the state a download token refers to) is deleted on error, so the
+ * on_error_resume_token callback must fire with a NULL token (it always fires exactly
+ * once on error — bindings may wrap it in a future, so it cannot be skipped). The tester
+ * separately asserts the file is gone after the failure. */
+TEST_CASE(get_error_token_delete_on_failure_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    AWS_ZERO_STRUCT(s_get_error_token_test_data);
+    struct get_error_token_mock_test_data *test_data = &s_get_error_token_test_data;
+    aws_mutex_init(&test_data->mutex);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_error_part_3");
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .on_error_resume_token = s_get_error_token_mock_on_error,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path,
+                .file_on_disk = true,
+                .recv_file_delete_on_failure = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    /* The download must have failed (403 on part 3), not paused. */
+    ASSERT_TRUE(out_results.finished_error_code != AWS_ERROR_SUCCESS);
+    ASSERT_TRUE(out_results.finished_error_code != AWS_ERROR_S3_PAUSED);
+    ASSERT_UINT_EQUALS(AWS_HTTP_STATUS_CODE_403_FORBIDDEN, out_results.finished_response_status);
+
+    /* The partial file was deleted, so there is no resumable state: the callback still fires
+     * exactly once with the error code, but with a NULL token. */
+    ASSERT_TRUE(test_data->error_callback_invoked);
+    ASSERT_INT_EQUALS(out_results.finished_error_code, test_data->error_code);
+    ASSERT_NULL(test_data->resume_token);
+
+    aws_mutex_clean_up(&test_data->mutex);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* PUT failure mid-upload: part 3 fails with 403 after a delay long enough for the other
  * parts to complete. The on_error_resume_token callback must fire with the meta request's
  * error code and a token carrying the upload id and part counters. */
