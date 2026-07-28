@@ -1855,7 +1855,7 @@ static struct get_pause_token_mock_test_data s_get_pause_token_test_data;
 
 static void s_get_pause_token_mock_pause_complete(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data) {
     (void)meta_request;
@@ -1994,7 +1994,7 @@ static struct get_pause_seq_mock_test_data s_get_pause_seq_test_data;
 
 static void s_get_pause_seq_mock_pause_complete(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data) {
     (void)meta_request;
@@ -2104,7 +2104,7 @@ static struct get_pause_early_mock_test_data s_get_pause_early_test_data;
 
 static void s_get_pause_early_mock_pause_complete(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data) {
     (void)meta_request;
@@ -2218,7 +2218,7 @@ static struct get_error_token_mock_test_data s_get_error_token_test_data;
 
 static void s_get_error_token_mock_on_error(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data) {
     (void)meta_request;
@@ -2375,7 +2375,7 @@ static struct put_error_token_mock_test_data s_put_error_token_test_data;
 
 static void s_put_error_token_mock_on_error(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data) {
     (void)meta_request;

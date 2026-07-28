@@ -9858,7 +9858,7 @@ static bool s_async_pause_completion_predicate(void *arg) {
 
 static void s_async_pause_complete_callback(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data) {
     (void)meta_request;
