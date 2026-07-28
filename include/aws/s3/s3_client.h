@@ -770,7 +770,7 @@ struct aws_s3_checksum_config {
  */
 typedef void(aws_s3_meta_request_pause_complete_fn)(
     struct aws_s3_meta_request *meta_request,
-    const struct aws_s3_meta_request_resume_token *resume_token,
+    struct aws_s3_meta_request_resume_token *resume_token,
     int error_code,
     void *user_data);
 
