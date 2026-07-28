@@ -1634,6 +1634,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 meta_request_options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
                 meta_request_options.recv_file_option = options->get_options.recv_file_option;
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
+                meta_request_options.recv_file_delete_on_failure = options->get_options.recv_file_delete_on_failure;
             }
             meta_request_options.message = message;
             meta_request_options.force_dynamic_part_size = options->get_options.force_dynamic_part_size;

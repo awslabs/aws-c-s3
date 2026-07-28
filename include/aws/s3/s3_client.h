@@ -257,6 +257,21 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
 /**
+ * Callback for async pause completion or on-error resume token delivery.
+ * Delivers the resume token once the meta request finishes.
+ *
+ * @param meta_request The meta request that was paused or failed.
+ * @param resume_token The resume token (NULL if pause failed). Caller must acquire to keep.
+ * @param error_code AWS_ERROR_SUCCESS if paused, or the error code that caused the failure.
+ * @param user_data User data passed to pause_async or from meta request options.
+ */
+typedef void(aws_s3_meta_request_pause_complete_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token *resume_token,
+    int error_code,
+    void *user_data);
+
+/**
  * Optional callback, for you to provide the full object checksum after the object was read.
  * Client will NOT check the checksum provided before sending it to the server.
  *
@@ -760,20 +775,6 @@ struct aws_s3_checksum_config {
  * 5) If the data is already in memory and you want the client to upload it with no extra copy or
  *    allocation, set `request_body` (DEFAULT meta request only).
  */
-/**
- * Callback for async pause completion or on-error resume token delivery.
- * Delivers the resume token once all in-flight writes have flushed and state is captured.
- * @param meta_request The meta request that was paused or failed.
- * @param resume_token The resume token (NULL if pause failed). Caller must acquire to keep.
- * @param error_code AWS_ERROR_SUCCESS if paused, or the error code that caused the failure.
- * @param user_data User data passed to pause_async or from meta request options.
- */
-typedef void(aws_s3_meta_request_pause_complete_fn)(
-    struct aws_s3_meta_request *meta_request,
-    struct aws_s3_meta_request_resume_token *resume_token,
-    int error_code,
-    void *user_data);
-
 struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
     enum aws_s3_meta_request_type type;
@@ -1078,6 +1079,11 @@ struct aws_s3_meta_request_options {
      * Allows persisting state for later resume without re-transferring completed parts.
      * Supported for both upload (PUT) and download (GET) meta requests.
      * Uses the same user_data as other callbacks.
+     * The token is NULL when no resumable state was captured.
+     * WARNING: for a file download with recv_file_delete_on_failure, the deletion is
+     * respected — the partial file is deleted on error, leaving nothing to resume on,
+     * and this callback fires with a NULL token. Do not set recv_file_delete_on_failure
+     * if you intend to resume from this callback's token.
      */
     aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
 };
@@ -1477,8 +1483,9 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_version_id(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Last-Modified of the S3 object being downloaded (HTTP-date format,
- * for example "Wed, 09 Oct 2024 22:28:00 GMT"), captured from the first response.
+ * Last-Modified of the S3 object being downloaded, in HTTP-date format
+ * (RFC 9110 §5.6.7, e.g. "Wed, 09 Oct 2024 22:28:00 GMT"),
+ * captured from the first response. The exact string in the response header.
  * Download tokens only; empty cursor for upload tokens.
  * Optional: empty if the value was not captured before the pause.
  */

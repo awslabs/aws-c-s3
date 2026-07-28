@@ -527,8 +527,8 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
 int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
 
     *out_resume_token = NULL;
 
@@ -543,8 +543,9 @@ int aws_s3_meta_request_pause_async(
     struct aws_s3_meta_request *meta_request,
     aws_s3_meta_request_pause_complete_fn *on_complete,
     void *user_data) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(on_complete);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(on_complete);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
 
     if (!meta_request->vtable->build_resume_token_synced) {
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
@@ -2602,7 +2603,13 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             is_error = true;
         }
 
-        if ((is_async_paused || (is_error && meta_request->on_error_resume_token)) &&
+        /* No error token when recv_file_delete_on_failure will discard the partial file on error —
+         * the token would describe deleted state. The on_error_resume_token callback still fires
+         * with a NULL token below. Async pause is unaffected as pause is not treated as an error.
+         **/
+        bool error_state_discarded = meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure;
+
+        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !error_state_discarded)) &&
             meta_request->vtable->build_resume_token_synced != NULL) {
             token = meta_request->vtable->build_resume_token_synced(meta_request);
         }
@@ -2678,8 +2685,11 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     }
 
     /* Fire pause/error resume-token callbacks before the general finish callback below,
-     * so callers see the resume token before the operation is reported as complete. */
-    if (is_error && meta_request->on_error_resume_token && token != NULL) {
+     * so callers see the resume token before the operation is reported as complete.
+     * Both callbacks fire exactly once whenever registered — bindings may wrap them in
+     * futures, so skipping the invocation could deadlock the caller. A NULL token means
+     * no resumable state was captured. */
+    if (is_error && meta_request->on_error_resume_token) {
         meta_request->on_error_resume_token(meta_request, token, finish_result.error_code, meta_request->user_data);
     }
     if (is_async_paused && pause_callback != NULL) {
