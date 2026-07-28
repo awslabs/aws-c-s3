@@ -453,19 +453,30 @@ struct aws_s3_meta_request_resume_token {
     struct aws_allocator *allocator;
     struct aws_ref_count ref_count;
 
-    enum aws_s3_meta_request_type type;
-
-    /* Note: since pause currently only supports upload, this structure only has
-        upload specific fields. Extending it to support other types is left as
-        exercise for future. */
-    struct aws_string *multipart_upload_id;
+    /* Shared fields (upload and download) */
     size_t part_size;
     size_t total_num_parts;
+
+    enum aws_s3_meta_request_type type;
+
+    /* Upload-specific fields */
+    struct aws_string *multipart_upload_id;
 
     /* Note: this field is used only when s3 tells us that upload id no longer
     exists, and if this indicates that all parts have already been uploaded,
     request is completed instead of failing it.*/
     size_t num_parts_completed;
+
+    /* Download-specific fields */
+    struct aws_string *etag;
+    struct aws_string *version_id;
+    struct aws_string *s3_object_last_modified; /* HTTP-date (RFC 9110 §5.6.7), e.g. "Wed, 09 Oct 2024 22:28:00 GMT" */
+    uint64_t continues_downloaded_bytes;        /* continues prefix bytes downloaded (no gaps) */
+    uint64_t total_downloaded_bytes;            /* total bytes downloaded (may have gaps with parallel write) */
+    uint64_t object_range_start;
+    uint64_t object_range_end;
+    uint64_t object_size;
+    uint64_t file_last_modified_epoch_ns; /* local file mtime (nanos since epoch) at pause */
 };
 
 void aws_s3_client_notify_connection_finished(

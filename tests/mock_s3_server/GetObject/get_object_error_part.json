@@ -1,0 +1,12 @@
+{
+  "delay": 2,
+  "status": 403,
+  "headers": {
+    "Date": "Thu, 12 Jan 2023 00:04:21 GMT",
+    "Content-Type": "application/xml"
+  },
+  "body": [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+  ]
+}
