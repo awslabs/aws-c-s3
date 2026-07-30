@@ -1920,9 +1920,7 @@ static int s_s3_auto_ranged_put_pause(
      * - complete MPU started - return success, generate token and try to cancel
      *   complete MPU
      */
-    if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
-        *out_resume_token = s_s3_auto_ranged_put_build_resume_token_synced(meta_request);
-    }
+    *out_resume_token = s_s3_auto_ranged_put_build_resume_token_synced(meta_request);
 
     /**
      * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.

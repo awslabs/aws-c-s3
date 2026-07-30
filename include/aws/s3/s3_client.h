@@ -1460,7 +1460,7 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
 /* TODO: the download token is currently not supported to resume on (no public constructor exists to
  * build a GET meta request from an externally-provided download resume token). Until that lands, the
  * alternative is for the caller to issue a new ranged GET manually, using
- * aws_s3_meta_request_resume_token_continues_downloaded_bytes() (offset from object_range_start) to the
+ * aws_s3_meta_request_resume_token_continuous_downloaded_bytes() (offset from object_range_start) to the
  * end of the original download (object_range_end, or object_size - 1 for an unranged download) as the
  * new Range, so only the undelivered bytes are re-fetched. */
 
@@ -1527,13 +1527,13 @@ uint64_t aws_s3_meta_request_resume_token_object_range_end(const struct aws_s3_m
  * Download tokens only; 0 for upload tokens.
  */
 AWS_S3_API
-uint64_t aws_s3_meta_request_resume_token_continues_downloaded_bytes(
+uint64_t aws_s3_meta_request_resume_token_continuous_downloaded_bytes(
     const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
  * Total number of bytes downloaded before the pause. May be greater than
- * continues_downloaded_bytes when parts completed out of order, leaving gaps.
- * Equals continues_downloaded_bytes when delivery was strictly in order.
+ * continuous_downloaded_bytes when parts completed out of order, leaving gaps.
+ * Equals continuous_downloaded_bytes when delivery was strictly in order.
  * Download tokens only; 0 for upload tokens.
  */
 AWS_S3_API
