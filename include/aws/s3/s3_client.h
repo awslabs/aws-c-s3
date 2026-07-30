@@ -1521,7 +1521,7 @@ AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_object_range_end(const struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Number of bytes downloaded continuesly from the start of the range, with no
+ * Number of bytes downloaded continuously from the start of the range, with no
  * gaps. Everything before this offset (relative to object_range_start) has been
  * downloaded.
  * Download tokens only; 0 for upload tokens.
