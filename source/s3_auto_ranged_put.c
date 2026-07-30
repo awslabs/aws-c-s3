@@ -328,7 +328,7 @@ static int s_try_init_resume_state_from_persisted_data(
     auto_ranged_put->synced_data.num_parts_noop = 0;
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
-    auto_ranged_put->upload_id = aws_string_clone_or_reuse(allocator, resume_token->multipart_upload_id);
+    auto_ranged_put->upload_id = aws_string_new_from_string(allocator, resume_token->multipart_upload_id);
 
     struct aws_s3_list_parts_params list_parts_params = {
         .key = request_path,
