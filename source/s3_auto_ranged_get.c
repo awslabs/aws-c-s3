@@ -1144,7 +1144,7 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
             aws_string_new_from_string(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
-    /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
+    /* Delivery is strictly sequential today, so the delivered bytes are both the continues
      * prefix and the total. A parallel-write delivery path will need to track the two
      * separately, diverging total (may have gaps) from continues (gap-free prefix). */
     token->continues_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;

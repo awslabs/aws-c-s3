@@ -233,7 +233,7 @@ struct aws_s3_meta_request {
         /* Total number of response-body bytes successfully delivered to the caller's sink
          * (file or body callback), in order with no gaps. Used to build the download resume
          * token on pause/error.
-         * TODO: delivery is strictly sequential today, so this is both the contiguous prefix and the total; a future
+         * TODO: delivery is strictly sequential today, so this is both the continues prefix and the total; a future
          * parallel-write delivery path will need to track the two separately. */
         uint64_t num_bytes_delivered;
 

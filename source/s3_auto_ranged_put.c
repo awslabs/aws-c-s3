@@ -1878,7 +1878,7 @@ static struct aws_s3_meta_request_resume_token *s_s3_auto_ranged_put_build_resum
 
     struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
     token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-    token->multipart_upload_id = aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
+    token->multipart_upload_id = aws_string_new_from_string(meta_request->allocator, auto_ranged_put->upload_id);
     token->part_size = meta_request->part_size;
     token->total_num_parts = auto_ranged_put->total_num_parts_from_content_length;
     token->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
