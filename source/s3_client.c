@@ -2995,10 +2995,10 @@ uint64_t aws_s3_meta_request_resume_token_object_range_end(
     return resume_token->object_range_end;
 }
 
-uint64_t aws_s3_meta_request_resume_token_continues_downloaded_bytes(
+uint64_t aws_s3_meta_request_resume_token_continuous_downloaded_bytes(
     const struct aws_s3_meta_request_resume_token *resume_token) {
     AWS_FATAL_PRECONDITION(resume_token);
-    return resume_token->continues_downloaded_bytes;
+    return resume_token->continuous_downloaded_bytes;
 }
 
 uint64_t aws_s3_meta_request_resume_token_total_downloaded_bytes(
