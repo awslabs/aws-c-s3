@@ -246,7 +246,7 @@ TEST_CASE(resume_token_cross_type_getters) {
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_size(upload_token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_start(upload_token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_end(upload_token));
-    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continues_downloaded_bytes(upload_token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(upload_token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_total_downloaded_bytes(upload_token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(upload_token));
 
