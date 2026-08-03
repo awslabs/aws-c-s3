@@ -440,9 +440,7 @@ int aws_checksum_combine_digest(
     struct aws_byte_cursor tail_digest,
     uint64_t tail_length) {
 
-    AWS_PRECONDITION(head);
-
-    if (head->vtable->combine == NULL) {
+    if (head == NULL || head->vtable == NULL || head->vtable->combine == NULL) {
         return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
     }
     if (!head->good) {
