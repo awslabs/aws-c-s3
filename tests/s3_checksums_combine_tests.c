@@ -276,27 +276,28 @@ static int s_checksum_combine_unsupported_algorithms_fn(struct aws_allocator *al
 
     struct aws_byte_cursor input = s_combine_test_input();
     for (size_t i = 0; i < AWS_ARRAY_SIZE(not_combinable); ++i) {
+        if (i <= AWS_SCA_SHA512) {
+#ifdef BYO_CRYPTO
+            /* Skip SHA based algo for BYO_CRYPTO since they are libcrypto based. */
+            continue;
+#endif
+        }
         enum aws_s3_checksum_algorithm algorithm = not_combinable[i];
-        printf("start %zu \n", i);
         ASSERT_FALSE(aws_checksum_algorithm_is_combinable(algorithm));
 
         struct aws_s3_checksum *head = aws_checksum_new(allocator, algorithm);
         struct aws_s3_checksum *tail = aws_checksum_new(allocator, algorithm);
-        printf("after mew %zu \n", i);
         ASSERT_NOT_NULL(head);
         ASSERT_NOT_NULL(tail);
         ASSERT_SUCCESS(aws_checksum_update(head, &input));
         ASSERT_SUCCESS(aws_checksum_update(tail, &input));
-        printf("after update %zu \n", i);
         uint8_t unused_digest[AWS_S3_COMBINABLE_DIGEST_MAX_LEN] = {0};
         ASSERT_ERROR(
             AWS_ERROR_UNSUPPORTED_OPERATION,
             aws_checksum_combine_digest(
                 head, aws_byte_cursor_from_array(unused_digest, sizeof(unused_digest)), input.len));
-        printf("after combine %zu \n", i);
         aws_checksum_destroy(tail);
         aws_checksum_destroy(head);
-        printf("after destory %zu \n", i);
     }
 
     aws_s3_library_clean_up();
