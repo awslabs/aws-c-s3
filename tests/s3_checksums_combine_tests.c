@@ -258,6 +258,7 @@ AWS_TEST_CASE(checksum_combine_empty_tail, s_checksum_combine_empty_tail_fn)
  * silently wrong digest. */
 static int s_checksum_combine_unsupported_algorithms_fn(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
+    printf("start soemthing \n");
     aws_s3_library_init(allocator);
 
     const enum aws_s3_checksum_algorithm combinable[] = {AWS_SCA_CRC32, AWS_SCA_CRC32C, AWS_SCA_CRC64NVME};
@@ -271,6 +272,7 @@ static int s_checksum_combine_unsupported_algorithms_fn(struct aws_allocator *al
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(combinable); ++i) {
+        printf("start %zu \n", i);
         ASSERT_TRUE(aws_checksum_algorithm_is_combinable(combinable[i]));
     }
 

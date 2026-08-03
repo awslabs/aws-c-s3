@@ -5122,9 +5122,7 @@ static int s_test_s3_multipart_get_whole_object_checksum(struct aws_allocator *a
  * CRCs, which are exactly the combinable algorithms, so this variant only exercises the combine path. The
  * non-combinable fallback is covered by test_s3_multipart_get_whole_object_checksum above, where a single
  * PutObject gives S3 a whole-object checksum for any algorithm. */
-AWS_TEST_CASE(
-    test_s3_multipart_get_full_object_checksum_header,
-    s_test_s3_multipart_get_full_object_checksum_header)
+AWS_TEST_CASE(test_s3_multipart_get_full_object_checksum_header, s_test_s3_multipart_get_full_object_checksum_header)
 static int s_test_s3_multipart_get_full_object_checksum_header(struct aws_allocator *allocator, void *ctx) {
     return s_test_s3_multipart_get_full_object_checksum_helper(allocator, ctx, AWS_TEST_FOC_HEADER);
 }
