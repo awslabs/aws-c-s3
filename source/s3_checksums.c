@@ -253,6 +253,22 @@ static void s_crc_destroy(struct aws_s3_checksum *checksum) {
     aws_mem_release(checksum->allocator, checksum);
 }
 
+static int s_crc32_combine(struct aws_s3_checksum *head, uint64_t tail_value, uint64_t tail_length) {
+    head->impl.crc_val_32bit = aws_checksums_crc32_combine(head->impl.crc_val_32bit, (uint32_t)tail_value, tail_length);
+    return AWS_OP_SUCCESS;
+}
+
+static int s_crc32c_combine(struct aws_s3_checksum *head, uint64_t tail_value, uint64_t tail_length) {
+    head->impl.crc_val_32bit =
+        aws_checksums_crc32c_combine(head->impl.crc_val_32bit, (uint32_t)tail_value, tail_length);
+    return AWS_OP_SUCCESS;
+}
+
+static int s_crc64nvme_combine(struct aws_s3_checksum *head, uint64_t tail_value, uint64_t tail_length) {
+    head->impl.crc_val_64bit = aws_checksums_crc64nvme_combine(head->impl.crc_val_64bit, tail_value, tail_length);
+    return AWS_OP_SUCCESS;
+}
+
 static struct aws_checksum_vtable hash_vtable = {
     .update = s_hash_update,
     .finalize = s_hash_finalize,
@@ -269,16 +285,19 @@ static struct aws_checksum_vtable crc32_vtable = {
     .update = s_crc32_checksum_update,
     .finalize = s_crc32_finalize,
     .destroy = s_crc_destroy,
+    .combine = s_crc32_combine,
 };
 static struct aws_checksum_vtable crc32c_vtable = {
     .update = s_crc32c_checksum_update,
     .finalize = s_crc32_finalize,
     .destroy = s_crc_destroy,
+    .combine = s_crc32c_combine,
 };
 static struct aws_checksum_vtable crc64nvme_vtable = {
     .update = s_crc64nvme_checksum_update,
     .finalize = s_crc64_finalize,
     .destroy = s_crc_destroy,
+    .combine = s_crc64nvme_combine,
 };
 
 struct aws_s3_checksum *aws_hash_new(struct aws_allocator *allocator, aws_hash_new_fn hash_fn) {
@@ -403,6 +422,51 @@ int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output) {
     AWS_PRECONDITION(checksum);
     return checksum->vtable->finalize(checksum, output);
+}
+
+bool aws_checksum_algorithm_is_combinable(enum aws_s3_checksum_algorithm algorithm) {
+    switch (algorithm) {
+        case AWS_SCA_CRC32:
+        case AWS_SCA_CRC32C:
+        case AWS_SCA_CRC64NVME:
+            return true;
+        default:
+            return false;
+    }
+}
+
+int aws_checksum_combine_digest(
+    struct aws_s3_checksum *head,
+    struct aws_byte_cursor tail_digest,
+    uint64_t tail_length) {
+
+    AWS_PRECONDITION(head);
+
+    if (head->vtable->combine == NULL) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+    if (!head->good) {
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+    if (tail_digest.len != head->digest_size) {
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* The CRC finalizers write digests big-endian, so read them back the same way. */
+    uint64_t tail_value = 0;
+    if (head->digest_size == AWS_CRC32_LEN) {
+        uint32_t value_32 = 0;
+        if (!aws_byte_cursor_read_be32(&tail_digest, &value_32)) {
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+        tail_value = value_32;
+    } else {
+        if (!aws_byte_cursor_read_be64(&tail_digest, &tail_value)) {
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+    }
+
+    return head->vtable->combine(head, tail_value, tail_length);
 }
 
 static int s_checksum_compute_fn(

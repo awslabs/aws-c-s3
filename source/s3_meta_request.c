@@ -38,6 +38,7 @@ static const size_t s_default_event_delivery_array_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
+static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
 static void s_s3_meta_request_destroy(void *user_data);
 
 static void s_s3_meta_request_init_signing_date_time(
@@ -100,7 +101,7 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-/* True if the checksum validated and matched, false otherwise. */
+/* True if the checksum validated and matched, false otherwise. Finalizes checksum_to_validate. */
 static bool s_validate_checksum(
     struct aws_s3_checksum *checksum_to_validate,
     struct aws_byte_buf *expected_encoded_checksum) {
@@ -139,17 +140,33 @@ static void s_validate_meta_request_checksum_on_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *meta_request_result) {
 
+    /* No lock. meta_request_level_running_response_sum has a single owner at any point in its life: the
+     * connection thread that creates it at discovery, then either the delivery loop (byte-wise) or this
+     * function (folding recorded part digests), never both. Each handoff sits behind a lock that the path
+     * already takes, so nothing here races. See the combine_slots declaration for the ordering argument. */
     if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
-        meta_request_result->did_validate = true;
-        meta_request_result->validation_algorithm = meta_request->meta_request_level_running_response_sum->algorithm;
-        if (!s_validate_checksum(
-                meta_request->meta_request_level_running_response_sum,
-                &meta_request->meta_request_level_response_header_checksum)) {
-            meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
-            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Checksum mismatch!", (void *)meta_request);
+        /* A part that never completed leaves the whole-object sum covering only a subset of the object, so
+         * validating it would be meaningless. Report it as unvalidated rather than as a failure: the caller
+         * asked for the object, and every part that arrived was still checked against whatever checksum it
+         * carried of its own. */
+        bool complete =
+            !meta_request->meta_request_level_checksum_combinable || s_s3_meta_request_fold_combine_slots(meta_request);
+
+        if (complete) {
+            meta_request_result->did_validate = true;
+            meta_request_result->validation_algorithm =
+                meta_request->meta_request_level_running_response_sum->algorithm;
+
+            if (!s_validate_checksum(
+                    meta_request->meta_request_level_running_response_sum,
+                    &meta_request->meta_request_level_response_header_checksum)) {
+                meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+                AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Checksum mismatch!", (void *)meta_request);
+            }
         }
     }
     aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
+    meta_request->meta_request_level_running_response_sum = NULL;
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
@@ -715,6 +732,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
 
+    /* Slots own nothing, so a cancelled or failed meta request can just drop them. */
+    aws_mem_release(meta_request->allocator, meta_request->combine_slots);
+    meta_request->combine_slots = NULL;
+    meta_request->combine_slot_count = 0;
+
     AWS_ASSERT(aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->synced_data.event_delivery_array);
 
@@ -753,6 +775,147 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     AWS_PRECONDITION(*request_b);
 
     return (*request_a)->part_number > (*request_b)->part_number;
+}
+
+/* Records one finished part's digest so it can be folded into the whole-object checksum at finish.
+ *
+ * No lock: the slot array was sized before any part was dispatched and is never resized, and this part owns
+ * its slot exclusively. See the combine_slots declaration for why the write is visible to the fold. */
+static void s_s3_meta_request_record_part_digest(
+    struct aws_s3_meta_request *meta_request,
+    uint32_t part_number,
+    const struct aws_byte_buf *digest,
+    uint64_t length) {
+
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(digest);
+    AWS_PRECONDITION(part_number > 0);
+    AWS_FATAL_ASSERT(digest->len > 0 && digest->len <= AWS_S3_COMBINABLE_DIGEST_MAX_LEN);
+
+    if (part_number > meta_request->combine_slot_count) {
+        /* More parts turned up than the discovery response accounted for. Leave the slots alone; the fold at
+         * finish will report the whole-object checksum as unvalidated rather than assembling a partial sum. */
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Part %" PRIu32 " is beyond the %" PRIu32 " parts discovered, so its checksum cannot "
+            "contribute to the whole-object checksum.",
+            (void *)meta_request,
+            part_number,
+            meta_request->combine_slot_count);
+        return;
+    }
+
+    struct aws_s3_combine_slot *slot = &meta_request->combine_slots[part_number - 1];
+    slot->length = length;
+    memcpy(slot->digest, digest->buffer, digest->len);
+    slot->digest_len = digest->len;
+}
+
+/* Assembles the whole-object checksum from the recorded part digests. Returns false, leaving the running sum
+ * untouched, if any part never recorded one.
+ *
+ * CRCs compose: folding part digests left to right in object order yields exactly the checksum of the
+ * concatenated object, so no thread re-reads the body. Slots are already in object order, so this is a single
+ * forward pass.
+ *
+ * No lock, and none needed: by the time the meta request finishes, update() has confirmed every dispatched
+ * part completed, so all slot writes are done and published. */
+static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_checksum *running_sum = meta_request->meta_request_level_running_response_sum;
+    AWS_FATAL_ASSERT(running_sum != NULL);
+
+    if (meta_request->combine_slots == NULL || meta_request->combine_slot_count == 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p No part checksums were recorded, so the whole-object checksum cannot be validated.",
+            (void *)meta_request);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < meta_request->combine_slot_count; ++i) {
+        const struct aws_s3_combine_slot *slot = &meta_request->combine_slots[i];
+        if (slot->digest_len == 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Part %" PRIu32 " never recorded a checksum, so the whole-object checksum cannot be "
+                "validated.",
+                (void *)meta_request,
+                i + 1);
+            return false;
+        }
+        if (aws_checksum_combine_digest(
+                running_sum, aws_byte_cursor_from_array(slot->digest, slot->digest_len), slot->length)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Failed to combine checksum for part %" PRIu32 ". last error:%s",
+                (void *)meta_request,
+                i + 1,
+                aws_error_name(aws_last_error_or_unknown()));
+            return false;
+        }
+    }
+
+    return true;
+}
+
+int aws_s3_meta_request_setup_checksum_combine_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *discovery_request,
+    uint32_t total_num_parts) {
+
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(discovery_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    meta_request->meta_request_level_checksum_combinable = false;
+
+    if (meta_request->meta_request_level_running_response_sum == NULL) {
+        /* Nothing to validate at the meta request level. */
+        return AWS_OP_SUCCESS;
+    }
+
+    enum aws_s3_checksum_algorithm algorithm = meta_request->meta_request_level_running_response_sum->algorithm;
+    if (!aws_checksum_algorithm_is_combinable(algorithm)) {
+        /* Leave it to the delivery loop, which sees the body in object order. */
+        return AWS_OP_SUCCESS;
+    }
+    if (total_num_parts == 0) {
+        /* An empty object, so there is nothing to combine. */
+        return AWS_OP_SUCCESS;
+    }
+
+    AWS_FATAL_ASSERT(meta_request->combine_slots == NULL);
+    meta_request->combine_slots =
+        aws_mem_calloc(meta_request->allocator, total_num_parts, sizeof(struct aws_s3_combine_slot));
+    meta_request->combine_slot_count = total_num_parts;
+    meta_request->meta_request_level_checksum_combinable = true;
+
+    /* From here on, each part checksums itself as it streams. The discovery request is the exception: if it
+     * carried body bytes, they arrived before we knew which algorithm to use, so checksum that one part from
+     * its buffer now. A HEAD discovery has no body and needs nothing. */
+    if (discovery_request->part_number == 0 || discovery_request->send_data.response_body.len == 0) {
+        return AWS_OP_SUCCESS;
+    }
+
+    struct aws_s3_checksum *part_sum = aws_checksum_new(meta_request->allocator, algorithm);
+    if (part_sum == NULL) {
+        return AWS_OP_ERR;
+    }
+
+    struct aws_byte_cursor body = aws_byte_cursor_from_buf(&discovery_request->send_data.response_body);
+    uint8_t digest_storage[AWS_S3_COMBINABLE_DIGEST_MAX_LEN];
+    struct aws_byte_buf part_digest = aws_byte_buf_from_empty_array(digest_storage, sizeof(digest_storage));
+
+    if (aws_checksum_update(part_sum, &body) || aws_checksum_finalize(part_sum, &part_digest)) {
+        aws_checksum_destroy(part_sum);
+        return AWS_OP_ERR;
+    }
+    aws_checksum_destroy(part_sum);
+
+    s_s3_meta_request_record_part_digest(meta_request, discovery_request->part_number, &part_digest, body.len);
+    return AWS_OP_SUCCESS;
 }
 
 static int s_s3_pending_prepare_entry_pred(const void *a, const void *b) {
@@ -1466,6 +1629,46 @@ static bool s_get_part_response_headers_checksum_helper(
     return false;
 }
 
+/* A part's own checksum header is not the only reason to run a per-part checksum. When the whole-object
+ * checksum is assembled by combining parts, every part needs a running sum even though its response may carry
+ * no checksum header of its own — and even when it does, that header's algorithm need not be the whole-object
+ * algorithm, so the combine gets its own sum rather than borrowing the validation one.
+ *
+ * Reading meta_request_level_checksum_combinable and ...running_response_sum unlocked is safe here: both are
+ * written when the discovery request finishes, and no part can be dispatched until after that, with the
+ * client's and meta request's locks acquired in between. */
+static int s_ensure_part_combine_sum(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+
+    if (request->request_level_combine_sum != NULL) {
+        /* Already running, from an earlier header block. */
+        return AWS_OP_SUCCESS;
+    }
+    if (!meta_request->meta_request_level_checksum_combinable) {
+        return AWS_OP_SUCCESS;
+    }
+    if (request->part_number == 0) {
+        /* Not a part, so it has no place in the object's byte order. */
+        return AWS_OP_SUCCESS;
+    }
+    AWS_FATAL_ASSERT(meta_request->meta_request_level_running_response_sum != NULL);
+
+    request->request_level_combine_sum =
+        aws_checksum_new(meta_request->allocator, meta_request->meta_request_level_running_response_sum->algorithm);
+    if (request->request_level_combine_sum == NULL) {
+        /* Failing the request is the only safe option: silently skipping this part would leave the
+         * whole-object checksum short by one part and report a mismatch on good data. */
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not create part checksum for request %p",
+            (void *)meta_request,
+            (void *)request);
+        return AWS_OP_ERR;
+    }
+    return AWS_OP_SUCCESS;
+}
+
 static int s_s3_meta_request_incoming_headers(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
@@ -1628,6 +1831,20 @@ static int s_s3_meta_request_headers_block_done(
      * because when object_size_hint is provided the buffer is sized to min(hint, part_size), which may be
      * smaller than part_size. Using part_size here would miss the case where hint < content_length <= part_size.
      */
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    AWS_PRECONDITION(meta_request);
+
+    /* Only now that the whole header block is in do we know whether this part carried a checksum header of
+     * its own. on_response_headers fires per batch of headers, so deciding any earlier can commit to "no
+     * header" and then be contradicted by a later batch. */
+    if (meta_request->checksum_config.validate_response_checksum &&
+        request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
+        s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS) {
+        if (s_ensure_part_combine_sum(meta_request, request)) {
+            return AWS_OP_ERR;
+        }
+    }
+
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
         uint64_t content_length;
@@ -1679,9 +1896,25 @@ static int s_s3_meta_request_incoming_body(
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
     }
 
-    if (meta_request->checksum_config.validate_response_checksum && request->request_level_running_response_sum) {
-        /* Update the request level checksum. */
-        aws_checksum_update(request->request_level_running_response_sum, data);
+    if (meta_request->checksum_config.validate_response_checksum) {
+        /* This part's running checksums. Doing it here keeps the work on this connection's thread, with the
+         * data still hot from the socket read. Either, both, or neither may be running: one validates this
+         * part against its own checksum header, the other contributes this part to the whole-object checksum.
+         * They are separate because they need not use the same algorithm. */
+        struct aws_s3_checksum *validation_sum = request->request_level_running_response_sum;
+        struct aws_s3_checksum *combine_sum = request->request_level_combine_sum;
+
+        if ((validation_sum != NULL && aws_checksum_update(validation_sum, data)) ||
+            (combine_sum != NULL && aws_checksum_update(combine_sum, data))) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Request %p could not update checksum due to error %d (%s).",
+                (void *)meta_request,
+                (void *)request,
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
+            return AWS_OP_ERR;
+        }
     }
 
     if (request->send_data.response_body.capacity == 0) {
@@ -1761,12 +1994,15 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
     if (meta_request->checksum_config.validate_response_checksum) {
-        /* finish the request level checksum validation. */
-        if (error_code == AWS_OP_SUCCESS && request->request_level_running_response_sum) {
+        /* Validate this part against its own checksum header, if it had one. The presence of an expected
+         * value is what decides, not the presence of a running sum: a part that only contributes to the
+         * whole-object checksum has a combine sum but nothing to compare anything against on its own. */
+        if (error_code == AWS_OP_SUCCESS && request->request_level_response_header_checksum.len > 0) {
+            struct aws_s3_checksum *part_sum = request->request_level_running_response_sum;
+            AWS_FATAL_ASSERT(part_sum != NULL);
             request->did_validate = true;
-            request->validation_algorithm = request->request_level_running_response_sum->algorithm;
-            request->checksum_match = s_validate_checksum(
-                request->request_level_running_response_sum, &request->request_level_response_header_checksum);
+            request->validation_algorithm = part_sum->algorithm;
+            request->checksum_match = s_validate_checksum(part_sum, &request->request_level_response_header_checksum);
             if (!request->checksum_match) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
@@ -1779,10 +2015,29 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
         } else {
             request->did_validate = false;
         }
+
+        /* Record this part's digest for the whole-object combine, which happens once the meta request
+         * finishes. It is copied into a slot the meta request owns, so the running checksum below can be torn
+         * down here exactly as it always was, and nothing of this request outlives it. */
+        if (error_code == AWS_OP_SUCCESS && request->request_level_combine_sum != NULL) {
+            uint8_t digest_storage[AWS_S3_COMBINABLE_DIGEST_MAX_LEN] = {0};
+            struct aws_byte_buf part_digest = aws_byte_buf_from_empty_array(digest_storage, sizeof(digest_storage));
+
+            if (aws_checksum_finalize(request->request_level_combine_sum, &part_digest)) {
+                error_code = aws_last_error_or_unknown();
+            } else {
+                s_s3_meta_request_record_part_digest(
+                    meta_request, request->part_number, &part_digest, request->send_data.response_body.len);
+            }
+        }
+
         aws_checksum_destroy(request->request_level_running_response_sum);
-        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
         request->request_level_running_response_sum = NULL;
+        aws_checksum_destroy(request->request_level_combine_sum);
+        request->request_level_combine_sum = NULL;
+        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
     }
+
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -2373,7 +2628,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 /* 4. Checksum update */
-                if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+                if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum &&
+                    !meta_request->meta_request_level_checksum_combinable) {
+                    /* Non-combinable algorithm, so the whole-object checksum can only be built by feeding it
+                     * bytes in object order, which is what this delivery loop guarantees. Combinable
+                     * algorithms fold in each part's own checksum when the part completes instead, so there
+                     * is nothing to do here. */
                     if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
                         error_code = aws_last_error();
                         AWS_LOGF_ERROR(
