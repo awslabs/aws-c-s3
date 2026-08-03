@@ -865,8 +865,8 @@ int aws_s3_meta_request_setup_checksum_combine_synced(
     struct aws_s3_request *discovery_request,
     uint32_t total_num_parts) {
 
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(discovery_request);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(discovery_request);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     meta_request->meta_request_level_checksum_combinable = false;
@@ -1629,36 +1629,28 @@ static bool s_get_part_response_headers_checksum_helper(
     return false;
 }
 
-/* A part's own checksum header is not the only reason to run a per-part checksum. When the whole-object
- * checksum is assembled by combining parts, every part needs a running sum even though its response may carry
- * no checksum header of its own — and even when it does, that header's algorithm need not be the whole-object
- * algorithm, so the combine gets its own sum rather than borrowing the validation one.
- *
- * Reading meta_request_level_checksum_combinable and ...running_response_sum unlocked is safe here: both are
- * written when the discovery request finishes, and no part can be dispatched until after that, with the
- * client's and meta request's locks acquired in between. */
+/* Check to see if we need to create a request_level_combine_sum for combine the checksum for the full object */
 static int s_ensure_part_combine_sum(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(request);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(request);
 
     if (request->request_level_combine_sum != NULL) {
-        /* Already running, from an earlier header block. */
-        return AWS_OP_SUCCESS;
-    }
-    if (!meta_request->meta_request_level_checksum_combinable) {
+        /* Already running, skipping. */
         return AWS_OP_SUCCESS;
     }
     if (request->part_number == 0) {
         /* Not a part, so it has no place in the object's byte order. */
         return AWS_OP_SUCCESS;
     }
-    AWS_FATAL_ASSERT(meta_request->meta_request_level_running_response_sum != NULL);
+    if (!meta_request->meta_request_level_checksum_combinable ||
+        meta_request->meta_request_level_running_response_sum == NULL) {
+        /* No track on the meta request level for combine the checksum */
+        return AWS_OP_SUCCESS;
+    }
 
     request->request_level_combine_sum =
         aws_checksum_new(meta_request->allocator, meta_request->meta_request_level_running_response_sum->algorithm);
     if (request->request_level_combine_sum == NULL) {
-        /* Failing the request is the only safe option: silently skipping this part would leave the
-         * whole-object checksum short by one part and report a mismatch on good data. */
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not create part checksum for request %p",
@@ -1834,9 +1826,7 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    /* Only now that the whole header block is in do we know whether this part carried a checksum header of
-     * its own. on_response_headers fires per batch of headers, so deciding any earlier can commit to "no
-     * header" and then be contradicted by a later batch. */
+    /* Check if we need to create a `request_level_combine_sum` or not */
     if (meta_request->checksum_config.validate_response_checksum &&
         request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS) {
@@ -1897,10 +1887,11 @@ static int s_s3_meta_request_incoming_body(
     }
 
     if (meta_request->checksum_config.validate_response_checksum) {
-        /* This part's running checksums. Doing it here keeps the work on this connection's thread, with the
-         * data still hot from the socket read. Either, both, or neither may be running: one validates this
-         * part against its own checksum header, the other contributes this part to the whole-object checksum.
-         * They are separate because they need not use the same algorithm. */
+        /* Update whichever of this part's running checksums are active, while the data is still hot from the
+         * socket read on this connection's thread. The two are independent: validation_sum is present only
+         * when this part's response carried a checksum header of its own, combine_sum only when this part
+         * feeds the whole-object checksum. They are separate objects because those two checksums may not use
+         * the same algorithm. */
         struct aws_s3_checksum *validation_sum = request->request_level_running_response_sum;
         struct aws_s3_checksum *combine_sum = request->request_level_combine_sum;
 
