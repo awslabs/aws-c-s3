@@ -2868,6 +2868,9 @@ static void s_resume_token_ref_count_zero_callback(void *arg) {
     struct aws_s3_meta_request_resume_token *token = arg;
 
     aws_string_destroy(token->multipart_upload_id);
+    aws_string_destroy(token->etag);
+    aws_string_destroy(token->version_id);
+    aws_string_destroy(token->s3_object_last_modified);
 
     aws_mem_release(token->allocator, token);
 }
@@ -2946,6 +2949,68 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     }
 
     return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_etag(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->etag != NULL) {
+        return aws_byte_cursor_from_string(resume_token->etag);
+    }
+    return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_version_id(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->version_id != NULL) {
+        return aws_byte_cursor_from_string(resume_token->version_id);
+    }
+    return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->s3_object_last_modified != NULL) {
+        return aws_byte_cursor_from_string(resume_token->s3_object_last_modified);
+    }
+    return aws_byte_cursor_from_c_str("");
+}
+
+uint64_t aws_s3_meta_request_resume_token_object_size(const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->object_size;
+}
+
+uint64_t aws_s3_meta_request_resume_token_object_range_start(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->object_range_start;
+}
+
+uint64_t aws_s3_meta_request_resume_token_object_range_end(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->object_range_end;
+}
+
+uint64_t aws_s3_meta_request_resume_token_continuous_downloaded_bytes(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->continuous_downloaded_bytes;
+}
+
+uint64_t aws_s3_meta_request_resume_token_total_downloaded_bytes(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->total_downloaded_bytes;
+}
+
+uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->file_last_modified_epoch_ns;
 }
 
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */

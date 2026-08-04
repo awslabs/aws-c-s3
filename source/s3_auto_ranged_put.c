@@ -159,6 +159,9 @@ static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **resume_token);
 
+static struct aws_s3_meta_request_resume_token *s_s3_auto_ranged_put_build_resume_token_synced(
+    struct aws_s3_meta_request *meta_request);
+
 static int s_process_part_info_synced(const struct aws_s3_part_info *info, void *user_data) {
     struct aws_s3_auto_ranged_put *auto_ranged_put = user_data;
     struct aws_s3_meta_request *meta_request = &auto_ranged_put->base;
@@ -325,7 +328,9 @@ static int s_try_init_resume_state_from_persisted_data(
     auto_ranged_put->synced_data.num_parts_noop = 0;
     auto_ranged_put->synced_data.create_multipart_upload_sent = true;
     auto_ranged_put->synced_data.create_multipart_upload_completed = true;
-    auto_ranged_put->upload_id = aws_string_clone_or_reuse(allocator, resume_token->multipart_upload_id);
+    if (resume_token->multipart_upload_id) {
+        auto_ranged_put->upload_id = aws_string_new_from_string(allocator, resume_token->multipart_upload_id);
+    }
 
     struct aws_s3_list_parts_params list_parts_params = {
         .key = request_path,
@@ -369,6 +374,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .destroy = s_s3_meta_request_auto_ranged_put_destroy,
     .finish = aws_s3_meta_request_finish_default,
     .pause = s_s3_auto_ranged_put_pause,
+    .build_resume_token_synced = s_s3_auto_ranged_put_build_resume_token_synced,
 };
 
 /**
@@ -1859,6 +1865,30 @@ static void s_s3_auto_ranged_put_request_finished(
 
 /* NOTES: the implementation has been copy/pasted to `s_pause_meta_request_synced` for testing purpose, if changed made
  * here, please update the other function correspondingly. */
+
+/* Build an upload resume token from current synced state (called with the synced-data lock held).
+ * Returns NULL if there is no resumable state (unknown content length, or multipart upload not yet
+ * created) — resume must restart from the beginning. */
+static struct aws_s3_meta_request_resume_token *s_s3_auto_ranged_put_build_resume_token_synced(
+    struct aws_s3_meta_request *meta_request) {
+
+    struct aws_s3_auto_ranged_put *auto_ranged_put = meta_request->impl;
+
+    if (!auto_ranged_put->has_content_length || !auto_ranged_put->synced_data.create_multipart_upload_completed) {
+        return NULL;
+    }
+
+    struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
+    token->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
+    if (auto_ranged_put->upload_id) {
+        token->multipart_upload_id = aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
+    }
+    token->part_size = meta_request->part_size;
+    token->total_num_parts = auto_ranged_put->total_num_parts_from_content_length;
+    token->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
+    return token;
+}
+
 static int s_s3_auto_ranged_put_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
@@ -1890,17 +1920,7 @@ static int s_s3_auto_ranged_put_pause(
      * - complete MPU started - return success, generate token and try to cancel
      *   complete MPU
      */
-    if (auto_ranged_put->synced_data.create_multipart_upload_completed) {
-
-        *out_resume_token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
-
-        (*out_resume_token)->type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-        (*out_resume_token)->multipart_upload_id =
-            aws_string_clone_or_reuse(meta_request->allocator, auto_ranged_put->upload_id);
-        (*out_resume_token)->part_size = meta_request->part_size;
-        (*out_resume_token)->total_num_parts = auto_ranged_put->total_num_parts_from_content_length;
-        (*out_resume_token)->num_parts_completed = auto_ranged_put->synced_data.num_parts_completed;
-    }
+    *out_resume_token = s_s3_auto_ranged_put_build_resume_token_synced(meta_request);
 
     /**
      * Cancels the meta request using the PAUSED flag to avoid deletion of uploaded parts.
