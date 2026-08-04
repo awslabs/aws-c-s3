@@ -21,6 +21,9 @@ struct aws_s3_auto_ranged_get {
 
     struct aws_string *etag;
 
+    /* S3 Last-Modified header value, captured from discovery response for resume token */
+    struct aws_string *s3_object_last_modified;
+
     /* Estimated object stored part size based on ETag analysis */
     uint64_t estimated_object_stored_part_size;
     /* Number of parts stored in S3. We derive this from ETag, if ETag is not formatted as expected, this will be
@@ -52,6 +55,10 @@ struct aws_s3_auto_ranged_get {
          * Note this is inclusive: https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests
          * So if begin=0 and end=0 then 1 byte is being downloaded. */
         uint64_t object_range_end;
+
+        /* Full size of the S3 object, from discovery (the Content-Range total, or Content-Length
+         * when the request had no Range header). May be larger than the range being downloaded. */
+        uint64_t object_size;
 
         uint64_t first_part_size;
 

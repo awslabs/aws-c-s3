@@ -144,6 +144,7 @@ struct aws_s3_tester_client_options {
     uint32_t max_active_connections_override;
     void *factory_user_data;
     uint64_t memory_limit_in_bytes;
+    aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -153,6 +154,10 @@ struct aws_s3_tester_meta_request_options {
     struct aws_allocator *allocator;
 
     enum aws_s3_meta_request_type meta_request_type;
+
+    /* Optional. Passed through to aws_s3_meta_request_options.on_error_resume_token.
+     * Note: the callback receives the tester's user_data; tests should use their own statics. */
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
 
     /* Optional. When NULL, a message will attempted to be created by the meta request type specific options. */
     struct aws_http_message *message;

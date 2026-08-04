@@ -112,7 +112,18 @@ class ResponseConfig:
 
         content_length_set = False
         for header in data['headers'].items():
-            headers.append((header[0], str(header[1])))
+            header_value = str(header[1])
+            if "<request-range>" in header_value and self.request_headers is not None:
+                # Build the range part of a Content-Range header from the request's Range
+                # header ("bytes=A-B" -> "bytes A-B"), so one response file can serve
+                # correct Content-Range headers for every part.
+                for h in self.request_headers:
+                    if h[0].lower() == b"range":
+                        request_range = h[1].decode("utf-8").split("=")[1]
+                        header_value = header_value.replace(
+                            "<request-range>", "bytes " + request_range)
+                        break
+            headers.append((header[0], header_value))
             if header[0].lower() == "content-length":
                 content_length_set = True
 
@@ -431,6 +442,45 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
 
+    if parsed_path.path == "/get_object_pause_delay_part":
+        # 256 KiB object served in 64 KiB parts (4 parts). The part at offset 65536
+        # (part 2) is delayed so the test can pause while parts 1, 3, 4 have completed.
+        if start_range == 65536:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_pause_delay_part_3":
+        # Same 256 KiB object, but part 3 (offset 131072) is delayed: parts 1 and 2
+        # deliver sequentially, so a pause produces a gap-free 2-part token.
+        if start_range == 131072:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_pause_delay_first_part":
+        # Same 256 KiB object with the discovery part (offset 0) delayed, so a pause
+        # issued right after the request starts always lands before size discovery.
+        if start_range == 0:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_error_part_3":
+        # Same 256 KiB object, but part 3 (offset 131072) fails with 403 after a short
+        # delay (long enough for parts 1 and 2 to be delivered first).
+        if start_range == 131072:
+            return ResponseConfig("/get_object_error_part", request=request)
+        response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     response_config.generate_body_size = data_length
     return response_config
 
@@ -442,6 +492,18 @@ def handle_list_parts(parsed_path):
         else:
             return ResponseConfig("/multiple_list_parts_1")
     return ResponseConfig(parsed_path.path)
+
+
+def handle_upload_part(request, parsed_path):
+    if parsed_path.path == "/upload_part_error_part_3":
+        # Multipart upload where part 3 fails with 403 after a short delay
+        # (long enough for the other parts to complete first).
+        query = parse_qs(parsed_path.query)
+        part_number = query.get("partNumber", ["0"])[0]
+        if part_number == "3":
+            return ResponseConfig("/upload_part_error", request=request)
+        return ResponseConfig("/default", request=request)
+    return ResponseConfig(parsed_path.path, request=request)
 
 
 async def handle_mock_s3_request(wrapper, request):
@@ -458,6 +520,7 @@ async def handle_mock_s3_request(wrapper, request):
             request_type = S3Opts.CompleteMultipartUpload
     elif method == "PUT":
         request_type = S3Opts.UploadPart
+        response_config = handle_upload_part(request, parsed_path)
     elif method == "DELETE":
         request_type = S3Opts.AbortMultipartUpload
     elif method == "GET" or method == "HEAD":
