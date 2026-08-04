@@ -1366,7 +1366,7 @@ TEST_CASE(get_object_opaque_etag_mock_server) {
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* Mock server returns a 256 KiB object whose ETag is opaque (GCP style) and cannot be
+    /* Mock server returns a 256 KiB object whose ETag is opaque and cannot be
      * parsed into a part count. The download must still succeed using the fallback part size. */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag");
 
