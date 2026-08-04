@@ -2,7 +2,6 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
-#define _GNU_SOURCE /* NOLINT(bugprone-reserved-identifier) */
 
 #include "aws/s3/private/s3_auto_ranged_get.h"
 #include "aws/s3/private/s3_auto_ranged_put.h"
@@ -28,16 +27,7 @@
 #include <aws/io/socket.h>
 #include <aws/io/stream.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <inttypes.h>
-#include <linux/aio_abi.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-
-/* O_DIRECT is not available on all platforms */
-#ifndef O_DIRECT
-#    define O_DIRECT 0
-#endif
 
 #define ONE_SEC_IN_NS_P ((uint64_t)AWS_TIMESTAMP_NANOS)
 #define MAX_TIMEOUT_NS_P (60 * ONE_SEC_IN_NS_P)
@@ -198,8 +188,6 @@ int aws_s3_meta_request_init_base(
     AWS_PRECONDITION(meta_request);
 
     AWS_ZERO_STRUCT(*meta_request);
-
-    meta_request->recv_file_fd = -1;
 
     AWS_ASSERT(vtable->update);
     AWS_ASSERT(vtable->prepare_request);
@@ -725,12 +713,6 @@ static void s_s3_meta_request_destroy(void *user_data) {
         meta_request->recv_file = NULL;
         if (meta_request->recv_file_delete_on_failure) {
             /* If the meta request succeed, the file should be closed from finish call. So it must be failing. */
-            aws_file_delete(meta_request->recv_filepath);
-        }
-    } else if (meta_request->recv_file_fd >= 0) {
-        close(meta_request->recv_file_fd);
-        meta_request->recv_file_fd = -1;
-        if (meta_request->recv_file_delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
     } else if (meta_request->recv_file_direct_io && meta_request->recv_file_delete_on_failure) {
@@ -2554,23 +2536,6 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
 
         struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
         s_deliver_body_to_sink(meta_request, &response_body, write_offset, request);
-
-        aws_thread_id_t tid = aws_thread_current_thread_id();
-        /* Record thread ID for test verification */
-        size_t idx = (size_t)aws_atomic_fetch_add(&meta_request->parallel_write_count, 1);
-        if (idx < 16) {
-            meta_request->parallel_write_thread_ids[idx] = tid;
-        }
-        bool is_new = true;
-        for (size_t i = 0; i < idx && i < 16; i++) {
-            if (aws_thread_thread_id_equal(meta_request->parallel_write_thread_ids[i], tid)) {
-                is_new = false;
-                break;
-            }
-        }
-        if (is_new) {
-            aws_atomic_fetch_add(&meta_request->parallel_write_thread_count, 1);
-        }
     }
 
     /* Increment delivery counters and finish metrics (same as delivery task would do) */
@@ -3010,16 +2975,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         if (delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
-    } else if (meta_request->recv_file_fd >= 0) {
-        close(meta_request->recv_file_fd);
-        meta_request->recv_file_fd = -1;
-        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
-            aws_file_delete(meta_request->recv_filepath);
-        }
-    } else if (
-        meta_request->recv_file_direct_io && finish_result.error_code && meta_request->recv_file_delete_on_failure) {
-        /* O_DIRECT path has no FILE* to close, but still honor delete-on-failure */
-        aws_file_delete(meta_request->recv_filepath);
     }
 
     /* Fire pause/error resume-token callbacks before the general finish callback below,

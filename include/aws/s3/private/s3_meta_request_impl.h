@@ -393,15 +393,7 @@ struct aws_s3_meta_request {
     bool recv_file_direct_io;
     /* Base file position for O_DIRECT writes (from recv_file_position option) */
     uint64_t recv_file_base_position;
-    /* When >= 0, parallel pwrite() on connection threads (for CREATE_OR_REPLACE/CREATE_NEW only) */
-    int recv_file_fd;
-    /* Linux AIO context for async O_DIRECT writes (0 = not initialized) */
-    unsigned long aio_ctx;
 
-    /* Test instrumentation: track unique thread IDs used by parallel write tasks */
-    struct aws_atomic_var parallel_write_count; /* number of writes completed on parallel threads */
-    aws_thread_id_t parallel_write_thread_ids[16];
-    struct aws_atomic_var parallel_write_thread_count; /* number of unique threads seen */
     /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
      * existing file size for CREATE_OR_APPEND. The actual write offset for each part is
      * base_position + delivery_range_start. Only meaningful when recv_file_direct_io is true. */
