@@ -497,6 +497,14 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_size = data_length
         return response_config
 
+    if parsed_path.path == "/get_object_opaque_etag":
+        # 256 KiB object whose ETag is an opaque identifier that does not follow the
+        # S3 "<md5>-<num_parts>" format. Used to verify auto-ranged GET still works
+        # when the part count cannot be parsed.
+        response_config = ResponseConfig(parsed_path.path, request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     if parsed_path.path == "/get_object_error_part_3":
         # Same 256 KiB object, but part 3 (offset 131072) fails with 403 after a short
         # delay (long enough for parts 1 and 2 to be delivered first).

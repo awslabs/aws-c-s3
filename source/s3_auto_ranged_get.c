@@ -835,6 +835,8 @@ static void s_s3_auto_ranged_get_request_finished(
                     num_parts,
                     auto_ranged_get->estimated_object_stored_part_size);
             } else {
+                /* avoid leaking the error code */
+                aws_reset_error();
                 num_parts = 1;
                 /* Failed to parse ETags */
                 AWS_LOGF_WARN(
@@ -842,7 +844,6 @@ static void s_s3_auto_ranged_get_request_finished(
                     "id=%p Failed to parse ETags, fallback to default part size.",
                     (void *)meta_request);
                 auto_ranged_get->estimated_object_stored_part_size = g_default_part_size_fallback;
-                goto update_synced_data;
             }
             auto_ranged_get->num_stored_parts = num_parts;
         }
