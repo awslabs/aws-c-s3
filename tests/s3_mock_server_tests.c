@@ -1469,6 +1469,114 @@ TEST_CASE(get_object_mismatch_checksum_responses_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* Downloads a 256 KiB object in four 64 KiB parts, where the whole-object CRC32 is only advertised on
+ * the HEAD response. Each part's CRC is computed on its own connection and the four are combined, so a
+ * correct result proves the combined checksum equals the checksum of the concatenated object.
+ *
+ * `object_path` selects whether parts complete in order or with part 2 delayed. */
+static int s_test_multipart_download_checksum_combine(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor object_path) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+    /* All 262144 bytes must have been delivered, otherwise a passing checksum would be meaningless. */
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(multipart_download_checksum_combine_mock_server) {
+    (void)ctx;
+    return s_test_multipart_download_checksum_combine(
+        allocator, aws_byte_cursor_from_c_str("/get_object_checksum_combine"));
+}
+
+TEST_CASE(multipart_download_checksum_combine_out_of_order_mock_server) {
+    (void)ctx;
+    /* Part 2 is served slowly, so parts 3 and 4 finish first and must wait in the combine queue.
+     * Combining out of arrival order has to produce the same digest as combining in order. */
+    return s_test_multipart_download_checksum_combine(
+        allocator, aws_byte_cursor_from_c_str("/get_object_checksum_combine_out_of_order"));
+}
+
+/* A 64 KiB object that downloads as a single part, where the part response carries the whole-object
+ * CRC32 as its own checksum header with the correct value. That part is therefore both validated
+ * against its own header and folded into the whole-object checksum, and both must succeed. */
+TEST_CASE(download_checksum_single_part_with_part_header_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_single_part"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+    ASSERT_UINT_EQUALS(65536, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.
  * We trigger this by having the mock server delay 60 seconds before sending the response. */
 TEST_CASE(get_object_throughput_failure_mock_server) {
@@ -1838,7 +1946,7 @@ TEST_CASE(resume_after_finished_mock_server) {
  * Mock object: 256 KiB served in 64 KiB parts (4 parts). The mock server delays part 2
  * (offset 65536), so parts 1, 3 and 4 complete on the network while part 2 is stalled.
  * Only part 1 can be delivered (in-order delivery is blocked by the part 2 gap), so pausing
- * must produce a token with continues_downloaded_bytes == total_downloaded_bytes == 64 KiB:
+ * must produce a token with continuous_downloaded_bytes == total_downloaded_bytes == 64 KiB:
  * parts 3 and 4 were cancelled undelivered and their bytes must not be counted. */
 
 struct get_pause_token_mock_test_data {
@@ -1957,7 +2065,7 @@ TEST_CASE(get_pause_token_mock_server) {
     /* Only part 1 was delivered; parts 3, 4 completed on the network but were cancelled
      * undelivered at pause, so they must not be counted. In-order delivery keeps the two
      * counters equal. */
-    ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(64 * 1024, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_start(token));
     ASSERT_UINT_EQUALS(256 * 1024 - 1, aws_s3_meta_request_resume_token_object_range_end(token));
@@ -2071,7 +2179,7 @@ TEST_CASE(get_pause_sequential_token_mock_server) {
 
     struct aws_s3_meta_request_resume_token *token = test_data->resume_token;
     /* Parts 1 and 2 were delivered back to back: gap-free, so both counters are equal. */
-    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(4, aws_s3_meta_request_resume_token_total_num_parts(token));
     ASSERT_UINT_EQUALS(256 * 1024, aws_s3_meta_request_resume_token_object_size(token));
@@ -2185,7 +2293,7 @@ TEST_CASE(get_pause_before_discovery_mock_server) {
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_size(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_start(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_range_end(token));
-    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(token));
 
@@ -2283,7 +2391,7 @@ TEST_CASE(get_error_token_mock_server) {
     ASSERT_INT_EQUALS(AWS_S3_META_REQUEST_TYPE_GET_OBJECT, aws_s3_meta_request_resume_token_type(token));
     /* Parts 1 and 2 were delivered before part 3's failure (its response is delayed);
      * part 4 completed but was blocked from delivery by the part 3 gap. */
-    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(2 * 64 * 1024, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(4, aws_s3_meta_request_resume_token_total_num_parts(token));
     ASSERT_UINT_EQUALS(256 * 1024, aws_s3_meta_request_resume_token_object_size(token));
@@ -2450,7 +2558,7 @@ TEST_CASE(put_error_token_mock_server) {
 
     /* Download-only fields must be zero/empty on an upload token. */
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_object_size(token));
-    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continues_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token));
     ASSERT_UINT_EQUALS(0, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
     struct aws_byte_cursor etag = aws_s3_meta_request_resume_token_etag(token);
     ASSERT_UINT_EQUALS(0, etag.len);

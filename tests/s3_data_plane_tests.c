@@ -4994,6 +4994,146 @@ static int s_test_s3_round_trip_multipart_get_fc_header(struct aws_allocator *al
     return s_test_s3_round_trip_multipart_get_fc_helper(allocator, ctx, true);
 }
 
+/* Uploads an object that S3 stores a whole-object checksum for, then downloads it split into many parts, for
+ * every algorithm in the priority list.
+ *
+ * Two part sizes, because the upload and download have to be split differently. The upload needs S3 to end
+ * up holding a whole-object checksum rather than a composite one, while the download needs to be split into
+ * parts for those parts to be recombined into that checksum. A per-meta-request part size gives each one
+ * what it needs from a single client, and on a PUT it doubles as the multipart threshold.
+ *
+ * With validate_response_checksum set, the download discovers the object with a HEAD, which never carries
+ * x-amz-mp-parts-count, so the whole-object checksum is taken at the meta request level (a composite
+ * checksum is still rejected there, since its trailing "-N" makes the value the wrong length). Combinable
+ * algorithms then have each part digest its own body and fold the digests together when the meta request
+ * finishes; the rest fall back to feeding the running sum from the delivery thread in object order. Looping
+ * the whole priority list covers both branches.
+ *
+ * s_s3_test_validate_checksum asserts the whole-object checksum was actually validated, so a part that
+ * failed to contribute its digest fails the test rather than silently downgrading to unvalidated. */
+static int s_test_s3_multipart_get_full_object_checksum_helper(
+    struct aws_allocator *allocator,
+    void *ctx,
+    enum aws_s3_tester_full_object_checksum full_object_checksum) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Without an explicit full-object checksum, the object has to stay under the upload's multipart threshold
+     * so the upload is a single PutObject, which is what makes S3 store a whole-object checksum for every
+     * algorithm. With one, the upload can be a real multipart upload that declares the checksum itself. */
+    bool explicit_full_object_checksum = full_object_checksum != AWS_TEST_FOC_NONE;
+    uint32_t object_size_mb = explicit_full_object_checksum ? 10 : 1;
+    size_t upload_part_size = MB_TO_BYTES(5);
+    size_t download_part_size = explicit_full_object_checksum ? MB_TO_BYTES(1) : 64 * 1024;
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = upload_part_size,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_checksum_algo_priority_list); i++) {
+        enum aws_s3_checksum_algorithm algorithm = s_checksum_algo_priority_list[i];
+
+        if (explicit_full_object_checksum && !aws_checksum_algorithm_is_combinable(algorithm)) {
+            /* S3 only offers a full object checksum for a multipart upload with the CRCs. The very property
+             * that makes them combinable here is what lets S3 assemble one from the parts on its side. */
+            continue;
+        }
+
+        struct aws_byte_buf path_buf;
+        AWS_ZERO_STRUCT(path_buf);
+        char object_path_sprintf_buffer[128] = "";
+        snprintf(
+            object_path_sprintf_buffer,
+            sizeof(object_path_sprintf_buffer),
+            "/prefix/round_trip/test_multipart_get_foc_%d_%d.txt",
+            algorithm,
+            full_object_checksum);
+        ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+            allocator, &path_buf, aws_byte_cursor_from_c_str(object_path_sprintf_buffer)));
+        struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+        /*** PUT FILE ***/
+
+        struct aws_s3_tester_meta_request_options put_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .client = client,
+            .part_size = upload_part_size,
+            .checksum_algorithm = algorithm,
+            .validate_get_response_checksum = false,
+            .put_options =
+                {
+                    .object_size_mb = object_size_mb,
+                    .object_path_override = object_path,
+                    .full_object_checksum = full_object_checksum,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
+
+        /*** GET FILE ***/
+
+        struct aws_s3_tester_meta_request_options get_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .client = client,
+            .part_size = download_part_size,
+            .expected_validate_checksum_alg = algorithm,
+            .validate_get_response_checksum = true,
+            .get_options =
+                {
+                    .object_path = object_path,
+                },
+            .finish_callback = s_s3_test_validate_checksum,
+        };
+
+        struct aws_s3_meta_request_test_results out_results;
+        aws_s3_meta_request_test_results_init(&out_results, allocator);
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+        ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+        ASSERT_TRUE(out_results.did_validate);
+        ASSERT_UINT_EQUALS(algorithm, out_results.validation_algorithm);
+        /* Every byte must have been delivered, otherwise a passing checksum would be meaningless. */
+        ASSERT_UINT_EQUALS(MB_TO_BYTES((uint64_t)object_size_mb), out_results.received_body_size);
+
+        aws_s3_meta_request_test_results_clean_up(&out_results);
+        aws_byte_buf_clean_up(&path_buf);
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Whole-object checksum from a single PutObject, downloaded in 16 parts. Covers all algorithms. */
+AWS_TEST_CASE(test_s3_multipart_get_whole_object_checksum, s_test_s3_multipart_get_whole_object_checksum)
+static int s_test_s3_multipart_get_whole_object_checksum(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_multipart_get_full_object_checksum_helper(allocator, ctx, AWS_TEST_FOC_NONE);
+}
+
+/* Full-object checksum declared on a multipart upload, downloaded in 10 parts. S3 only supports this for the
+ * CRCs, which are exactly the combinable algorithms, so this variant only exercises the combine path. The
+ * non-combinable fallback is covered by test_s3_multipart_get_whole_object_checksum above, where a single
+ * PutObject gives S3 a whole-object checksum for any algorithm. */
+AWS_TEST_CASE(test_s3_multipart_get_full_object_checksum_header, s_test_s3_multipart_get_full_object_checksum_header)
+static int s_test_s3_multipart_get_full_object_checksum_header(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_multipart_get_full_object_checksum_helper(allocator, ctx, AWS_TEST_FOC_HEADER);
+}
+
+AWS_TEST_CASE(
+    test_s3_multipart_get_full_object_checksum_callback,
+    s_test_s3_multipart_get_full_object_checksum_callback)
+static int s_test_s3_multipart_get_full_object_checksum_callback(struct aws_allocator *allocator, void *ctx) {
+    return s_test_s3_multipart_get_full_object_checksum_helper(allocator, ctx, AWS_TEST_FOC_CALLBACK);
+}
+
 /* Test the multipart uploaded object was downloaded with same part size, which will download the object matches all the
  * parts and validate the parts checksum. */
 static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(

@@ -1014,6 +1014,15 @@ update_synced_data:
                     object_range_start,
                     object_range_end);
             }
+
+            /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding
+             * here also means every part dispatched afterwards sees the decision already made. */
+            if (meta_request->checksum_config.validate_response_checksum && error_code == AWS_ERROR_SUCCESS) {
+                if (aws_s3_meta_request_setup_checksum_combine_synced(
+                        meta_request, request, auto_ranged_get->synced_data.total_num_parts) != AWS_OP_SUCCESS) {
+                    error_code = aws_last_error_or_unknown();
+                }
+            }
         }
 
         switch (request->request_tag) {
@@ -1147,7 +1156,7 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
     /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
      * prefix and the total. A parallel-write delivery path will need to track the two
      * separately, diverging total (may have gaps) from continues (gap-free prefix). */
-    token->continues_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->continuous_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
     token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
 
     return token;

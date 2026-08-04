@@ -265,8 +265,20 @@ struct aws_s3_request {
     /* checksum found in the header of an individual get part http request */
     struct aws_byte_buf request_level_response_header_checksum;
 
-    /* running checksum of the response to an individual get part http request */
+    /* Running checksum used to validate this part against its own checksum header, which
+     * request_level_response_header_checksum holds the expected value for. NULL when the response carried no
+     * checksum header of its own. Its algorithm is whichever one that header named. */
     struct aws_s3_checksum *request_level_running_response_sum;
+
+    /* Running checksum used only to produce this part's digest for the meta request's whole-object combine.
+     * NULL when this part does not contribute to a combine.
+     *
+     * Kept separate from request_level_running_response_sum because the two answer to different algorithms:
+     * this one always uses the whole-object algorithm from the discovery response, while the validation sum
+     * uses whatever algorithm this part's own checksum header named. Nothing requires those to agree — an
+     * object can carry a whole-object CRC64NVME while its parts carry per-part CRC32 — and folding a digest
+     * of the wrong algorithm would silently corrupt the whole-object sum. */
+    struct aws_s3_checksum *request_level_combine_sum;
     /* The algorithm used to validate the checksum */
     enum aws_s3_checksum_algorithm validation_algorithm;
 
