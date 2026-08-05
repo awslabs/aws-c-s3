@@ -239,19 +239,19 @@ bool aws_checksum_algorithm_is_combinable(enum aws_s3_checksum_algorithm algorit
  * Folds the digest of one data block into `head`, so that `head` becomes the checksum of its own data
  * followed by that block, without re-scanning either:
  *
- *   head = checksum(block_head)                 (still running, not finalized)
- *   tail_digest = finalized checksum(block_tail)
+ *   head = checksum(block_head)
+ *   tail_digest = checksum_finalize(block_tail)
  *   aws_checksum_combine_digest(head, tail_digest, block_tail_length)
  *   -> head == checksum(block_head || block_tail)
  *
- * Taking a finalized digest rather than a live checksum lets the caller fold in a block long after the
+ * Taking a digest rather than a live checksum lets the caller fold in a block long after the
  * checksum that produced it is gone. `tail_length` is the length in bytes of the data that produced
  * `tail_digest`, not the digest size.
  *
- * `head`'s algorithm must satisfy aws_checksum_algorithm_is_combinable and `head` must not have been
- * finalized. Raises AWS_ERROR_UNSUPPORTED_OPERATION for a non-combinable algorithm,
- * AWS_ERROR_INVALID_STATE if `head` is already finalized, and AWS_ERROR_INVALID_ARGUMENT if
- * `tail_digest` is not exactly the algorithm's digest size.
+ * `head`'s algorithm must satisfy aws_checksum_algorithm_is_combinable.
+ * AWS_ERROR_UNSUPPORTED_OPERATION for a non-combinable algorithm,
+ * AWS_ERROR_INVALID_STATE if `head` is already finalized,
+ * AWS_ERROR_INVALID_ARGUMENT if `tail_digest` is not exactly the algorithm's digest size.
  */
 AWS_S3_API
 int aws_checksum_combine_digest(struct aws_s3_checksum *head, struct aws_byte_cursor tail_digest, uint64_t tail_length);
