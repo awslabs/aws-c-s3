@@ -596,11 +596,10 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
     return AWS_OP_SUCCESS;
 }
 
-int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_request_ptr) {
+void aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_request_ptr) {
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(out_request_ptr);
     *out_request_ptr = (size_t)metrics->crt_info_metrics.request_ptr;
-    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_request_metrics_get_thread_id(const struct aws_s3_request_metrics *metrics, aws_thread_id_t *thread_id) {
