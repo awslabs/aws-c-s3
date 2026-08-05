@@ -37,6 +37,7 @@ static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
+static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static void s_s3_meta_request_destroy(void *user_data);
 
 static void s_s3_meta_request_init_signing_date_time(
@@ -258,6 +259,14 @@ int aws_s3_meta_request_init_base(
         s_default_event_delivery_array_size,
         sizeof(struct aws_s3_meta_request_event));
 
+    aws_priority_queue_init_dynamic(
+        &meta_request->io_threaded_data.pending_put_prepare_queue,
+        meta_request->allocator,
+        0,
+        sizeof(struct aws_s3_pending_prepare_entry),
+        s_s3_pending_prepare_entry_pred);
+    meta_request->io_threaded_data.next_put_part_to_prepare = 1;
+
     *((size_t *)&meta_request->part_size) = part_size;
     *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
@@ -457,6 +466,7 @@ int aws_s3_meta_request_init_base(
     meta_request->body_callback = options->body_callback;
     meta_request->body_callback_ex = options->body_callback_ex;
     meta_request->finish_callback = options->finish_callback;
+    meta_request->on_error_resume_token = options->on_error_resume_token;
 
     /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
     meta_request->impl = impl;
@@ -517,8 +527,8 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
 int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
 
     *out_resume_token = NULL;
 
@@ -527,6 +537,46 @@ int aws_s3_meta_request_pause(
     }
 
     return meta_request->vtable->pause(meta_request, out_resume_token);
+}
+
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data) {
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(on_complete);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
+
+    if (!meta_request->vtable->build_resume_token_synced) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (meta_request->synced_data.async_pause_requested) {
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* Invoke callback immediately — pause already in progress */
+        on_complete(meta_request, NULL, AWS_ERROR_INVALID_STATE, user_data);
+        return AWS_OP_SUCCESS;
+    }
+
+    meta_request->synced_data.async_pause_requested = true;
+    meta_request->synced_data.pause_complete_callback = on_complete;
+    meta_request->synced_data.pause_complete_user_data = user_data;
+
+    /* Stop scheduling new work and cancel in-flight HTTP streams and pending buffer reservations */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_PAUSED);
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Schedule work processing so the update loop can wind down and finish */
+    aws_s3_client_schedule_process_work(meta_request->client);
+
+    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -671,6 +721,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
 
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->io_threaded_data.pending_put_prepare_queue) == 0);
+    aws_priority_queue_clean_up(&meta_request->io_threaded_data.pending_put_prepare_queue);
+
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
 
@@ -700,6 +753,12 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     AWS_PRECONDITION(*request_b);
 
     return (*request_a)->part_number > (*request_b)->part_number;
+}
+
+static int s_s3_pending_prepare_entry_pred(const void *a, const void *b) {
+    const struct aws_s3_pending_prepare_entry *entry_a = a;
+    const struct aws_s3_pending_prepare_entry *entry_b = b;
+    return entry_a->request->part_number > entry_b->request->part_number;
 }
 
 bool aws_s3_meta_request_update(
@@ -2229,6 +2288,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
+    uint64_t num_bytes_delivered = 0;
     uint64_t bytes_allowed_to_deliver = 0;
 
     /* BEGIN CRITICAL SECTION */
@@ -2345,6 +2405,10 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 /* 6. Completion tracking */
                 event.u.response_body.bytes_delivered += response_body.len;
                 meta_request->io_threaded_data.num_bytes_delivery_completed += response_body.len;
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    /* Only count bytes the sink actually accepted. */
+                    num_bytes_delivered += response_body.len;
+                }
 
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
@@ -2432,6 +2496,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
+        meta_request->synced_data.num_bytes_delivered += num_bytes_delivered;
         meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
@@ -2493,6 +2558,10 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request) {
     meta_request->vtable->finish(meta_request);
 }
 
+/* Used to reopen recv_filepath in read-only mode after the write handle has been closed, solely to
+ * query its last-modified time for the resume token (see aws_s3_meta_request_finish_default). */
+AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_reopen_mode, "rb");
+
 void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
@@ -2502,6 +2571,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_simple_completion_callback *pending_async_write_waker = NULL;
     void *pending_async_write_waker_user_data = NULL;
+
+    bool is_async_paused = false;
+    bool is_error = false;
+    aws_s3_meta_request_pause_complete_fn *pause_callback = NULL;
+    void *pause_user_data = NULL;
+    struct aws_s3_meta_request_resume_token *token = NULL;
 
     struct aws_s3_meta_request_result finish_result;
     AWS_ZERO_STRUCT(finish_result);
@@ -2516,6 +2591,28 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         }
 
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
+
+        /* Read pause state and build a resume token while still holding the lock. */
+        if (meta_request->synced_data.async_pause_requested) {
+            is_async_paused = true;
+            pause_callback = meta_request->synced_data.pause_complete_callback;
+            pause_user_data = meta_request->synced_data.pause_complete_user_data;
+        } else if (
+            meta_request->synced_data.finish_result.error_code != AWS_ERROR_SUCCESS &&
+            meta_request->synced_data.finish_result.error_code != AWS_ERROR_S3_PAUSED) {
+            is_error = true;
+        }
+
+        /* No error token when recv_file_delete_on_failure will discard the partial file on error —
+         * the token would describe deleted state. The on_error_resume_token callback still fires
+         * with a NULL token below. Async pause is unaffected as pause is not treated as an error.
+         **/
+        bool error_state_discarded = meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure;
+
+        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !error_state_discarded)) &&
+            meta_request->vtable->build_resume_token_synced != NULL) {
+            token = meta_request->vtable->build_resume_token_synced(meta_request);
+        }
 
         /* Clean out the pending-stream-to-caller priority queue*/
         while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
@@ -2565,10 +2662,41 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
-        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
+
+        bool delete_on_failure = finish_result.error_code && finish_result.error_code != AWS_ERROR_S3_PAUSED &&
+                                 meta_request->recv_file_delete_on_failure;
+
+        /* Capture the file's last-modified time for the resume token. This must happen after the
+         * write handle is closed so the mtime reflects all written data. */
+        if (token != NULL && !delete_on_failure) {
+            FILE *reopened_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_reopen_mode);
+            if (reopened_file != NULL) {
+                uint64_t last_modified_ns = 0;
+                if (aws_file_get_last_modified_epoch(reopened_file, &last_modified_ns) == AWS_OP_SUCCESS) {
+                    token->file_last_modified_epoch_ns = last_modified_ns;
+                }
+                fclose(reopened_file);
+            }
+        }
+
+        if (delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
     }
+
+    /* Fire pause/error resume-token callbacks before the general finish callback below,
+     * so callers see the resume token before the operation is reported as complete.
+     * Both callbacks fire exactly once whenever registered — bindings may wrap them in
+     * futures, so skipping the invocation could deadlock the caller. A NULL token means
+     * no resumable state was captured. */
+    if (is_error && meta_request->on_error_resume_token) {
+        meta_request->on_error_resume_token(meta_request, token, finish_result.error_code, meta_request->user_data);
+    }
+    if (is_async_paused && pause_callback != NULL) {
+        /* Token may be NULL if the request type has no resumable state — resume restarts from the beginning. */
+        pause_callback(meta_request, token, AWS_ERROR_SUCCESS, pause_user_data);
+    }
+    token = aws_s3_meta_request_resume_token_release(token);
 
     while (!aws_linked_list_empty(&release_request_list)) {
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);
@@ -2653,7 +2781,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If using async-writes, call function which fills the buffer and/or hits EOF  */
     if (meta_request->request_body_using_async_writes == true) {
+        if (offset < meta_request->io_threaded_data.next_read_offset) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Async-write read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+                (void *)meta_request,
+                meta_request->io_threaded_data.next_read_offset,
+                offset);
+            aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+            return synchronous_read_future;
+        }
+
         bool eof = s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer);
+        meta_request->io_threaded_data.next_read_offset = offset + buffer->len;
         aws_future_bool_set_result(synchronous_read_future, eof);
         return synchronous_read_future;
     }
@@ -2662,6 +2802,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_input_stream *synchronous_stream =
         aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(synchronous_stream);
+
+    /* Non-parallel body sources require reads in increasing offset order.
+     * If a read arrives below the last offset seen, parts were prepared out of order. */
+    if (offset < meta_request->io_threaded_data.next_read_offset) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Sequential stream read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+            (void *)meta_request,
+            meta_request->io_threaded_data.next_read_offset,
+            offset);
+        aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+        return synchronous_read_future;
+    }
 
     /* Keep calling read() until we fill the buffer, or hit EOF */
     struct aws_stream_status status = {.is_end_of_stream = false, .is_valid = true};
@@ -2679,6 +2832,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         }
     }
 
+    meta_request->io_threaded_data.next_read_offset = offset;
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:

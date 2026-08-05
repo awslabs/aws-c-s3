@@ -124,6 +124,11 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
+    /* Optional. Build a resume token from current synced state; called with the synced-data lock held
+     * when a pause was requested (or an error occurred and on_error_resume_token is set).
+     * May return NULL to indicate no resumable state (caller must restart from the beginning). */
+    struct aws_s3_meta_request_resume_token *(*build_resume_token_synced)(struct aws_s3_meta_request *meta_request);
+
 #ifdef AWS_C_S3_ENABLE_TEST_STUBS
     /********************* TEST ONLY STUB **************************/
     /* A stub to the update implementation from meta request with the lock held. Only for tests. */
@@ -184,6 +189,8 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
     aws_s3_meta_request_finish_fn *finish_callback;
+
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
@@ -223,6 +230,13 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
+        /* Total number of response-body bytes successfully delivered to the caller's sink
+         * (file or body callback), in order with no gaps. Used to build the download resume
+         * token on pause/error.
+         * TODO: delivery is strictly sequential today, so this is both the contiguous prefix and the total; a future
+         * parallel-write delivery path will need to track the two separately. */
+        uint64_t num_bytes_delivered;
+
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
          * If `event_delivery_task_scheduled` is true, then this task is scheduled.
@@ -245,6 +259,12 @@ struct aws_s3_meta_request {
 
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
+
+        /* Pause state (see aws_s3_meta_request_pause_async). Set once when a pause is requested;
+         * consumed during finish to build a resume token and fire the pause callback. */
+        uint32_t async_pause_requested : 1;
+        aws_s3_meta_request_pause_complete_fn *pause_complete_callback;
+        void *pause_complete_user_data;
 
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;
@@ -305,6 +325,20 @@ struct aws_s3_meta_request {
         /* Total number of bytes that have been attempted to be delivered. (Will equal the sum of succeeded and
          * failed.)*/
         uint64_t num_bytes_delivery_completed;
+
+        /* Priority queue of requests that have acquired their buffer ticket but must wait
+         * for earlier parts to be dispatched for prepare first. This ensures sequential
+         * input stream reads happen in part-number order even when buffer pool reservations
+         * complete out of order.
+         * Note: each element is the pending request, callback to the next state and some user data
+         * (aws_s3_pending_prepare_entry). */
+        struct aws_priority_queue pending_put_prepare_queue;
+
+        /* Next part number that should be dispatched from pending_put_prepare_queue. */
+        uint32_t next_put_part_to_prepare;
+
+        /* Expected offset for the next sequential stream read. Used to detect out-of-order reads. */
+        uint64_t next_read_offset;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
@@ -336,6 +370,14 @@ struct aws_s3_meta_request {
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
+};
+
+/* Entry in the pending_put_prepare_queue. Holds a request that has acquired its buffer
+ * ticket but must wait for earlier parts to dispatch for prepare first. */
+struct aws_s3_pending_prepare_entry {
+    struct aws_s3_request *request;
+    aws_s3_meta_request_prepare_request_callback_fn *callback;
+    void *user_data;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */

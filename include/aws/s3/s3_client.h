@@ -257,6 +257,21 @@ typedef void(aws_s3_meta_request_shutdown_fn)(void *user_data);
 typedef void(aws_s3_client_shutdown_complete_callback_fn)(void *user_data);
 
 /**
+ * Callback for async pause completion or on-error resume token delivery.
+ * Delivers the resume token once the meta request finishes.
+ *
+ * @param meta_request The meta request that was paused or failed.
+ * @param resume_token The resume token (NULL if pause failed). Caller must acquire to keep.
+ * @param error_code AWS_ERROR_SUCCESS if paused, or the error code that caused the failure.
+ * @param user_data User data passed to pause_async or from meta request options.
+ */
+typedef void(aws_s3_meta_request_pause_complete_fn)(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token *resume_token,
+    int error_code,
+    void *user_data);
+
+/**
  * Optional callback, for you to provide the full object checksum after the object was read.
  * Client will NOT check the checksum provided before sending it to the server.
  *
@@ -1057,6 +1072,20 @@ struct aws_s3_meta_request_options {
     /* When set, this will cap the number of active connections for the meta request. When 0, the client will determine
      * it based on client side settings. (Recommended) */
     uint32_t max_active_connections_override;
+
+    /**
+     * Optional.
+     * Callback invoked with a resume token when a meta request fails unexpectedly.
+     * Allows persisting state for later resume without re-transferring completed parts.
+     * Supported for both upload (PUT) and download (GET) meta requests.
+     * Uses the same user_data as other callbacks.
+     * The token is NULL when no resumable state was captured.
+     * WARNING: for a file download with recv_file_delete_on_failure, the deletion is
+     * respected — the partial file is deleted on error, leaving nothing to resume on,
+     * and this callback fires with a NULL token. Do not set recv_file_delete_on_failure
+     * if you intend to resume from this callback's token.
+     */
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
 };
 
 /* Result details of a meta request.
@@ -1278,7 +1307,10 @@ AWS_S3_API
 void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request);
 
 /**
- * Note: pause is currently only supported on upload requests.
+ * Note: this synchronous pause only works for uploads; calling it on any other
+ * meta request type fails with AWS_ERROR_UNSUPPORTED_OPERATION. To pause a
+ * download, use aws_s3_meta_request_pause_async() instead (which supports both
+ * uploads and downloads).
  * In order to pause an ongoing upload, call aws_s3_meta_request_pause() that
  * will return resume token. Token can be used to query the state of operation
  * at the pausing time.
@@ -1307,6 +1339,25 @@ AWS_S3_API
 int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token);
+
+/**
+ * Asynchronously pause a meta request. The on_complete callback fires once all
+ * in-flight work has completed and the resume token is ready.
+ *
+ * For download (GET) meta requests, this waits for file writes to flush before
+ * capturing the token. For upload (PUT) meta requests, this waits for in-flight
+ * parts to complete.
+ *
+ * @param meta_request The meta request to pause.
+ * @param on_complete Callback invoked with the resume token once pause is complete.
+ * @param user_data User data for the callback.
+ * @return AWS_OP_SUCCESS if pause was initiated, or AWS_OP_ERR.
+ */
+AWS_S3_API
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data);
 
 /*
  * Options to construct upload resume token.
@@ -1354,38 +1405,151 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_releas
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Type of resume token.
+ * A resume token is produced by pausing a meta request (aws_s3_meta_request_pause_async(),
+ * or the on_error_resume_token callback) and describes how far the operation got.
+ * The same opaque type is used for both upload (PUT) and download (GET) tokens; use
+ * aws_s3_meta_request_resume_token_type() to tell them apart. The getters below note
+ * which token type populates each field. Getters read from the other token type return
+ * 0 (numeric) or an empty cursor (string).
+ */
+
+/*
+ * Type of the operation this token was created from.
+ * Valid for all tokens: AWS_S3_META_REQUEST_TYPE_PUT_OBJECT for upload tokens,
+ * AWS_S3_META_REQUEST_TYPE_GET_OBJECT for download tokens.
  */
 AWS_S3_API
 enum aws_s3_meta_request_type aws_s3_meta_request_resume_token_type(
     struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Part size associated with operation.
+ * Part size the operation was using. Always set for upload and download tokens.
+ * Upload: the size of each uploaded part.
+ * Download: the nominal size of each ranged GET (the first and last parts may be
+ * smaller).
  */
 AWS_S3_API
 uint64_t aws_s3_meta_request_resume_token_part_size(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Total num parts associated with operation.
+ * Total number of parts the operation was split into. Always set for upload and
+ * download tokens.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_total_num_parts(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Num parts completed.
+ * Number of parts that completed before the pause.
+ * Upload: number of parts uploaded. During resume it is used for sanity checking
+ * against uploads on the S3 side: if the upload id no longer exists (already resumed
+ * using this token, or pause was called after the upload completed) and this equals
+ * total_num_parts, resume becomes a noop.
+ * Download: number of parts successfully fetched at pause time.
  */
 AWS_S3_API
 size_t aws_s3_meta_request_resume_token_num_parts_completed(struct aws_s3_meta_request_resume_token *resume_token);
 
 /*
- * Upload id associated with operation.
- * Only valid for tokens returned from upload operation. For all other operations
- * this will return empty.
+ * Multipart upload id of the paused upload.
+ * Upload tokens only; empty cursor for download tokens.
  */
 AWS_S3_API
 struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     struct aws_s3_meta_request_resume_token *resume_token);
+
+/* TODO: the download token is currently not supported to resume on (no public constructor exists to
+ * build a GET meta request from an externally-provided download resume token). Until that lands, the
+ * alternative is for the caller to issue a new ranged GET manually, using
+ * aws_s3_meta_request_resume_token_continuous_downloaded_bytes() (offset from object_range_start) to the
+ * end of the original download (object_range_end, or object_size - 1 for an unranged download) as the
+ * new Range, so only the undelivered bytes are re-fetched. */
+
+/*
+ * ETag of the S3 object being downloaded, captured from the first response.
+ * Download tokens only; empty cursor for upload tokens.
+ * Also empty if the download was paused before the first response arrived.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_etag(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Version ID of the S3 object being downloaded.
+ * Download tokens only; empty cursor for upload tokens.
+ * Optional: empty when the bucket is unversioned or the version id was not captured.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_version_id(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Last-Modified of the S3 object being downloaded, in HTTP-date format
+ * (RFC 9110 §5.6.7, e.g. "Wed, 09 Oct 2024 22:28:00 GMT"),
+ * captured from the first response. The exact string in the response header.
+ * Download tokens only; empty cursor for upload tokens.
+ * Optional: empty if the value was not captured before the pause.
+ */
+AWS_S3_API
+struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Total size of the S3 object being downloaded, regardless of any Range header on
+ * the request (for a ranged download this is larger than the range being fetched).
+ * Download tokens only; 0 for upload tokens.
+ * 0 if the download was paused before the object size was discovered.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_object_size(const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Absolute byte offset in the object where the download's range starts.
+ * 0 for a download without a Range header.
+ * Download tokens only; 0 for upload tokens.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_object_range_start(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Absolute byte offset in the object where the download's range ends (inclusive).
+ * For a download without a Range header this is object size - 1.
+ * Download tokens only; 0 for upload tokens.
+ * 0 if the download was paused before the object size was discovered.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_object_range_end(const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Number of bytes downloaded continuously from the start of the range, with no
+ * gaps. Everything before this offset (relative to object_range_start) has been
+ * downloaded.
+ * Download tokens only; 0 for upload tokens.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_continuous_downloaded_bytes(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Total number of bytes downloaded before the pause. May be greater than
+ * continuous_downloaded_bytes when parts completed out of order, leaving gaps.
+ * Equals continuous_downloaded_bytes when delivery was strictly in order.
+ * Download tokens only; 0 for upload tokens.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_total_downloaded_bytes(
+    const struct aws_s3_meta_request_resume_token *resume_token);
+
+/*
+ * Last-modified time of the local receive file (nanoseconds since the Unix epoch),
+ * captured after the file handle was closed during the pause.
+ * Download tokens only, and only when the download was writing to a file
+ * (recv_filepath); 0 for upload tokens, downloads that deliver via body callback,
+ * or when the timestamp could not be queried.
+ */
+AWS_S3_API
+uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(
+    const struct aws_s3_meta_request_resume_token *resume_token);
 
 /**
  * Add a reference, keeping this object alive.
