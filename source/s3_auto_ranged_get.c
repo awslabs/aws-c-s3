@@ -623,8 +623,8 @@ static int s_discover_object_range_and_size(
                 break;
             }
 
-            /* if the inital message had a ranged header, there should also be a Content-Range header that specifies the
-             * object range and total object size. Otherwise, the size and range should be equal to the
+            /* if the initial message had a ranged header, there should also be a Content-Range header that specifies
+             * the object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_size = content_length;
