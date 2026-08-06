@@ -54,6 +54,22 @@ struct aws_s3_prepare_request_payload {
     void *user_data;
 };
 
+/* One part's contribution to the meta request's whole-object checksum. Lives in
+ * aws_s3_meta_request.combine_slots at index (part_number - 1).
+ *
+ * Deliberately plain data: it owns nothing and points at nothing, so its lifetime is the meta
+ * request's and is independent of the request. That is what lets a request tear down its own running
+ * checksums at stream completion while its contribution to the whole-object checksum outlives it. */
+struct aws_s3_combine_slot {
+    /* Length in bytes of the part body the digest covers. */
+    uint64_t length;
+    /* Raw (not base64) digest of the part body, `digest_len` bytes. */
+    uint8_t digest[AWS_S3_COMBINABLE_DIGEST_MAX_LEN];
+    /* Zero until this part records its digest. A slot still zero when the meta request finishes means
+     * the part never completed, so the whole-object checksum cannot be assembled. */
+    size_t digest_len;
+};
+
 /* An event to be delivered on the meta-request's io_event_loop thread. */
 struct aws_s3_meta_request_event {
     enum aws_s3_meta_request_event_type {
@@ -352,6 +368,23 @@ struct aws_s3_meta_request {
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
 
+    /* True when meta_request_level_running_response_sum uses an algorithm that aws_checksum_combine supports
+     * (the CRCs). In that case each part computes a digest of its own body on its connection's thread and
+     * records it in combine_slots, and the whole-object sum is assembled from those digests with an O(1)
+     * combine per part when the meta request finishes, so no thread re-reads the body. Otherwise the delivery
+     * thread feeds bytes into the running sum directly, which requires delivery to be in object order. */
+    bool meta_request_level_checksum_combinable;
+
+    /* Per-part digests will be folded into meta_request_level_running_response_sum, indexed by
+     * (part_number - 1). NULL unless meta_request_level_checksum_combinable is true.
+     *
+     * Not protected by the synced data lock, and does not need to be: the array is allocated once, before any
+     * part is dispatched, and never resized, so slot addresses are stable; each part writes only its own slot
+     * and touches no shared bookkeeping. */
+    struct aws_s3_combine_slot *combine_slots;
+    /* Number of entries in combine_slots. Zero when combine_slots is NULL. */
+    uint32_t combine_slot_count;
+
     /* The receiving file handler */
     FILE *recv_file;
     struct aws_string *recv_filepath;
@@ -481,6 +514,26 @@ AWS_S3_API
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
+
+/* Decides how the whole-object response checksum will be built, once the discovery response has told us which
+ * algorithm the object uses and how many parts it has. Call after aws_s3_check_headers_for_checksum() has run
+ * at the meta request level, before any part is dispatched, with the meta request's synced data lock HELD.
+ *
+ * For the CRCs, each part checksums its own body on its own connection's thread and records the digest in
+ * meta_request->combine_slots, which this function allocates. The digests are folded together with an O(1)
+ * combine per part when the meta request finishes, so no thread ever re-reads the object. Everything else
+ * falls back to feeding the running sum from the delivery thread.
+ *
+ * `discovery_request` is the request whose response headers were just inspected. If it carried body bytes of
+ * its own (a partNumber=1 GET rather than a HEAD), its digest is computed here, since its body may arrive before
+ * the algorithm was known.
+ *
+ * Only worth calling for multipart downloads; with a single request there are no parts to combine. */
+AWS_S3_API
+int aws_s3_meta_request_setup_checksum_combine_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *discovery_request,
+    uint32_t total_num_parts);
 
 /* Add an event for delivery on the meta-request's io_event_loop thread.
  * These events usually correspond to callbacks that must fire sequentially and non-overlapping,

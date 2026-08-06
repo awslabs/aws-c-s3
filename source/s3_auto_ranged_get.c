@@ -1015,6 +1015,15 @@ update_synced_data:
                     object_range_start,
                     object_range_end);
             }
+
+            /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding
+             * here also means every part dispatched afterwards sees the decision already made. */
+            if (meta_request->checksum_config.validate_response_checksum && error_code == AWS_ERROR_SUCCESS) {
+                if (aws_s3_meta_request_setup_checksum_combine_synced(
+                        meta_request, request, auto_ranged_get->synced_data.total_num_parts) != AWS_OP_SUCCESS) {
+                    error_code = aws_last_error_or_unknown();
+                }
+            }
         }
 
         switch (request->request_tag) {

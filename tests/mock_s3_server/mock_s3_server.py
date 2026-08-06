@@ -442,6 +442,31 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
     if parsed_path.path == "/get_object_modified":
         return handle_get_object_modified(start_range, end_range, request)
 
+    if parsed_path.path == "/get_object_checksum_single_part":
+        # 64 KiB object that downloads as a single part, where the part response carries the
+        # whole-object CRC32 as its own checksum header (correct value, so per-part validation
+        # passes). Exercises a part being both validated against its own header and folded into
+        # the whole-object checksum.
+        if head_request:
+            return ResponseConfig("/get_object_checksum_single_part_head", request=request)
+        response_config = ResponseConfig("/get_object_checksum_single_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path in ("/get_object_checksum_combine", "/get_object_checksum_combine_out_of_order"):
+        # 256 KiB object of repeated 'a'. The whole-object CRC32 is advertised on the HEAD response only,
+        # the way real S3 does for a single-part upload: ranged part responses carry no checksum header.
+        # Validation can therefore only succeed by combining the per-part CRCs.
+        if head_request:
+            return ResponseConfig("/get_object_checksum_combine_head", request=request)
+        if parsed_path.path == "/get_object_checksum_combine_out_of_order" and start_range == 65536:
+            # Delay part 2 so parts 3 and 4 complete first and have to wait their turn to combine.
+            response_config = ResponseConfig("/get_object_checksum_combine_slow_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_checksum_combine_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     if parsed_path.path == "/get_object_pause_delay_part":
         # 256 KiB object served in 64 KiB parts (4 parts). The part at offset 65536
         # (part 2) is delayed so the test can pause while parts 1, 3, 4 have completed.
