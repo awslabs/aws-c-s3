@@ -1,0 +1,96 @@
+name: Check ABI compliance
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: check-abi-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILDER_VERSION: v0.9.93
+  BUILDER_SOURCE: releases
+  BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
+  PACKAGE_NAME: aws-c-s3
+  RUN: ${{ github.run_id }}-${{ github.run_number }}
+  CRT_CI_ROLE: ${{ secrets.CRT_CI_ROLE_ARN }}
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions:
+  id-token: write
+
+jobs:
+  check-abi:
+    name: check-abi
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CRT_CI_ROLE }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ libssl-dev abi-compliance-checker abi-dumper universal-ctags
+          python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+          chmod a+x builder
+
+      - name: Build base and head refs
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: |
+          git worktree add /tmp/base "$BASE_REF"
+
+          # build head and base in parallel; artifacts land in <repo>/build/install
+          ./builder build -p ${{ env.PACKAGE_NAME }} \
+            --cmake-extra=-DBUILD_SHARED_LIBS=ON \
+            --cmake-extra=-DBUILD_TESTING=OFF \
+            --cmake-extra="-DCMAKE_C_FLAGS=-g -Og" \
+            run_tests=false &
+          pid_head=$!
+
+          ( cd /tmp/base && ${{ github.workspace }}/builder build -p ${{ env.PACKAGE_NAME }} \
+            --cmake-extra=-DBUILD_SHARED_LIBS=ON \
+            --cmake-extra=-DBUILD_TESTING=OFF \
+            --cmake-extra="-DCMAKE_C_FLAGS=-g -Og" \
+            run_tests=false ) &
+          pid_base=$!
+
+          wait $pid_head
+          wait $pid_base
+
+      - name: Check ABI compliance
+        env:
+          HEAD_INSTALL: ${{ github.workspace }}/build/install
+          BASE_INSTALL: /tmp/base/build/install
+          OUT_DIR: ${{ github.workspace }}/abi-report
+        run: bash codebuild/check-abi.sh
+
+      - name: Emit summary
+        if: always()
+        run: |
+          REPORT_DIR="${{ github.workspace }}/abi-report"
+          if [[ -f "$REPORT_DIR/summary.md" ]]; then
+            cat "$REPORT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Check ABI compliance: failed before producing a report" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ -f "$REPORT_DIR/compat_report.html" ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "---" >> "$GITHUB_STEP_SUMMARY"
+            echo "## ABI compliance report" >> "$GITHUB_STEP_SUMMARY"
+            # Extract body content only - GitHub step summary expects a fragment,
+            # not a full HTML document. Sending the full file leaks DOCTYPE and
+            # outer tags as visible text.
+            sed -n '/<body/,/<\/body>/p' "$REPORT_DIR/compat_report.html" \
+              | sed 's/<body[^>]*>//;s/<\/body>//' >> "$GITHUB_STEP_SUMMARY"
+          fi
