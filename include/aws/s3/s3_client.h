@@ -226,9 +226,6 @@ struct aws_s3_meta_request_progress {
     /* Bytes transferred since the previous progress update */
     uint64_t bytes_transferred;
 
-    /* Total bytes transferred so far across all progress updates */
-    uint64_t total_bytes_transferred;
-
     /* Length of the entire meta request operation */
     uint64_t content_length;
 };
@@ -289,8 +286,8 @@ typedef struct aws_string *(aws_s3_meta_request_full_object_checksum_fn)(struct 
                                                                          void *user_data);
 
 enum aws_s3_meta_request_tls_mode {
-    AWS_MR_TLS_DISABLED,
     AWS_MR_TLS_ENABLED,
+    AWS_MR_TLS_DISABLED,
 };
 
 enum aws_s3_meta_request_compute_content_md5 {
@@ -316,8 +313,8 @@ enum aws_s3_checksum_algorithm {
 
 enum aws_s3_checksum_location {
     AWS_SCL_NONE = 0,
-    AWS_SCL_TRAILER,
     AWS_SCL_HEADER,
+    AWS_SCL_TRAILER,
 };
 
 enum aws_s3_recv_file_options {
@@ -1812,7 +1809,7 @@ int aws_s3_request_metrics_get_connection_id(const struct aws_s3_request_metrics
 
 /* Get the pointer to the request that attempt was made from. Always available. */
 AWS_S3_API
-void aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_request_ptr);
+int aws_s3_request_metrics_get_request_ptr(const struct aws_s3_request_metrics *metrics, size_t *out_request_ptr);
 
 /* Get the thread ID of the thread that request was made from. AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised if
  * data not available */
