@@ -1353,6 +1353,48 @@ TEST_CASE(get_object_modified_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+TEST_CASE(get_object_opaque_etag_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* Mock server returns a 256 KiB object whose ETag is opaque and cannot be
+     * parsed into a part count. The download must still succeed using the fallback part size. */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag");
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(get_object_invalid_responses_mock_server) {
     (void)ctx;
 
@@ -1461,6 +1503,114 @@ TEST_CASE(get_object_mismatch_checksum_responses_mock_server) {
 
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
     ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Downloads a 256 KiB object in four 64 KiB parts, where the whole-object CRC32 is only advertised on
+ * the HEAD response. Each part's CRC is computed on its own connection and the four are combined, so a
+ * correct result proves the combined checksum equals the checksum of the concatenated object.
+ *
+ * `object_path` selects whether parts complete in order or with part 2 delayed. */
+static int s_test_multipart_download_checksum_combine(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor object_path) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+    /* All 262144 bytes must have been delivered, otherwise a passing checksum would be meaningless. */
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(multipart_download_checksum_combine_mock_server) {
+    (void)ctx;
+    return s_test_multipart_download_checksum_combine(
+        allocator, aws_byte_cursor_from_c_str("/get_object_checksum_combine"));
+}
+
+TEST_CASE(multipart_download_checksum_combine_out_of_order_mock_server) {
+    (void)ctx;
+    /* Part 2 is served slowly, so parts 3 and 4 finish first and must wait in the combine queue.
+     * Combining out of arrival order has to produce the same digest as combining in order. */
+    return s_test_multipart_download_checksum_combine(
+        allocator, aws_byte_cursor_from_c_str("/get_object_checksum_combine_out_of_order"));
+}
+
+/* A 64 KiB object that downloads as a single part, where the part response carries the whole-object
+ * CRC32 as its own checksum header with the correct value. That part is therefore both validated
+ * against its own header and folded into the whole-object checksum, and both must succeed. */
+TEST_CASE(download_checksum_single_part_with_part_header_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_single_part"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+    ASSERT_UINT_EQUALS(65536, out_results.received_body_size);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
