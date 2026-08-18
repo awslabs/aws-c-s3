@@ -26,9 +26,9 @@ python3 test_helper.py clean
 * Create `<BUCKET_NAME>` in us-west-2.
   + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
   + Upload files:
-    - `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted fille
-    - `pre-existing-10MB-aes256` [SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/specifying-s3-encryption.html) encrypted fille
-    - `pre-existing-10MB-kms` [SSE-KMS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html) encrypted fille
+    - `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted file
+    - `pre-existing-10MB-aes256` [SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/specifying-s3-encryption.html) encrypted file
+    - `pre-existing-10MB-kms` [SSE-KMS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html) encrypted file
     - `pre-existing-10MB`
     - `pre-existing-1MB`
     - `pre-existing-1MB-@`

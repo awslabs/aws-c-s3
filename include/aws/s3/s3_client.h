@@ -695,7 +695,7 @@ struct aws_s3_client_config {
      */
     aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
 
-    /* User data thats passed into pool factory. */
+    /* User data that's passed into pool factory. */
     void *buffer_pool_user_data;
 };
 

@@ -576,11 +576,11 @@ static bool s_should_trim_for_reserve_synced(
     }
 
     size_t primary_overallocation = aws_sub_size_saturating(buffer_pool->primary_allocated, buffer_pool->primary_used);
-    /* Reserved can be more tha allocated */
+    /* Reserved can be more than allocated */
     primary_overallocation = aws_sub_size_saturating(primary_overallocation, buffer_pool->primary_reserved);
     size_t special_overallocation =
         aws_sub_size_saturating(buffer_pool->special_blocks_allocated, buffer_pool->special_blocks_used);
-    /* Reserved can be more tha allocated */
+    /* Reserved can be more than allocated */
     special_overallocation = aws_sub_size_saturating(special_overallocation, buffer_pool->special_blocks_reserved);
 
     size_t total_overallocation = aws_add_size_saturating(special_overallocation, primary_overallocation);
