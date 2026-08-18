@@ -334,7 +334,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester);
 
-/* Wait forthe correct number of aws_s3_tester_notify_meta_request_shutdown to be called. */
+/* Wait for the correct number of aws_s3_tester_notify_meta_request_shutdown to be called. */
 void aws_s3_tester_wait_for_meta_request_shutdown(struct aws_s3_tester *tester);
 
 /* Notify the tester that a meta request has finished. */
@@ -483,7 +483,7 @@ int aws_s3_tester_validate_put_object_results(
 void aws_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester);
 
 /*
- * Value to populate test stream with. Useful for cases where we need to verify that cheksums fail.
+ * Value to populate test stream with. Useful for cases where we need to verify that checksums fail.
  */
 enum aws_s3_test_stream_value {
     TEST_STREAM_VALUE_1,
@@ -537,7 +537,7 @@ extern const struct aws_byte_cursor g_put_object_prefix;
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 extern struct aws_byte_cursor g_test_bucket_name;
-/* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public
  */
 extern struct aws_byte_cursor g_test_public_bucket_name;

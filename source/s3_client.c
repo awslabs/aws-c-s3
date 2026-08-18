@@ -94,7 +94,7 @@ static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 
 /**
- * The envrionment variable name for memory limit control.
+ * The environment variable name for memory limit control.
  */
 static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 
@@ -170,7 +170,7 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
 
 /* Returns the max number of connections allowed.
  *
- * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
+ * When meta request is NULL, this will return the overall allowed number of connections based on the client
  * configurations.
  *
  * If meta_request is not NULL, this will return the number of connections allowed based on the meta request
@@ -331,7 +331,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
-        /* Try to read from the envrionment variable for memory limit */
+        /* Try to read from the environment variable for memory limit */
         struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
         if (memory_limit_from_env_var) {
             uint64_t mem_limit_in_gib = 0;
@@ -340,7 +340,7 @@ struct aws_s3_client *aws_s3_client_new(
                 aws_string_destroy(memory_limit_from_env_var);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; envrionment variable: %s, is not set correctly, only "
+                    "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
                     "integers supported.",
                     s_memory_limit_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -348,13 +348,13 @@ struct aws_s3_client *aws_s3_client_new(
             }
             aws_string_destroy(memory_limit_from_env_var);
             uint64_t mem_limit_in_bytes = 0;
-            /* Covert mem_limit_in_gib to bytes */
+            /* Convert mem_limit_in_gib to bytes */
             if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
                 aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
                 aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; envrionment variable: %s, overflow detected.",
+                    "Cannot create client from client_config; environment variable: %s, overflow detected.",
                     s_memory_limit_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
@@ -1465,7 +1465,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         if (num_parts > 2) {
                             uint64_t aligned_part_size =
                                 aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, part_size);
-                            /* Incase of overflow, fallback to no alignment. */
+                            /* In case of overflow, fallback to no alignment. */
                             aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
                             part_size = (size_t)aligned_part_size;
                             /* update the number of parts as well. */
@@ -2291,7 +2291,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
                     /**
                      * When upload with streaming, the prepare stage will not read into buffer.
-                     * But it should prevent more requests to be preapred so that the request will not staying in the
+                     * But it should prevent more requests to be prepared so that the request will not stay in the
                      * queue to wait for the connection available. Prevents the credentials to be expired during waiting
                      * for too long.
                      */
