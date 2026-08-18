@@ -254,6 +254,20 @@ static const struct aws_byte_cursor s_checksum_type_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-type");
 static const struct aws_byte_cursor s_checksum_type_full_object = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("full_object");
 
+static const struct {
+    struct aws_byte_cursor src_name;
+    struct aws_byte_cursor dst_name;
+} s_copy_source_forwarded_headers[] = {
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
+    },
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-source-expected-bucket-owner"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-expected-bucket-owner"),
+    },
+};
+
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
@@ -536,6 +550,44 @@ error_clean_up:
 }
 
 static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+
+/**
+ * Forward the request-scoped headers from the original CopyObject request onto the source-object HEAD that is used to
+ * size the copy. This HEAD is built from a fresh message, so headers that gate access to the source object are dropped
+ * unless we copy them explicitly:
+ *  - x-amz-request-payer: required, or the HEAD is rejected with 403 on a Requester Pays bucket.
+ *  - x-amz-source-expected-bucket-owner: on a CopyObject this asserts the *source* bucket owner, which maps to
+ *    x-amz-expected-bucket-owner on a HEAD of the source object. (The plain x-amz-expected-bucket-owner on a CopyObject
+ *    asserts the *destination* owner and must NOT be forwarded to the source HEAD.)
+ */
+static int s_s3_copy_source_object_head_forward_headers(
+    struct aws_http_message *base_message,
+    struct aws_http_message *message) {
+
+    struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
+    if (base_headers == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_copy_source_forwarded_headers); ++i) {
+        struct aws_byte_cursor value;
+        if (aws_http_headers_get(base_headers, s_copy_source_forwarded_headers[i].src_name, &value) == AWS_OP_SUCCESS) {
+            struct aws_http_header header = {
+                .name = s_copy_source_forwarded_headers[i].dst_name,
+                .value = value,
+            };
+            if (aws_http_message_add_header(message, header)) {
+                return AWS_OP_ERR;
+            }
+        } else {
+            /* Avoid leaking the error code. */
+            aws_reset_error();
+        }
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 /**
  * For the CopyObject operation, create the initial HEAD message to retrieve the size of the copy source.
  */
@@ -572,6 +624,10 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         }
 
         if (aws_http_message_set_request_path(message, path)) {
+            goto error_cleanup;
+        }
+
+        if (s_s3_copy_source_object_head_forward_headers(base_message, message)) {
             goto error_cleanup;
         }
         return message;
@@ -655,6 +711,10 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
     }
 
     if (aws_http_message_set_request_path(message, request_path)) {
+        goto error_cleanup;
+    }
+
+    if (s_s3_copy_source_object_head_forward_headers(base_message, message)) {
         goto error_cleanup;
     }
 
