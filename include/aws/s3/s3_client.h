@@ -1793,6 +1793,12 @@ void aws_s3_request_metrics_get_host_address(
     const struct aws_string **out_host_address);
 
 /**
+ * Get whether the request was made over TLS (https) or plaintext (http). This will always be available.
+ */
+AWS_S3_API
+bool aws_s3_request_metrics_get_is_https(const struct aws_s3_request_metrics *metrics);
+
+/**
  * Get the IP address of the request connected to.
  * If unavailable, AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE will be raised.
  * If available, out_ip_address will be set to a string. Be warned this string's lifetime is tied to the metrics object.

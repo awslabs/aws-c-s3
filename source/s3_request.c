@@ -84,6 +84,8 @@ static void s_populate_metrics_from_message(struct aws_s3_request *request, stru
         aws_string_new_from_cursor(request->send_data.metrics->allocator, &host_header_value);
     AWS_ASSERT(request->send_data.metrics->req_resp_info_metrics.host_address != NULL);
 
+    request->send_data.metrics->req_resp_info_metrics.is_https = request->meta_request->is_https;
+
     request->send_data.metrics->req_resp_info_metrics.request_type = request->request_type;
     request->send_data.metrics->req_resp_info_metrics.operation_name =
         aws_string_new_from_string(request->send_data.metrics->allocator, request->operation_name);
@@ -572,6 +574,11 @@ void aws_s3_request_metrics_get_host_address(
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(host_address);
     *host_address = metrics->req_resp_info_metrics.host_address;
+}
+
+bool aws_s3_request_metrics_get_is_https(const struct aws_s3_request_metrics *metrics) {
+    AWS_PRECONDITION(metrics);
+    return metrics->req_resp_info_metrics.is_https;
 }
 
 int aws_s3_request_metrics_get_ip_address(

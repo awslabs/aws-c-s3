@@ -1094,6 +1094,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
     meta_request->is_express = use_s3express_signing;
+    meta_request->is_https = is_https;
 
     bool error_occurred = false;
 

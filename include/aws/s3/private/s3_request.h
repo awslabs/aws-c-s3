@@ -143,6 +143,8 @@ struct aws_s3_request_metrics {
         struct aws_string *request_path_query;
         /* The host address of the request. */
         struct aws_string *host_address;
+        /* Whether the request was made over TLS (https) or plaintext (http). */
+        bool is_https;
         /* The the request ID header value. */
         struct aws_string *request_id;
         /* The the extended request ID header value. */
