@@ -254,6 +254,20 @@ static const struct aws_byte_cursor s_checksum_type_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-type");
 static const struct aws_byte_cursor s_checksum_type_full_object = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("full_object");
 
+static const struct {
+    struct aws_byte_cursor src_name;
+    struct aws_byte_cursor dst_name;
+} s_copy_source_forwarded_headers[] = {
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
+    },
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-source-expected-bucket-owner"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-expected-bucket-owner"),
+    },
+};
+
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
@@ -555,33 +569,20 @@ static int s_s3_copy_source_object_head_forward_headers(
         return AWS_OP_SUCCESS;
     }
 
-    const struct {
-        struct aws_byte_cursor src_name;
-        struct aws_byte_cursor dst_name;
-    } forwarded_headers[] = {
-        {
-            .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
-            .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
-        },
-        {
-            .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-source-expected-bucket-owner"),
-            .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-expected-bucket-owner"),
-        },
-    };
-
-    for (size_t i = 0; i < AWS_ARRAY_SIZE(forwarded_headers); ++i) {
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_copy_source_forwarded_headers); ++i) {
         struct aws_byte_cursor value;
-        if (aws_http_headers_get(base_headers, forwarded_headers[i].src_name, &value) == AWS_OP_SUCCESS) {
+        if (aws_http_headers_get(base_headers, s_copy_source_forwarded_headers[i].src_name, &value) == AWS_OP_SUCCESS) {
             struct aws_http_header header = {
-                .name = forwarded_headers[i].dst_name,
+                .name = s_copy_source_forwarded_headers[i].dst_name,
                 .value = value,
             };
             if (aws_http_message_add_header(message, header)) {
                 return AWS_OP_ERR;
             }
+        } else {
+            /* Avoid leaking the error code. */
+            aws_reset_error();
         }
-        /* Avoid leaking the error code. */
-        aws_reset_error();
     }
 
     return AWS_OP_SUCCESS;
