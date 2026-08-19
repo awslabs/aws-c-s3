@@ -94,7 +94,7 @@ static const size_t s_buffer_pool_trim_time_offset_in_s = 5;
 static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 
 /**
- * The envrionment variable name for memory limit control.
+ * The environment variable name for memory limit control.
  */
 static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 
@@ -170,7 +170,7 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
 
 /* Returns the max number of connections allowed.
  *
- * When meta request is NULL, this will return the overall allowed number of connections based on the clinet
+ * When meta request is NULL, this will return the overall allowed number of connections based on the client
  * configurations.
  *
  * If meta_request is not NULL, this will return the number of connections allowed based on the meta request
@@ -331,7 +331,7 @@ struct aws_s3_client *aws_s3_client_new(
     }
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
-        /* Try to read from the envrionment variable for memory limit */
+        /* Try to read from the environment variable for memory limit */
         struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
         if (memory_limit_from_env_var) {
             uint64_t mem_limit_in_gib = 0;
@@ -340,7 +340,7 @@ struct aws_s3_client *aws_s3_client_new(
                 aws_string_destroy(memory_limit_from_env_var);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; envrionment variable: %s, is not set correctly, only "
+                    "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
                     "integers supported.",
                     s_memory_limit_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -348,13 +348,13 @@ struct aws_s3_client *aws_s3_client_new(
             }
             aws_string_destroy(memory_limit_from_env_var);
             uint64_t mem_limit_in_bytes = 0;
-            /* Covert mem_limit_in_gib to bytes */
+            /* Convert mem_limit_in_gib to bytes */
             if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
                 aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
                 aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; envrionment variable: %s, overflow detected.",
+                    "Cannot create client from client_config; environment variable: %s, overflow detected.",
                     s_memory_limit_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
@@ -1330,11 +1330,43 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
     if (options->send_async_stream != NULL) {
         ++body_source_count;
     }
+    if (!aws_byte_cursor_is_valid(&options->request_body)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "Could not create meta request."
+            " request_body has a NULL pointer with a non-zero length.");
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return NULL;
+    }
+    if (options->request_body.ptr != NULL) {
+        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create meta request."
+                " request_body is only supported for DEFAULT meta requests.");
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return NULL;
+        }
+        if (!content_length_found) {
+            content_length = options->request_body.len;
+            content_length_found = true;
+        } else if (options->request_body.len != content_length) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "Could not create meta request."
+                " request_body length (%zu) does not match the Content-Length header (%" PRIu64 ").",
+                options->request_body.len,
+                content_length);
+            aws_raise_error(AWS_ERROR_S3_INCORRECT_CONTENT_LENGTH);
+            return NULL;
+        }
+        ++body_source_count;
+    }
     if (body_source_count > 1) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "Could not create meta request."
-            " More than one data source is set (filepath, async stream, body stream, data writes).");
+            " More than one data source is set (filepath, async stream, body stream, data writes, request_body).");
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
@@ -1433,7 +1465,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                         if (num_parts > 2) {
                             uint64_t aligned_part_size =
                                 aws_s3_buffer_pool_derive_aligned_buffer_size(client->buffer_pool, part_size);
-                            /* Incase of overflow, fallback to no alignment. */
+                            /* In case of overflow, fallback to no alignment. */
                             aligned_part_size = aligned_part_size > SIZE_MAX ? part_size : aligned_part_size;
                             part_size = (size_t)aligned_part_size;
                             /* update the number of parts as well. */
@@ -2004,6 +2036,54 @@ static void s_s3_prepare_acquire_mem_callback_and_destroy(
     aws_mem_release(payload->allocator, payload);
 }
 
+/* Drain the pending_put_prepare_queue in part-number order. Only dispatches requests
+ * whose part_number matches next_part_to_prepare. Called on io_event_loop thread. */
+static void s_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_request) {
+    struct aws_priority_queue *queue = &meta_request->io_threaded_data.pending_put_prepare_queue;
+
+    while (aws_priority_queue_size(queue) > 0) {
+
+        struct aws_s3_pending_prepare_entry *top = NULL;
+        aws_priority_queue_top(queue, (void **)&top);
+
+        if (top->request->part_number != meta_request->io_threaded_data.next_put_part_to_prepare) {
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Exiting put prepare queue drain early because top part number %" PRIu32
+                " is different from next part %" PRIu32 ".",
+                (void *)meta_request,
+                top->request->part_number,
+                meta_request->io_threaded_data.next_put_part_to_prepare);
+
+            break;
+        }
+
+        struct aws_s3_pending_prepare_entry entry;
+        aws_priority_queue_pop(queue, &entry);
+        ++meta_request->io_threaded_data.next_put_part_to_prepare;
+
+        aws_s3_meta_request_prepare_request(meta_request, entry.request, entry.callback, entry.user_data);
+    }
+}
+
+/* Force-drain all entries from pending_put_prepare_queue regardless of ordering.
+ * Called when a buffer reservation fails and the missing part will never arrive,
+ * which would otherwise leave queued requests stuck forever. Releases tickets and
+ * fails each request through the normal callback. */
+static void s_force_drain_pending_put_prepare_queue(struct aws_s3_meta_request *meta_request, int error_code) {
+    struct aws_priority_queue *queue = &meta_request->io_threaded_data.pending_put_prepare_queue;
+
+    while (aws_priority_queue_size(queue) > 0) {
+        struct aws_s3_pending_prepare_entry entry;
+        aws_priority_queue_pop(queue, &entry);
+
+        aws_s3_buffer_ticket_release(entry.request->ticket);
+        entry.request->ticket = NULL;
+
+        entry.callback(meta_request, entry.request, error_code, entry.user_data);
+    }
+}
+
 static void s_on_pool_buffer_reserved(void *user_data) {
     struct aws_s3_reserve_memory_payload *payload = user_data;
     AWS_PRECONDITION(payload);
@@ -2033,6 +2113,7 @@ static void s_on_pool_buffer_reserved(void *user_data) {
             request->request_tag);
 
         s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
         return;
     }
 
@@ -2048,9 +2129,39 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     }
     /* END CRITICAL SECTION */
 
-    aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
-    aws_future_s3_buffer_ticket_release(payload->buffer_future);
-    aws_mem_release(payload->allocator, payload);
+    /*
+     * Note: on why following check excludes everything, but put object type.
+     * Specific problem is with get object, which has complex logic of sometimes trying with bad range and
+     * if that fails trying with part number, etc... that can throw off the counter for which part num is expected next
+     * and hang the meta request.
+     * Lets play safe for now and only include puts in this logic.
+     * We can revisit whether it makes sense for get and add it later.
+     */
+
+    bool needs_ordered_prepare = request->part_number > 0 &&
+                                 meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
+                                 !meta_request->request_body_parallel_stream;
+
+    if (needs_ordered_prepare) {
+        /* Insert into priority queue and drain in order to ensure sequential
+         * stream reads happen in part-number order. */
+        struct aws_s3_pending_prepare_entry entry = {
+            .request = request,
+            .callback = payload->callback,
+            .user_data = payload->user_data,
+        };
+        aws_priority_queue_push(&meta_request->io_threaded_data.pending_put_prepare_queue, &entry);
+
+        aws_future_s3_buffer_ticket_release(payload->buffer_future);
+        aws_mem_release(payload->allocator, payload);
+
+        s_drain_pending_put_prepare_queue(meta_request);
+    } else {
+        aws_s3_meta_request_prepare_request(request->meta_request, request, payload->callback, payload->user_data);
+        aws_future_s3_buffer_ticket_release(payload->buffer_future);
+        aws_mem_release(payload->allocator, payload);
+    }
+
     return;
 }
 
@@ -2180,7 +2291,7 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
 
                     /**
                      * When upload with streaming, the prepare stage will not read into buffer.
-                     * But it should prevent more requests to be preapred so that the request will not staying in the
+                     * But it should prevent more requests to be prepared so that the request will not stay in the
                      * queue to wait for the connection available. Prevents the credentials to be expired during waiting
                      * for too long.
                      */
@@ -2627,13 +2738,6 @@ reset_connection:
         connection->retry_token = NULL;
     }
 
-    /* If we weren't successful, and we're here, that means this failure is not eligible for a retry. So finish the
-     * request, and close our HTTP connection. */
-    if (finish_code != AWS_S3_CONNECTION_FINISH_CODE_SUCCESS) {
-        if (connection->http_connection != NULL) {
-            aws_http_connection_close(connection->http_connection);
-        }
-    }
     aws_atomic_fetch_sub(&meta_request->num_requests_network, 1);
     aws_atomic_fetch_sub(&client->stats.num_requests_network_io[meta_request->type], 1);
 
@@ -2764,6 +2868,9 @@ static void s_resume_token_ref_count_zero_callback(void *arg) {
     struct aws_s3_meta_request_resume_token *token = arg;
 
     aws_string_destroy(token->multipart_upload_id);
+    aws_string_destroy(token->etag);
+    aws_string_destroy(token->version_id);
+    aws_string_destroy(token->s3_object_last_modified);
 
     aws_mem_release(token->allocator, token);
 }
@@ -2842,6 +2949,68 @@ struct aws_byte_cursor aws_s3_meta_request_resume_token_upload_id(
     }
 
     return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_etag(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->etag != NULL) {
+        return aws_byte_cursor_from_string(resume_token->etag);
+    }
+    return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_version_id(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->version_id != NULL) {
+        return aws_byte_cursor_from_string(resume_token->version_id);
+    }
+    return aws_byte_cursor_from_c_str("");
+}
+
+struct aws_byte_cursor aws_s3_meta_request_resume_token_s3_object_last_modified(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    if (resume_token->s3_object_last_modified != NULL) {
+        return aws_byte_cursor_from_string(resume_token->s3_object_last_modified);
+    }
+    return aws_byte_cursor_from_c_str("");
+}
+
+uint64_t aws_s3_meta_request_resume_token_object_size(const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->object_size;
+}
+
+uint64_t aws_s3_meta_request_resume_token_object_range_start(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->object_range_start;
+}
+
+uint64_t aws_s3_meta_request_resume_token_object_range_end(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->object_range_end;
+}
+
+uint64_t aws_s3_meta_request_resume_token_continuous_downloaded_bytes(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->continuous_downloaded_bytes;
+}
+
+uint64_t aws_s3_meta_request_resume_token_total_downloaded_bytes(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->total_downloaded_bytes;
+}
+
+uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(
+    const struct aws_s3_meta_request_resume_token *resume_token) {
+    AWS_FATAL_PRECONDITION(resume_token);
+    return resume_token->file_last_modified_epoch_ns;
 }
 
 static uint64_t s_upload_timeout_threshold_ns = 5000000000; /* 5 Secs */

@@ -131,8 +131,13 @@ static int s_on_list_bucket_result_node_encountered(struct aws_xml_node *node, v
             fs_wrapper.fs_info.prefix = aws_byte_cursor_from_string(operation_data->prefix);
         }
 
-        struct aws_byte_buf trimmed_etag = aws_replace_quote_entities(fs_wrapper.allocator, fs_wrapper.fs_info.e_tag);
-        fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
+        struct aws_byte_buf trimmed_etag;
+        aws_byte_buf_init(&trimmed_etag, fs_wrapper.allocator, 20);
+
+        if (aws_byte_buf_append_unescaped_xml(fs_wrapper.allocator, fs_wrapper.fs_info.e_tag, &trimmed_etag) ==
+            AWS_OP_SUCCESS) {
+            fs_wrapper.fs_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
+        }
 
         int ret_val = AWS_OP_SUCCESS;
         if (operation_data->on_object) {

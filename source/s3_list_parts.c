@@ -142,9 +142,13 @@ static int s_xml_on_ListPartsResult_child(struct aws_xml_node *node, void *user_
             return AWS_OP_ERR;
         }
 
-        struct aws_byte_buf trimmed_etag =
-            aws_replace_quote_entities(result_wrapper.allocator, result_wrapper.part_info.e_tag);
-        result_wrapper.part_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
+        struct aws_byte_buf trimmed_etag;
+        aws_byte_buf_init(&trimmed_etag, result_wrapper.allocator, 20);
+
+        if (aws_byte_buf_append_unescaped_xml(
+                result_wrapper.allocator, result_wrapper.part_info.e_tag, &trimmed_etag) == AWS_OP_SUCCESS) {
+            result_wrapper.part_info.e_tag = aws_byte_cursor_from_buf(&trimmed_etag);
+        }
 
         int ret_val = AWS_OP_SUCCESS;
         if (operation_data->on_part) {

@@ -37,6 +37,8 @@ static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
+static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
+static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
 static void s_s3_meta_request_destroy(void *user_data);
 
 static void s_s3_meta_request_init_signing_date_time(
@@ -99,7 +101,7 @@ void aws_s3_meta_request_unlock_synced_data(struct aws_s3_meta_request *meta_req
     aws_mutex_unlock(&meta_request->synced_data.lock);
 }
 
-/* True if the checksum validated and matched, false otherwise. */
+/* True if the checksum validated and matched, false otherwise. Finalizes checksum_to_validate. */
 static bool s_validate_checksum(
     struct aws_s3_checksum *checksum_to_validate,
     struct aws_byte_buf *expected_encoded_checksum) {
@@ -138,17 +140,33 @@ static void s_validate_meta_request_checksum_on_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *meta_request_result) {
 
+    /* No lock. meta_request_level_running_response_sum has a single owner at any point in its life: the
+     * connection thread that creates it at discovery, then either the delivery loop (byte-wise) or this
+     * function (folding recorded part digests), never both. Each handoff sits behind a lock that the path
+     * already takes, so nothing here races. See the combine_slots declaration for the ordering argument. */
     if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
-        meta_request_result->did_validate = true;
-        meta_request_result->validation_algorithm = meta_request->meta_request_level_running_response_sum->algorithm;
-        if (!s_validate_checksum(
-                meta_request->meta_request_level_running_response_sum,
-                &meta_request->meta_request_level_response_header_checksum)) {
-            meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
-            AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Checksum mismatch!", (void *)meta_request);
+        /* A part that never completed leaves the whole-object sum covering only a subset of the object, so
+         * validating it would be meaningless. Report it as unvalidated rather than as a failure: the caller
+         * asked for the object, and every part that arrived was still checked against whatever checksum it
+         * carried of its own. */
+        bool complete =
+            !meta_request->meta_request_level_checksum_combinable || s_s3_meta_request_fold_combine_slots(meta_request);
+
+        if (complete) {
+            meta_request_result->did_validate = true;
+            meta_request_result->validation_algorithm =
+                meta_request->meta_request_level_running_response_sum->algorithm;
+
+            if (!s_validate_checksum(
+                    meta_request->meta_request_level_running_response_sum,
+                    &meta_request->meta_request_level_response_header_checksum)) {
+                meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+                AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Checksum mismatch!", (void *)meta_request);
+            }
         }
     }
     aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
+    meta_request->meta_request_level_running_response_sum = NULL;
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
@@ -258,6 +276,14 @@ int aws_s3_meta_request_init_base(
         s_default_event_delivery_array_size,
         sizeof(struct aws_s3_meta_request_event));
 
+    aws_priority_queue_init_dynamic(
+        &meta_request->io_threaded_data.pending_put_prepare_queue,
+        meta_request->allocator,
+        0,
+        sizeof(struct aws_s3_pending_prepare_entry),
+        s_s3_pending_prepare_entry_pred);
+    meta_request->io_threaded_data.next_put_part_to_prepare = 1;
+
     *((size_t *)&meta_request->part_size) = part_size;
     *((uint32_t *)&meta_request->max_active_connections_override) = options->max_active_connections_override;
     *((bool *)&meta_request->should_compute_content_md5) = should_compute_content_md5;
@@ -287,6 +313,16 @@ int aws_s3_meta_request_init_base(
     if (options->recv_filepath.len > 0) {
 
         meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
+        meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
+
+        /* "direct_io" is what we'll attempt; we may flip it off below if any precondition fails.
+         * recv_file_direct_io_fallback_count tracks each fallback decision (init-time and delivery). */
+        bool direct_io = meta_request->fio_opts.direct_io;
+        size_t page_size = aws_system_info_page_size();
+        uint64_t direct_io_base_position = 0;
+
+        /* Open the FILE* per the requested recv_file_option. Always open it even if direct_io is
+         * requested — we'll keep it open as the fallback when O_DIRECT cannot be used for a part. */
         switch (options->recv_file_option) {
             case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
                 meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
@@ -299,14 +335,36 @@ int aws_s3_meta_request_init_base(
                         "id=%p Cannot receive file via CREATE_NEW: file already exists",
                         (void *)meta_request);
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
-                    break;
-                } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
-                    break;
+                    goto error;
                 }
-            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "ab");
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "wb");
                 break;
+
+            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "a+b");
+                /* For APPEND, the base position is the existing file size. We need it to be
+                 * page-aligned for O_DIRECT writes to land at correct offsets. */
+                if (direct_io && meta_request->recv_file) {
+                    int64_t existing_len = 0;
+                    if (aws_file_get_length(meta_request->recv_file, &existing_len) != AWS_OP_SUCCESS) {
+                        goto error;
+                    }
+                    if ((uint64_t)existing_len % page_size != 0) {
+                        AWS_LOGF_WARN(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: O_DIRECT requested with CREATE_OR_APPEND but existing file size %" PRId64
+                            " is not page-aligned (page size %zu). Falling back to buffered I/O.",
+                            (void *)meta_request,
+                            existing_len,
+                            page_size);
+                        direct_io = false;
+                        ++meta_request->recv_file_direct_io_fallback_count;
+                    } else {
+                        direct_io_base_position = (uint64_t)existing_len;
+                    }
+                }
+                break;
+
             case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
                 if (!aws_path_exists(meta_request->recv_filepath)) {
                     AWS_LOGF_ERROR(
@@ -314,49 +372,96 @@ int aws_s3_meta_request_init_base(
                         "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
                         (void *)meta_request);
                     aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                    break;
-                } else {
-                    meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
-                    if (meta_request->recv_file &&
-                        aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
-                        /* error out. */
-                        goto error;
-                    }
-                    break;
+                    goto error;
                 }
+                meta_request->recv_file = aws_fopen(aws_string_c_str(meta_request->recv_filepath), "r+");
+                if (meta_request->recv_file &&
+                    aws_fseek(meta_request->recv_file, options->recv_file_position, SEEK_SET) != AWS_OP_SUCCESS) {
+                    goto error;
+                }
+                /* For WRITE_TO_POSITION, the base offset is set by the user. Must be page-aligned
+                 * for O_DIRECT writes. */
+                if (direct_io) {
+                    if (options->recv_file_position % page_size != 0) {
+                        AWS_LOGF_WARN(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: O_DIRECT requested with WRITE_TO_POSITION but recv_file_position %" PRIu64
+                            " is not page-aligned (page size %zu). Falling back to buffered I/O.",
+                            (void *)meta_request,
+                            options->recv_file_position,
+                            page_size);
+                        direct_io = false;
+                        ++meta_request->recv_file_direct_io_fallback_count;
+                    } else {
+                        direct_io_base_position = options->recv_file_position;
+                    }
+                }
+                break;
 
             default:
                 AWS_ASSERT(false);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                break;
+                goto error;
         }
+
         if (!meta_request->recv_file) {
             goto error;
+        }
+
+        /* Additional init-time fallback checks for O_DIRECT */
+        if (direct_io && !aws_file_direct_io_is_supported()) {
+            /* Platform doesn't support O_DIRECT. Fall back proactively at init rather than
+             * waiting for the first write to fail. */
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT is not supported on this platform. Falling back to buffered I/O.",
+                (void *)meta_request);
+            direct_io = false;
+            ++meta_request->recv_file_direct_io_fallback_count;
+        }
+
+        if (direct_io && part_size % page_size != 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT requires part_size to be page-aligned, but part_size is %zu and "
+                "page size is %zu. Falling back to buffered I/O.",
+                (void *)meta_request,
+                part_size,
+                page_size);
+            direct_io = false;
+            ++meta_request->recv_file_direct_io_fallback_count;
+        }
+
+        if (direct_io) {
+            meta_request->recv_file_direct_io = true;
+            meta_request->recv_file_direct_io_base_position = direct_io_base_position;
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT enabled for download write path. base_position=%" PRIu64,
+                (void *)meta_request,
+                direct_io_base_position);
         }
     }
 
     /* If the request's body is being passed in some other way, set that up.
      * (we checked earlier that the request body is not being passed multiple ways) */
     if (options->send_filepath.len > 0) {
+        /* For upload with direct_io, check platform support proactively.
+         * If not supported, silently disable direct_io for the upload stream. */
+        bool upload_direct_io = meta_request->fio_opts.direct_io;
+        if (upload_direct_io && !aws_file_direct_io_is_supported()) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: O_DIRECT is not supported on this platform. Upload will use buffered I/O.",
+                (void *)meta_request);
+            upload_direct_io = false;
+        }
+
         /* Create parallel read stream from file */
         meta_request->request_body_parallel_stream = client->vtable->parallel_input_stream_new_from_file(
-            allocator, options->send_filepath, client->body_streaming_elg, meta_request->fio_opts.direct_io);
+            allocator, options->send_filepath, client->body_streaming_elg, upload_direct_io);
         if (meta_request->request_body_parallel_stream == NULL) {
             goto error;
-        }
-        if (meta_request->fio_opts.direct_io && !meta_request->fio_opts.should_stream) {
-            size_t page_size = aws_system_info_page_size();
-            if (part_size % page_size != 0) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Invalid meta request configuration - direct_io without streaming upload requires part size "
-                    "to be aligned with page size. part size is:%zu, while page size is:%zu",
-                    (void *)meta_request,
-                    part_size,
-                    page_size);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                goto error;
-            }
         }
 
     } else if (options->send_async_stream != NULL) {
@@ -378,6 +483,7 @@ int aws_s3_meta_request_init_base(
     meta_request->body_callback = options->body_callback;
     meta_request->body_callback_ex = options->body_callback_ex;
     meta_request->finish_callback = options->finish_callback;
+    meta_request->on_error_resume_token = options->on_error_resume_token;
 
     /* Nothing can fail after here. Leave the impl not affected by failure of initializing base. */
     meta_request->impl = impl;
@@ -438,8 +544,8 @@ void aws_s3_meta_request_cancel(struct aws_s3_meta_request *meta_request) {
 int aws_s3_meta_request_pause(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_resume_token **out_resume_token) {
-    AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(meta_request->vtable);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
 
     *out_resume_token = NULL;
 
@@ -448,6 +554,46 @@ int aws_s3_meta_request_pause(
     }
 
     return meta_request->vtable->pause(meta_request, out_resume_token);
+}
+
+int aws_s3_meta_request_pause_async(
+    struct aws_s3_meta_request *meta_request,
+    aws_s3_meta_request_pause_complete_fn *on_complete,
+    void *user_data) {
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(on_complete);
+    AWS_ERROR_PRECONDITION(meta_request->vtable);
+
+    if (!meta_request->vtable->build_resume_token_synced) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+
+    if (meta_request->synced_data.async_pause_requested) {
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        /* Invoke callback immediately — pause already in progress */
+        on_complete(meta_request, NULL, AWS_ERROR_INVALID_STATE, user_data);
+        return AWS_OP_SUCCESS;
+    }
+
+    meta_request->synced_data.async_pause_requested = true;
+    meta_request->synced_data.pause_complete_callback = on_complete;
+    meta_request->synced_data.pause_complete_user_data = user_data;
+
+    /* Stop scheduling new work and cancel in-flight HTTP streams and pending buffer reservations */
+    aws_s3_meta_request_set_fail_synced(meta_request, NULL, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_cancellable_requests_synced(meta_request, AWS_ERROR_S3_PAUSED);
+    aws_s3_meta_request_cancel_pending_buffer_futures_synced(meta_request, AWS_ERROR_S3_PAUSED);
+
+    aws_s3_meta_request_unlock_synced_data(meta_request);
+    /* END CRITICAL SECTION */
+
+    /* Schedule work processing so the update loop can wind down and finish */
+    aws_s3_client_schedule_process_work(meta_request->client);
+
+    return AWS_OP_SUCCESS;
 }
 
 void aws_s3_meta_request_set_fail_synced(
@@ -578,17 +724,27 @@ static void s_s3_meta_request_destroy(void *user_data) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
+        /* pending buffer acquisition will keep meta request alive from destroying.  */
+        AWS_ASSERT(meta_request->synced_data.async_write.buffered_data_ticket_future == NULL);
         meta_request->client = aws_s3_client_release(meta_request->client);
     }
 
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
 
+    /* Slots own nothing, so a cancelled or failed meta request can just drop them. */
+    aws_mem_release(meta_request->allocator, meta_request->combine_slots);
+    meta_request->combine_slots = NULL;
+    meta_request->combine_slot_count = 0;
+
     AWS_ASSERT(aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->synced_data.event_delivery_array);
 
     AWS_ASSERT(aws_array_list_length(&meta_request->io_threaded_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->io_threaded_data.event_delivery_array);
+
+    AWS_ASSERT(aws_priority_queue_size(&meta_request->io_threaded_data.pending_put_prepare_queue) == 0);
+    aws_priority_queue_clean_up(&meta_request->io_threaded_data.pending_put_prepare_queue);
 
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
@@ -619,6 +775,153 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     AWS_PRECONDITION(*request_b);
 
     return (*request_a)->part_number > (*request_b)->part_number;
+}
+
+/* Records one finished part's digest so it can be folded into the whole-object checksum at finish.
+ *
+ * No lock: the slot array was sized before any part was dispatched and is never resized, and this part owns
+ * its slot exclusively. See the combine_slots declaration for why the write is visible to the fold. */
+static void s_s3_meta_request_record_part_digest(
+    struct aws_s3_meta_request *meta_request,
+    uint32_t part_number,
+    const struct aws_byte_buf *digest,
+    uint64_t length) {
+
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(digest);
+    AWS_PRECONDITION(part_number > 0);
+    AWS_FATAL_ASSERT(digest->len > 0 && digest->len <= AWS_S3_COMBINABLE_DIGEST_MAX_LEN);
+
+    if (part_number > meta_request->combine_slot_count) {
+        /* More parts turned up than the discovery response accounted for. Leave the slots alone; the fold at
+         * finish will report the whole-object checksum as unvalidated rather than assembling a partial sum. */
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Part %" PRIu32 " is beyond the %" PRIu32 " parts discovered, so its checksum cannot "
+            "contribute to the whole-object checksum.",
+            (void *)meta_request,
+            part_number,
+            meta_request->combine_slot_count);
+        return;
+    }
+
+    struct aws_s3_combine_slot *slot = &meta_request->combine_slots[part_number - 1];
+    slot->length = length;
+    memcpy(slot->digest, digest->buffer, digest->len);
+    slot->digest_len = digest->len;
+}
+
+/* Assembles the whole-object checksum from the recorded part digests. Returns false, leaving the running sum
+ * untouched, if any part never recorded one.
+ *
+ * CRCs compose: folding part digests left to right in object order yields exactly the checksum of the
+ * concatenated object, so no thread re-reads the body. Slots are already in object order, so this is a single
+ * forward pass.
+ *
+ * No lock, and none needed: by the time the meta request finishes, update() has confirmed every dispatched
+ * part completed, so all slot writes are done and published. */
+static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_s3_checksum *running_sum = meta_request->meta_request_level_running_response_sum;
+    AWS_FATAL_ASSERT(running_sum != NULL);
+
+    if (meta_request->combine_slots == NULL || meta_request->combine_slot_count == 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p No part checksums were recorded, so the whole-object checksum cannot be validated.",
+            (void *)meta_request);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < meta_request->combine_slot_count; ++i) {
+        const struct aws_s3_combine_slot *slot = &meta_request->combine_slots[i];
+        if (slot->digest_len == 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Part %" PRIu32 " never recorded a checksum, so the whole-object checksum cannot be "
+                "validated.",
+                (void *)meta_request,
+                i + 1);
+            return false;
+        }
+        if (aws_checksum_combine_digest(
+                running_sum, aws_byte_cursor_from_array(slot->digest, slot->digest_len), slot->length)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Failed to combine checksum for part %" PRIu32 ". last error:%s",
+                (void *)meta_request,
+                i + 1,
+                aws_error_name(aws_last_error_or_unknown()));
+            return false;
+        }
+    }
+
+    return true;
+}
+
+int aws_s3_meta_request_setup_checksum_combine_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *discovery_request,
+    uint32_t total_num_parts) {
+
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(discovery_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    meta_request->meta_request_level_checksum_combinable = false;
+
+    if (meta_request->meta_request_level_running_response_sum == NULL) {
+        /* Nothing to validate at the meta request level. */
+        return AWS_OP_SUCCESS;
+    }
+
+    enum aws_s3_checksum_algorithm algorithm = meta_request->meta_request_level_running_response_sum->algorithm;
+    if (!aws_checksum_algorithm_is_combinable(algorithm)) {
+        /* Leave it to the delivery loop, which sees the body in object order. */
+        return AWS_OP_SUCCESS;
+    }
+    if (total_num_parts == 0) {
+        /* An empty object, so there is nothing to combine. */
+        return AWS_OP_SUCCESS;
+    }
+
+    AWS_FATAL_ASSERT(meta_request->combine_slots == NULL);
+    meta_request->combine_slots =
+        aws_mem_calloc(meta_request->allocator, total_num_parts, sizeof(struct aws_s3_combine_slot));
+    meta_request->combine_slot_count = total_num_parts;
+    meta_request->meta_request_level_checksum_combinable = true;
+
+    /* From here on, each part checksums itself as it streams. The discovery request is the exception: if it
+     * carried body bytes, they arrived before we knew which algorithm to use, so checksum that one part from
+     * its buffer now. A HEAD discovery has no body and needs nothing. */
+    if (discovery_request->part_number == 0 || discovery_request->send_data.response_body.len == 0) {
+        return AWS_OP_SUCCESS;
+    }
+
+    struct aws_s3_checksum *part_sum = aws_checksum_new(meta_request->allocator, algorithm);
+    if (part_sum == NULL) {
+        return AWS_OP_ERR;
+    }
+
+    struct aws_byte_cursor body = aws_byte_cursor_from_buf(&discovery_request->send_data.response_body);
+    uint8_t digest_storage[AWS_S3_COMBINABLE_DIGEST_MAX_LEN];
+    struct aws_byte_buf part_digest = aws_byte_buf_from_empty_array(digest_storage, sizeof(digest_storage));
+
+    if (aws_checksum_update(part_sum, &body) || aws_checksum_finalize(part_sum, &part_digest)) {
+        aws_checksum_destroy(part_sum);
+        return AWS_OP_ERR;
+    }
+    aws_checksum_destroy(part_sum);
+
+    s_s3_meta_request_record_part_digest(meta_request, discovery_request->part_number, &part_digest, body.len);
+    return AWS_OP_SUCCESS;
+}
+
+static int s_s3_pending_prepare_entry_pred(const void *a, const void *b) {
+    const struct aws_s3_pending_prepare_entry *entry_a = a;
+    const struct aws_s3_pending_prepare_entry *entry_b = b;
+    return entry_a->request->part_number > entry_b->request->part_number;
 }
 
 bool aws_s3_meta_request_update(
@@ -1326,6 +1629,38 @@ static bool s_get_part_response_headers_checksum_helper(
     return false;
 }
 
+/* Check to see if we need to create a request_level_combine_sum for combine the checksum for the full object */
+static int s_ensure_part_combine_sum(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(request);
+
+    if (request->request_level_combine_sum != NULL) {
+        /* Already running, skipping. */
+        return AWS_OP_SUCCESS;
+    }
+    if (request->part_number == 0) {
+        /* Not a part, so it has no place in the object's byte order. */
+        return AWS_OP_SUCCESS;
+    }
+    if (!meta_request->meta_request_level_checksum_combinable ||
+        meta_request->meta_request_level_running_response_sum == NULL) {
+        /* No track on the meta request level for combine the checksum */
+        return AWS_OP_SUCCESS;
+    }
+
+    request->request_level_combine_sum =
+        aws_checksum_new(meta_request->allocator, meta_request->meta_request_level_running_response_sum->algorithm);
+    if (request->request_level_combine_sum == NULL) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not create part checksum for request %p",
+            (void *)meta_request,
+            (void *)request);
+        return AWS_OP_ERR;
+    }
+    return AWS_OP_SUCCESS;
+}
+
 static int s_s3_meta_request_incoming_headers(
     struct aws_http_stream *stream,
     enum aws_http_header_block header_block,
@@ -1480,21 +1815,34 @@ static int s_s3_meta_request_headers_block_done(
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
+    /*
+     * When downloading parts via partNumber, if the response is larger than the buffer we reserved, cancel
+     * immediately so we don't overflow memory. We'll retry using ranged gets instead.
+     *
+     * Compare against the reserved buffer size (part_range_end - part_range_start + 1) rather than part_size,
+     * because when object_size_hint is provided the buffer is sized to min(hint, part_size), which may be
+     * smaller than part_size. Using part_size here would miss the case where hint < content_length <= part_size.
+     */
     struct aws_s3_meta_request *meta_request = request->meta_request;
     AWS_PRECONDITION(meta_request);
 
-    /*
-     * When downloading parts via partNumber, if the size is larger than expected, cancel the request immediately so
-     * we don't end up downloading more into memory than we can handle. We'll retry the download using ranged gets
-     * instead.
-     */
+    /* Check if we need to create a `request_level_combine_sum` or not */
+    if (meta_request->checksum_config.validate_response_checksum &&
+        request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
+        s_s3_meta_request_error_code_from_response_status(request->send_data.response_status) == AWS_ERROR_SUCCESS) {
+        if (s_ensure_part_combine_sum(meta_request, request)) {
+            return AWS_OP_ERR;
+        }
+    }
+
     if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT &&
         request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1) {
         uint64_t content_length;
+        uint64_t reserved_size = request->part_range_end - request->part_range_start + 1;
         if (!aws_s3_parse_content_length_response_header(
                 request->allocator, request->send_data.response_headers, &content_length) &&
-            content_length > meta_request->part_size) {
-            return aws_raise_error(AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+            content_length > reserved_size) {
+            return aws_raise_error(AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE);
         }
     }
     return AWS_OP_SUCCESS;
@@ -1538,9 +1886,26 @@ static int s_s3_meta_request_incoming_body(
         AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "response body: \n" PRInSTR "\n", AWS_BYTE_CURSOR_PRI(*data));
     }
 
-    if (meta_request->checksum_config.validate_response_checksum && request->request_level_running_response_sum) {
-        /* Update the request level checksum. */
-        aws_checksum_update(request->request_level_running_response_sum, data);
+    if (meta_request->checksum_config.validate_response_checksum) {
+        /* Update whichever of this part's running checksums are active, while the data is still hot from the
+         * socket read on this connection's thread. The two are independent: validation_sum is present only
+         * when this part's response carried a checksum header of its own, combine_sum only when this part
+         * feeds the whole-object checksum. They are separate objects because those two checksums may not use
+         * the same algorithm. */
+        struct aws_s3_checksum *validation_sum = request->request_level_running_response_sum;
+        struct aws_s3_checksum *combine_sum = request->request_level_combine_sum;
+
+        if ((validation_sum != NULL && aws_checksum_update(validation_sum, data)) ||
+            (combine_sum != NULL && aws_checksum_update(combine_sum, data))) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Request %p could not update checksum due to error %d (%s).",
+                (void *)meta_request,
+                (void *)request,
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
+            return AWS_OP_ERR;
+        }
     }
 
     if (request->send_data.response_body.capacity == 0) {
@@ -1620,12 +1985,15 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
     struct aws_s3_meta_request *meta_request = request->meta_request;
 
     if (meta_request->checksum_config.validate_response_checksum) {
-        /* finish the request level checksum validation. */
-        if (error_code == AWS_OP_SUCCESS && request->request_level_running_response_sum) {
+        /* Validate this part against its own checksum header, if it had one. The presence of an expected
+         * value is what decides, not the presence of a running sum: a part that only contributes to the
+         * whole-object checksum has a combine sum but nothing to compare anything against on its own. */
+        if (error_code == AWS_OP_SUCCESS && request->request_level_response_header_checksum.len > 0) {
+            struct aws_s3_checksum *part_sum = request->request_level_running_response_sum;
+            AWS_FATAL_ASSERT(part_sum != NULL);
             request->did_validate = true;
-            request->validation_algorithm = request->request_level_running_response_sum->algorithm;
-            request->checksum_match = s_validate_checksum(
-                request->request_level_running_response_sum, &request->request_level_response_header_checksum);
+            request->validation_algorithm = part_sum->algorithm;
+            request->checksum_match = s_validate_checksum(part_sum, &request->request_level_response_header_checksum);
             if (!request->checksum_match) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
@@ -1638,10 +2006,29 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
         } else {
             request->did_validate = false;
         }
+
+        /* Record this part's digest for the whole-object combine, which happens once the meta request
+         * finishes. It is copied into a slot the meta request owns, so the running checksum below can be torn
+         * down here exactly as it always was, and nothing of this request outlives it. */
+        if (error_code == AWS_OP_SUCCESS && request->request_level_combine_sum != NULL) {
+            uint8_t digest_storage[AWS_S3_COMBINABLE_DIGEST_MAX_LEN] = {0};
+            struct aws_byte_buf part_digest = aws_byte_buf_from_empty_array(digest_storage, sizeof(digest_storage));
+
+            if (aws_checksum_finalize(request->request_level_combine_sum, &part_digest)) {
+                error_code = aws_last_error_or_unknown();
+            } else {
+                s_s3_meta_request_record_part_digest(
+                    meta_request, request->part_number, &part_digest, request->send_data.response_body.len);
+            }
+        }
+
         aws_checksum_destroy(request->request_level_running_response_sum);
-        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
         request->request_level_running_response_sum = NULL;
+        aws_checksum_destroy(request->request_level_combine_sum);
+        request->request_level_combine_sum = NULL;
+        aws_byte_buf_clean_up(&request->request_level_response_header_checksum);
     }
+
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -1789,11 +2176,11 @@ void aws_s3_meta_request_send_request_finish_default(
         /* If the request failed due to an invalid (ie: unrecoverable) response status, or the meta request already
          * has a result, then make sure that this request isn't retried. */
         if (error_code == AWS_ERROR_S3_INVALID_RESPONSE_STATUS ||
-            error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
+            error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE ||
             error_code == AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR ||
             error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH || meta_request_finishing) {
             finish_code = AWS_S3_CONNECTION_FINISH_CODE_FAILED;
-            if (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
+            if (error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
                 /* Log at info level instead of error as it's expected and not a fatal error */
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,
@@ -2014,6 +2401,113 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
     return false;
 }
 
+/* Helper: write the response body to recv_file with fwrite. Sets *out_error_code on failure. */
+static int s_buffered_write_to_recv_file(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *response_body) {
+    if (fwrite((void *)response_body->ptr, response_body->len, 1, meta_request->recv_file) < 1) {
+        int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno */
+        aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Failed writing to file. errno:%d. aws-error:%s",
+            (void *)meta_request,
+            errno_value,
+            aws_error_name(aws_last_error()));
+        return AWS_OP_ERR;
+    }
+    return AWS_OP_SUCCESS;
+}
+
+/* Helper: Write body to file. */
+static int s_write_body_to_file(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t file_offset) {
+
+    if (meta_request->recv_file_direct_io) {
+        if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body) ==
+            AWS_OP_SUCCESS) {
+            /* We succeed. Early out. */
+            return AWS_OP_SUCCESS;
+        }
+
+        if (meta_request->recv_file_direct_io_fallback_count == 0) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Failed writing to file with O_DIRECT. aws-error:%s. Fallback.",
+                (void *)meta_request,
+                aws_error_name(aws_last_error()));
+        }
+        ++meta_request->recv_file_direct_io_fallback_count;
+        aws_reset_error();
+        /* Reset flag to stop trying it. */
+        meta_request->recv_file_direct_io = false;
+
+        /* Buffered fallback for unaligned data. recv_file is already open from init.
+         * Need to seek because O_DIRECT path doesn't update FILE* position. */
+        if (aws_fseek(meta_request->recv_file, (int64_t)file_offset, SEEK_SET) != AWS_OP_SUCCESS) {
+            return AWS_OP_ERR;
+        }
+        /* Fallback to buffered write */
+    }
+
+    /* Regular FILE* path — no seek needed, events arrive in order. */
+    return s_buffered_write_to_recv_file(meta_request, body);
+}
+
+/* Deliver response body to the appropriate sink: file (O_DIRECT or buffered) or user callback. */
+static int s_deliver_body_to_sink(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_byte_cursor *body,
+    uint64_t delivery_range_start,
+    struct aws_s3_request *request) {
+
+    int error_code = AWS_ERROR_SUCCESS;
+
+    if (meta_request->recv_file_direct_io || meta_request->recv_file) {
+        uint64_t file_offset = meta_request->recv_file_direct_io
+                                   ? meta_request->recv_file_direct_io_base_position + delivery_range_start
+                                   : 0; /* unused — sequential FILE* path doesn't seek */
+        error_code = s_write_body_to_file(meta_request, body, file_offset);
+        if (meta_request->client->enable_read_backpressure) {
+            aws_s3_meta_request_increment_read_window(meta_request, body->len);
+        }
+        return error_code;
+    }
+
+    if (meta_request->body_callback_ex != NULL &&
+        meta_request->body_callback_ex(
+            meta_request,
+            body,
+            (struct aws_s3_meta_request_receive_body_extra_info){
+                .range_start = delivery_range_start, .ticket = request->ticket},
+            meta_request->user_data)) {
+        error_code = aws_last_error_or_unknown();
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Response body callback raised error %d (%s).",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+        return error_code;
+    }
+
+    if (meta_request->body_callback != NULL &&
+        meta_request->body_callback(meta_request, body, delivery_range_start, meta_request->user_data)) {
+        error_code = aws_last_error_or_unknown();
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Response body callback raised error %d (%s).",
+            (void *)meta_request,
+            error_code,
+            aws_error_str(error_code));
+        return error_code;
+    }
+
+    return AWS_ERROR_SUCCESS;
+}
+
 /* Deliver events in event_delivery_array.
  * This task runs on the meta-request's io_event_loop thread. */
 static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
@@ -2040,6 +2534,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     /* If an error occurs, don't fire callbacks anymore. */
     int error_code = AWS_ERROR_SUCCESS;
     uint32_t num_parts_delivered = 0;
+    uint64_t num_bytes_delivered = 0;
     uint64_t bytes_allowed_to_deliver = 0;
 
     /* BEGIN CRITICAL SECTION */
@@ -2076,40 +2571,42 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 AWS_ASSERT(meta_request == request->meta_request);
                 bool delivery_incomplete = false;
                 struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
-                if (response_body.len == 0) {
-                    /* Nothing to delivery, finish this delivery event and break out. */
-                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
 
+                /* 1. Early return: empty body */
+                if (response_body.len == 0) {
+                    aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
-
                     aws_s3_request_release(request);
                     break;
                 }
 
+                /* 2. Backpressure: limit how many bytes we deliver this tick */
                 if (s_should_apply_backpressure(request)) {
-                    /* Apply backpressure for the request, only deliver the bytes that allowed to deliver. */
                     aws_byte_cursor_advance(&response_body, bytes_delivered_for_request);
                     if (response_body.len > (size_t)bytes_allowed_to_deliver) {
                         response_body.len = (size_t)bytes_allowed_to_deliver;
                         delivery_incomplete = true;
                     }
-                    /* Update the remaining bytes we allow to delivery. */
                     bytes_allowed_to_deliver -= response_body.len;
                 } else {
-                    /* We should not have any incomplete delivery in this case. */
                     AWS_FATAL_ASSERT(bytes_delivered_for_request == 0);
                 }
-                uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
 
+                /* Nothing to deliver after backpressure — re-queue and move on */
+                if (response_body.len == 0) {
+                    aws_array_list_push_front(&incomplete_deliver_events_array, &event);
+                    break;
+                }
+
+                /* 3. Sequential order validation */
+                uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
                 AWS_ASSERT(request->part_number >= 1);
                 if (request->part_number == 1) {
                     meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
                 }
-                /* Make sure the response body is delivered in the sequential order */
                 if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
-                    /* Unexpected error, log the error */
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p: Unexpected code error. Please report the error to the team, "
@@ -2121,96 +2618,57 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 }
                 meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
-                if (error_code == AWS_ERROR_SUCCESS && response_body.len > 0) {
-                    if (meta_request->meta_request_level_running_response_sum) {
-                        if (aws_checksum_update(
-                                meta_request->meta_request_level_running_response_sum, &response_body)) {
-                            error_code = aws_last_error();
-                            AWS_LOGF_ERROR(
-                                AWS_LS_S3_META_REQUEST,
-                                "id=%p Failed to update checksum. last error:%s",
-                                (void *)meta_request,
-                                aws_error_name(error_code));
-                        }
-                    }
-                    if (error_code == AWS_ERROR_SUCCESS) {
-                        if (request->send_data.metrics) {
-                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
-                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_start_timestamp_ns);
-                        }
-
-                        if (meta_request->recv_file) {
-                            /* Write the data directly to the file. No need to seek, since the event will always be
-                             * delivered with the right order. */
-                            if (fwrite((void *)response_body.ptr, response_body.len, 1, meta_request->recv_file) < 1) {
-                                int errno_value = ferror(meta_request->recv_file) ? errno : 0; /* Always cache errno  */
-                                aws_translate_and_raise_io_error_or(errno_value, AWS_ERROR_FILE_WRITE_FAILURE);
-                                error_code = aws_last_error();
-                                AWS_LOGF_ERROR(
-                                    AWS_LS_S3_META_REQUEST,
-                                    "id=%p Failed writing to file. errno:%d. aws-error:%s",
-                                    (void *)meta_request,
-                                    errno_value,
-                                    aws_error_name(error_code));
-                            }
-                            if (meta_request->client->enable_read_backpressure) {
-                                aws_s3_meta_request_increment_read_window(meta_request, response_body.len);
-                            }
-                        } else if (
-                            meta_request->body_callback_ex != NULL &&
-                            meta_request->body_callback_ex(
-                                meta_request,
-                                &response_body,
-                                (struct aws_s3_meta_request_receive_body_extra_info){
-                                    .range_start = delivery_range_start, .ticket = request->ticket},
-                                meta_request->user_data)) {
-                            error_code = aws_last_error_or_unknown();
-                            AWS_LOGF_ERROR(
-                                AWS_LS_S3_META_REQUEST,
-                                "id=%p Response body callback raised error %d (%s).",
-                                (void *)meta_request,
-                                error_code,
-                                aws_error_str(error_code));
-                        } else if (
-                            meta_request->body_callback != NULL &&
-                            meta_request->body_callback(
-                                meta_request, &response_body, delivery_range_start, meta_request->user_data)) {
-
-                            error_code = aws_last_error_or_unknown();
-                            AWS_LOGF_ERROR(
-                                AWS_LS_S3_META_REQUEST,
-                                "id=%p Response body callback raised error %d (%s).",
-                                (void *)meta_request,
-                                error_code,
-                                aws_error_str(error_code));
-                        }
-
-                        if (request->send_data.metrics) {
-                            struct aws_s3_request_metrics *metric = request->send_data.metrics;
-                            aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_end_timestamp_ns);
-                            AWS_ASSERT(metric->time_metrics.deliver_start_timestamp_ns != 0);
-                            metric->time_metrics.deliver_duration_ns = metric->time_metrics.deliver_end_timestamp_ns -
-                                                                       metric->time_metrics.deliver_start_timestamp_ns;
-                        }
+                /* 4. Checksum update */
+                if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum &&
+                    !meta_request->meta_request_level_checksum_combinable) {
+                    /* Non-combinable algorithm, so the whole-object checksum can only be built by feeding it
+                     * bytes in object order, which is what this delivery loop guarantees. Combinable
+                     * algorithms fold in each part's own checksum when the part completes instead, so there
+                     * is nothing to do here. */
+                    if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
+                        error_code = aws_last_error();
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p Failed to update checksum. last error:%s",
+                            (void *)meta_request,
+                            aws_error_name(error_code));
                     }
                 }
+
+                /* 5. Deliver body to sink (file or callback) */
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    if (request->send_data.metrics) {
+                        aws_high_res_clock_get_ticks(
+                            (uint64_t *)&request->send_data.metrics->time_metrics.deliver_start_timestamp_ns);
+                    }
+
+                    error_code = s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request);
+
+                    if (request->send_data.metrics) {
+                        struct aws_s3_request_metrics *metric = request->send_data.metrics;
+                        aws_high_res_clock_get_ticks((uint64_t *)&metric->time_metrics.deliver_end_timestamp_ns);
+                        AWS_ASSERT(metric->time_metrics.deliver_start_timestamp_ns != 0);
+                        metric->time_metrics.deliver_duration_ns = metric->time_metrics.deliver_end_timestamp_ns -
+                                                                   metric->time_metrics.deliver_start_timestamp_ns;
+                    }
+                }
+
+                /* 6. Completion tracking */
                 event.u.response_body.bytes_delivered += response_body.len;
                 meta_request->io_threaded_data.num_bytes_delivery_completed += response_body.len;
+                if (error_code == AWS_ERROR_SUCCESS) {
+                    /* Only count bytes the sink actually accepted. */
+                    num_bytes_delivered += response_body.len;
+                }
 
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
-                    /* We completed the delivery for this request. */
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
-
                     ++num_parts_delivered;
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
-
                     aws_s3_request_release(request);
                 } else {
-                    /* We didn't complete the delivery for this request and no error happened */
-                    /* Push to the front of the queue and wait for the next tick to deliver the rest of the bytes. */
-                    /* Note: we push to the front of the array since when we move those incomplete events back to the
-                     * synced_queue, we need to make sure it still has the same order. */
+                    /* Incomplete delivery — re-queue for next tick */
                     aws_array_list_push_front(&incomplete_deliver_events_array, &event);
                 }
             } break;
@@ -2289,6 +2747,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
+        meta_request->synced_data.num_bytes_delivered += num_bytes_delivered;
         meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
@@ -2350,6 +2809,10 @@ void aws_s3_meta_request_finish(struct aws_s3_meta_request *meta_request) {
     meta_request->vtable->finish(meta_request);
 }
 
+/* Used to reopen recv_filepath in read-only mode after the write handle has been closed, solely to
+ * query its last-modified time for the resume token (see aws_s3_meta_request_finish_default). */
+AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_reopen_mode, "rb");
+
 void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
 
@@ -2359,6 +2822,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
     aws_simple_completion_callback *pending_async_write_waker = NULL;
     void *pending_async_write_waker_user_data = NULL;
+
+    bool is_async_paused = false;
+    bool is_error = false;
+    aws_s3_meta_request_pause_complete_fn *pause_callback = NULL;
+    void *pause_user_data = NULL;
+    struct aws_s3_meta_request_resume_token *token = NULL;
 
     struct aws_s3_meta_request_result finish_result;
     AWS_ZERO_STRUCT(finish_result);
@@ -2374,6 +2843,28 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
 
+        /* Read pause state and build a resume token while still holding the lock. */
+        if (meta_request->synced_data.async_pause_requested) {
+            is_async_paused = true;
+            pause_callback = meta_request->synced_data.pause_complete_callback;
+            pause_user_data = meta_request->synced_data.pause_complete_user_data;
+        } else if (
+            meta_request->synced_data.finish_result.error_code != AWS_ERROR_SUCCESS &&
+            meta_request->synced_data.finish_result.error_code != AWS_ERROR_S3_PAUSED) {
+            is_error = true;
+        }
+
+        /* No error token when recv_file_delete_on_failure will discard the partial file on error —
+         * the token would describe deleted state. The on_error_resume_token callback still fires
+         * with a NULL token below. Async pause is unaffected as pause is not treated as an error.
+         **/
+        bool error_state_discarded = meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure;
+
+        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !error_state_discarded)) &&
+            meta_request->vtable->build_resume_token_synced != NULL) {
+            token = meta_request->vtable->build_resume_token_synced(meta_request);
+        }
+
         /* Clean out the pending-stream-to-caller priority queue*/
         while (aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) > 0) {
             struct aws_s3_request *request = NULL;
@@ -2384,7 +2875,15 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         }
 
         /* Clean out any pending async-write future */
-        if (meta_request->synced_data.async_write.waker != NULL) {
+        if (meta_request->synced_data.async_write.buffered_data_ticket_future != NULL) {
+            /* We're waiting on the buffer pool to fulfill a (deferred) ticket reservation.
+             * Error it out so its completion callback fires; that callback owns invoking the
+             * waker and cleaning up the future (and releasing the ref it holds on the meta request).
+             * NOTE: set_error schedules the callback as an event-loop task (it was registered with
+             * register_event_loop_callback), so this does NOT run the callback synchronously here. */
+            aws_future_s3_buffer_ticket_set_error(
+                meta_request->synced_data.async_write.buffered_data_ticket_future, AWS_ERROR_S3_CANCELED);
+        } else if (meta_request->synced_data.async_write.waker != NULL) {
             pending_async_write_waker = meta_request->synced_data.async_write.waker;
             pending_async_write_waker_user_data = meta_request->synced_data.async_write.waker_user_data;
 
@@ -2414,10 +2913,41 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
-        if (finish_result.error_code && meta_request->recv_file_delete_on_failure) {
+
+        bool delete_on_failure = finish_result.error_code && finish_result.error_code != AWS_ERROR_S3_PAUSED &&
+                                 meta_request->recv_file_delete_on_failure;
+
+        /* Capture the file's last-modified time for the resume token. This must happen after the
+         * write handle is closed so the mtime reflects all written data. */
+        if (token != NULL && !delete_on_failure) {
+            FILE *reopened_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_reopen_mode);
+            if (reopened_file != NULL) {
+                uint64_t last_modified_ns = 0;
+                if (aws_file_get_last_modified_epoch(reopened_file, &last_modified_ns) == AWS_OP_SUCCESS) {
+                    token->file_last_modified_epoch_ns = last_modified_ns;
+                }
+                fclose(reopened_file);
+            }
+        }
+
+        if (delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
     }
+
+    /* Fire pause/error resume-token callbacks before the general finish callback below,
+     * so callers see the resume token before the operation is reported as complete.
+     * Both callbacks fire exactly once whenever registered — bindings may wrap them in
+     * futures, so skipping the invocation could deadlock the caller. A NULL token means
+     * no resumable state was captured. */
+    if (is_error && meta_request->on_error_resume_token) {
+        meta_request->on_error_resume_token(meta_request, token, finish_result.error_code, meta_request->user_data);
+    }
+    if (is_async_paused && pause_callback != NULL) {
+        /* Token may be NULL if the request type has no resumable state — resume restarts from the beginning. */
+        pause_callback(meta_request, token, AWS_ERROR_SUCCESS, pause_user_data);
+    }
+    token = aws_s3_meta_request_resume_token_release(token);
 
     while (!aws_linked_list_empty(&release_request_list)) {
         struct aws_linked_list_node *request_node = aws_linked_list_pop_front(&release_request_list);
@@ -2502,7 +3032,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     /* If using async-writes, call function which fills the buffer and/or hits EOF  */
     if (meta_request->request_body_using_async_writes == true) {
+        if (offset < meta_request->io_threaded_data.next_read_offset) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Async-write read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+                (void *)meta_request,
+                meta_request->io_threaded_data.next_read_offset,
+                offset);
+            aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+            return synchronous_read_future;
+        }
+
         bool eof = s_s3_meta_request_read_from_pending_async_writes(meta_request, buffer);
+        meta_request->io_threaded_data.next_read_offset = offset + buffer->len;
         aws_future_bool_set_result(synchronous_read_future, eof);
         return synchronous_read_future;
     }
@@ -2511,6 +3053,19 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     struct aws_input_stream *synchronous_stream =
         aws_http_message_get_body_stream(meta_request->initial_request_message);
     AWS_FATAL_ASSERT(synchronous_stream);
+
+    /* Non-parallel body sources require reads in increasing offset order.
+     * If a read arrives below the last offset seen, parts were prepared out of order. */
+    if (offset < meta_request->io_threaded_data.next_read_offset) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Sequential stream read out of order. Last offset was %" PRIu64 " but got %" PRIu64,
+            (void *)meta_request,
+            meta_request->io_threaded_data.next_read_offset,
+            offset);
+        aws_future_bool_set_error(synchronous_read_future, AWS_ERROR_INVALID_STATE);
+        return synchronous_read_future;
+    }
 
     /* Keep calling read() until we fill the buffer, or hit EOF */
     struct aws_stream_status status = {.is_end_of_stream = false, .is_valid = true};
@@ -2528,6 +3083,7 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         }
     }
 
+    meta_request->io_threaded_data.next_read_offset = offset;
     aws_future_bool_set_result(synchronous_read_future, status.is_end_of_stream);
 
 synchronous_read_done:
@@ -2560,6 +3116,86 @@ void aws_s3_meta_request_result_setup(
 
     result->response_status = response_status;
     result->error_code = error_code;
+}
+
+/* Completion callback for a deferred async-write buffer reservation.
+ * Runs on the meta request's io_event_loop thread. */
+static void s_s3_meta_request_on_async_write_buffer_reserved(void *user_data) {
+    struct aws_s3_meta_request *meta_request = user_data;
+    AWS_PRECONDITION(meta_request);
+
+    aws_simple_completion_callback *waker = NULL;
+    void *waker_user_data = NULL;
+    bool schedule_work = false;
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+
+        struct aws_future_s3_buffer_ticket *future = meta_request->synced_data.async_write.buffered_data_ticket_future;
+        AWS_FATAL_ASSERT(future != NULL);
+        meta_request->synced_data.async_write.buffered_data_ticket_future = NULL;
+
+        int error_code = aws_future_s3_buffer_ticket_get_error(future);
+        if (error_code == AWS_ERROR_SUCCESS && !aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+            /* Reservation granted. Claim the buffer so the resumed poll_write() can copy data into it. */
+            meta_request->synced_data.async_write.buffered_data_ticket =
+                aws_future_s3_buffer_ticket_get_result_by_move(future);
+            meta_request->synced_data.async_write.buffered_data =
+                aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
+        } else if (error_code != AWS_ERROR_SUCCESS) {
+            /* Reservation failed. Terminate the meta request; the resumed poll_write() will report the
+             * failure to the caller. Kick the process-work loop so update() observes the finish result
+             * and drives the meta request to completion. */
+            if (error_code == AWS_ERROR_S3_CANCELED) {
+                AWS_LOGF_TRACE(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Async-write buffer reservation canceled; meta request already finishing.",
+                    (void *)meta_request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Failed to acquire buffer for async write, error %d (%s).",
+                    (void *)meta_request,
+                    error_code,
+                    aws_error_str(error_code));
+            }
+            aws_s3_meta_request_set_fail_synced(meta_request, NULL, error_code);
+            schedule_work = true;
+        } else {
+            /* Reservation was granted, but the meta request already finished.
+             * Nothing to claim; releasing the future below returns the granted ticket to the pool. */
+            AWS_LOGF_TRACE(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Buffer reservation for async write fulfilled after meta request finished; "
+                "returning buffer to pool.",
+                (void *)meta_request);
+        }
+
+        aws_future_s3_buffer_ticket_release(future);
+
+        waker = meta_request->synced_data.async_write.waker;
+        meta_request->synced_data.async_write.waker = NULL;
+        waker_user_data = meta_request->synced_data.async_write.waker_user_data;
+        meta_request->synced_data.async_write.waker_user_data = NULL;
+
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+    /* END CRITICAL SECTION */
+
+    if (schedule_work) {
+        aws_s3_client_schedule_process_work(meta_request->client);
+    }
+
+    if (waker != NULL) {
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Invoking write waker, buffer reservation fulfilled. Ready for more data",
+            (void *)meta_request);
+        waker(waker_user_data);
+    }
+
+    aws_s3_meta_request_release(meta_request);
 }
 
 struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
@@ -2624,9 +3260,10 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
         if (meta_request->synced_data.async_write.buffered_data_ticket == NULL) {
 
             struct aws_future_s3_buffer_ticket *buffered_ticket_future;
-            /* NOTE: we acquire a forced-buffer because there's a risk of deadlock if we
-             * waited for a normal ticket reservation, respecting the pool's memory limit.
-             * (See "test_s3_many_async_uploads_without_data" for description of deadlock scenario) */
+            /* can_block=true: not granting this right away can block the meta request (deadlock risk
+             * if we waited on a normal reservation - see test_s3_many_async_uploads_without_data, and
+             * the can_block docs in s3_buffer_pool.h). The default pool grants synchronously (forced
+             * buffer); a custom pool may defer, which we handle below. */
 
             struct aws_s3_buffer_pool_reserve_meta meta = {
                 .size = meta_request->part_size,
@@ -2644,23 +3281,35 @@ struct aws_s3_meta_request_poll_write_result aws_s3_meta_request_poll_write(
                 } else {
                     meta_request->synced_data.async_write.buffered_data_ticket =
                         aws_future_s3_buffer_ticket_get_result_by_move(buffered_ticket_future);
-
-                    aws_future_s3_buffer_ticket_release(buffered_ticket_future);
-
                     meta_request->synced_data.async_write.buffered_data =
                         aws_s3_buffer_ticket_claim(meta_request->synced_data.async_write.buffered_data_ticket);
                 }
-            } else {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Illegal call to write(). Failed to acquire buffer memory.",
-                    (void *)meta_request);
-                illegal_usage_terminate_meta_request = true;
                 aws_future_s3_buffer_ticket_release(buffered_ticket_future);
+            } else {
+                /* The pool deferred the reservation. Ownership of buffered_ticket_future moves into
+                 * the meta request; the completion callback resumes poll_write() (or, if the meta
+                 * request finishes first, finish_default() errors the future) and releases it. */
+                AWS_LOGF_TRACE(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: write() pending, buffer reservation deferred by pool, waker registered ...",
+                    (void *)meta_request);
+
+                meta_request->synced_data.async_write.buffered_data_ticket_future = buffered_ticket_future;
+                meta_request->synced_data.async_write.waker = waker;
+                meta_request->synced_data.async_write.waker_user_data = user_data;
+                result.is_pending = true;
+
+                /* Keep the meta request alive until the ticket future callback invokes. */
+                aws_s3_meta_request_acquire(meta_request);
+                aws_future_s3_buffer_ticket_register_event_loop_callback(
+                    buffered_ticket_future,
+                    meta_request->io_event_loop,
+                    s_s3_meta_request_on_async_write_buffer_reserved,
+                    meta_request);
             }
         }
 
-        if (!illegal_usage_terminate_meta_request) {
+        if (!illegal_usage_terminate_meta_request && !result.is_pending) {
             /* Copy as much data as we can into the buffer */
             struct aws_byte_cursor processed_data =
                 aws_byte_buf_write_to_capacity(&meta_request->synced_data.async_write.buffered_data, &data);
@@ -2863,6 +3512,14 @@ bool aws_s3_meta_request_checksum_config_has_algorithm(
             return meta_request->checksum_config.response_checksum_algorithms.sha1;
         case AWS_SCA_SHA256:
             return meta_request->checksum_config.response_checksum_algorithms.sha256;
+        case AWS_SCA_SHA512:
+            return meta_request->checksum_config.response_checksum_algorithms.sha512;
+        case AWS_SCA_XXHASH64:
+            return meta_request->checksum_config.response_checksum_algorithms.xxhash64;
+        case AWS_SCA_XXHASH3_64:
+            return meta_request->checksum_config.response_checksum_algorithms.xxhash3_64;
+        case AWS_SCA_XXHASH3_128:
+            return meta_request->checksum_config.response_checksum_algorithms.xxhash3_128;
         default:
             return false;
     }

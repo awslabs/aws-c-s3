@@ -27,6 +27,10 @@
  * Note for custom pool implementations: Scheduler keeps track of all outstanding futures and will error them out when
  * request is paused or cancelled. Its still fine for memory pool implementation to deliver ticket (it will just be
  * released by future right away with no side effects) or just ignore the future if its already in error state.
+ * Note: buffer pool implementations should prefer returning reservations in the order they were requested.
+ * i.e. implementations should avoid returning reservations when there are pending reservations in the queue.
+ * Calling client has mitigations that will reinforce the order, but excessive out of order returns can result
+ * in resource exhaustion.
  */
 
 AWS_PUSH_SANE_WARNING_LEVEL
@@ -52,11 +56,13 @@ struct aws_s3_buffer_pool_reserve_meta {
     /* size of the buffer to reserve. */
     size_t size;
 
-    /* whether not granting reservation can result in request pipeline being blocked.
-     * Note: blocking is currently a terminal condition and that cannot be recovered from,
-     * i.e. meta request will be stuck and not make any process.
-     * As such buffer pool should either grant or error out reservation in sync.
-     * This scenario currently only occurs in the async_write flows. */
+    /* Whether withholding the reservation can block this meta request's progress (currently only the
+     * async-write flow). The pool can't hold such a reservation indefinitely (that can deadlock the
+     * client); it must resolve it, either synchronously (the default pool hands out a "forced" buffer
+     * that may exceed the memory limit) or by deferring. To defer, the pool returns a not-yet-done
+     * future and resolves it later as memory frees up; the caller waits on the future and resumes
+     * once it completes. A pool that defers must guarantee every deferred reservation is eventually
+     * resolved. */
     bool can_block;
 };
 
@@ -92,7 +98,9 @@ AWS_S3_API struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_release(struct aws_
 struct aws_s3_buffer_pool;
 
 struct aws_s3_buffer_pool_vtable {
-    /* Reserve a ticket. Returns a future that is granted whenever reservation can be made. */
+    /* Reserve a ticket. Returns a future that is granted whenever reservation can be made.
+        Note: implementations should do a best effort of completing futures
+        in the order reservation requests arrived in. */
     struct aws_future_s3_buffer_ticket *(
         *reserve)(struct aws_s3_buffer_pool *pool, struct aws_s3_buffer_pool_reserve_meta meta);
 

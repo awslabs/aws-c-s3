@@ -40,6 +40,8 @@ struct aws_s3_upload_request_checksum_context {
 
     /* Validation */
     size_t encoded_checksum_size;
+
+    bool has_review_callback;
 };
 
 /**
@@ -54,7 +56,8 @@ struct aws_s3_upload_request_checksum_context {
 AWS_S3_API
 struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new(
     struct aws_allocator *allocator,
-    const struct aws_s3_meta_request_checksum_config_storage *checksum_config);
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
+    bool has_review_callback);
 
 /**
  * Create a new upload request checksum context with an existing base64 encoded checksum value.
@@ -70,7 +73,8 @@ AWS_S3_API
 struct aws_s3_upload_request_checksum_context *aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
     struct aws_allocator *allocator,
     const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
-    struct aws_byte_cursor existing_base64_checksum);
+    struct aws_byte_cursor existing_base64_checksum,
+    bool has_review_callback);
 
 /**
  * Acquire a reference to the upload request checksum context.

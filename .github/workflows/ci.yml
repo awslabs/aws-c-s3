@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILDER_VERSION: v0.9.74
+  BUILDER_VERSION: latest
   BUILDER_SOURCE: releases
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
@@ -42,7 +42,7 @@ jobs:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
     - name: Checkout Sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
         # We can't use the `uses: docker://image` version yet, GitHub lacks authentication for actions -> packages
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
@@ -62,31 +62,13 @@ jobs:
           - name: clang-11
           - name: clang-15
           - name: clang-17
+          - name: clang-latest
           - name: gcc-4.8
           - name: gcc-5
           - name: gcc-6
           - name: gcc-7
           - name: gcc-8
           - name: gcc-11
-          - name: gcc-13
-          # See Issue: https://github.com/llvm/llvm-project/issues/59007. Although this issue
-          # has been fixed in LLVM, the fix will probably not propagate to older versions of Ubuntu and GCC 13.1.
-          #
-          # Starting with GLIBC version 2.34, the `dn_expand` function, previously found in `libresolv.so`, was moved to `libc.so`. This
-          # function is used internally by the `getaddrinfo()` system call.
-          #
-          # In our setup (As of December 2024), we are using an Ubuntu 18 Docker image on a newer Ubuntu host.
-          # However, due to compatibility issues between newer libasan.so in GCC 13.1
-          # and the older Ubuntu image, the linker does not link with `libresolv.so`.
-          # This results in crashes in `getaddrinfo()` since Ubuntu-18 GLIBC is 2.31.
-          #
-          # This problem does not occur on Ubuntu 22 and newer because GLIBC versions 2.34
-          # and above include `dn_expand` in `libc.so`, eliminating the dependency on
-          # `libresolv.so`.
-          #
-          # We can bypass this problem by linking with "resolv" manually until we bump
-          # our base Linux image to Ubuntu 22.
-            extra-build-flag: --cmake-extra=-DCMAKE_EXE_LINKER_FLAGS="-lresolv"
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -95,7 +77,24 @@ jobs:
     - name: Build ${{ env.PACKAGE_NAME }}
       run: |
         aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
-        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --compiler=${{ matrix.compiler.name }} ${{ matrix.compiler.extra-build-flag }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DAWS_ENABLE_S3_ENDPOINT_RESOLVER=ON
+        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-${{ env.LINUX_BASE_IMAGE }} build -p ${{ env.PACKAGE_NAME }} --compiler=${{ matrix.compiler.name }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DAWS_ENABLE_S3_ENDPOINT_RESOLVER=ON
+
+  linux-newer-compiler-compat:
+    runs-on: ubuntu-24.04 # latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - name: gcc-13
+    steps:
+    - uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ env.CRT_CI_ROLE }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    - name: Build ${{ env.PACKAGE_NAME }}
+      run: |
+        aws s3 cp s3://aws-crt-test-stuff/ci/${{ env.BUILDER_VERSION }}/linux-container-ci.sh ./linux-container-ci.sh && chmod a+x ./linux-container-ci.sh
+        ./linux-container-ci.sh ${{ env.BUILDER_VERSION }} aws-crt-ubuntu-22-x64 build -p ${{ env.PACKAGE_NAME }} --compiler=${{ matrix.compiler.name }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DAWS_ENABLE_S3_ENDPOINT_RESOLVER=ON
 
   clang-sanitizers:
     runs-on: ubuntu-24.04 # latest
@@ -203,7 +202,7 @@ jobs:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
     - name: Checkout Sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Build ${{ env.PACKAGE_NAME }} + consumers
       run: |
         python3 -m venv .venv
@@ -220,7 +219,26 @@ jobs:
         role-to-assume: ${{ env.CRT_CI_ROLE }}
         aws-region: ${{ env.AWS_DEFAULT_REGION }}
     - name: Checkout Sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+        chmod a+x builder
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
+
+  macos-s2n:
+    runs-on: macos-14 # latest
+    env:
+      AWS_CRT_USE_NON_FIPS_TLS_13: 1
+    steps:
+    - uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ env.CRT_CI_ROLE }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    - name: Checkout Sources
+      uses: actions/checkout@v6
     - name: Build ${{ env.PACKAGE_NAME }} + consumers
       run: |
         python3 -m venv .venv
@@ -228,6 +246,25 @@ jobs:
         python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
         chmod a+x builder
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
+
+  macos-x64-s2n:
+    runs-on: macos-14-large # latest
+    env:
+      AWS_CRT_USE_NON_FIPS_TLS_13: 1
+    steps:
+    - uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ env.CRT_CI_ROLE }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    - name: Checkout Sources
+      uses: actions/checkout@v6
+    - name: Build ${{ env.PACKAGE_NAME }} + consumers
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python3 -c "from urllib.request import urlretrieve; urlretrieve('${{ env.BUILDER_HOST }}/${{ env.BUILDER_SOURCE }}/${{ env.BUILDER_VERSION }}/builder.pyz?run=${{ env.RUN }}', 'builder')"
+        chmod a+x builder
+        ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
 
   # Test downstream repos.
   # This should not be required because we can run into a chicken and egg problem if there is a change that needs some fix in a downstream repo.

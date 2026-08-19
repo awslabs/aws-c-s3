@@ -44,12 +44,17 @@ enum aws_s3_errors {
     AWS_ERROR_S3_EXCEEDS_MEMORY_LIMIT,
     AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG,
     AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED,
-    AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE,
+    AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE,
     AWS_ERROR_S3_REQUEST_HAS_COMPLETED,
     AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS,
     AWS_ERROR_S3_RECV_FILE_NOT_FOUND,
     AWS_ERROR_S3_REQUEST_TIMEOUT,
     AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED,
+
+    /* Dont insert anything past this line.
+        Everything below is non-nefarious hacks to preserve backwards compat */
+    AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE =
+        AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE,
 
     AWS_ERROR_S3_END_RANGE = AWS_ERROR_ENUM_END_RANGE(AWS_C_S3_PACKAGE_ID)
 };
@@ -77,8 +82,8 @@ struct aws_s3_platform_info {
     struct aws_byte_cursor instance_type;
     /* max throughput for this instance type, in gigabits per second */
     double max_throughput_gbps;
-    /* The current build of this library specifically knows an optimal configuration for this
-     * platform */
+    /* Whether this library recommends automatically applying its optimized
+     * configuration for this instance type without explicit user opt-in. */
     bool has_recommended_configuration;
 };
 

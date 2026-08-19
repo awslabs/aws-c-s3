@@ -144,6 +144,7 @@ struct aws_s3_tester_client_options {
     uint32_t max_active_connections_override;
     void *factory_user_data;
     uint64_t memory_limit_in_bytes;
+    aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -153,6 +154,10 @@ struct aws_s3_tester_meta_request_options {
     struct aws_allocator *allocator;
 
     enum aws_s3_meta_request_type meta_request_type;
+
+    /* Optional. Passed through to aws_s3_meta_request_options.on_error_resume_token.
+     * Note: the callback receives the tester's user_data; tests should use their own statics. */
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
 
     /* Optional. When NULL, a message will attempted to be created by the meta request type specific options. */
     struct aws_http_message *message;
@@ -277,6 +282,10 @@ struct aws_s3_meta_request_test_results {
     bool did_validate;
     enum aws_s3_checksum_algorithm validation_algorithm;
 
+    /* Captured from meta_request->recv_file_direct_io_fallback_count via a finish callback.
+     * Tests can check this to verify the expected number of O_DIRECT fallbacks occurred. */
+    size_t recv_file_direct_io_fallback_count;
+
     /* Record data from progress_callback() */
     struct {
         uint64_t content_length;          /* Remember progress->content_length */
@@ -289,6 +298,8 @@ struct aws_s3_meta_request_test_results {
         struct aws_array_list metrics;
         /* The array_list of `struct aws_s3_request_metrics *` that the request succeed, to avoid retries counts. */
         struct aws_array_list succeed_metrics;
+        /* The array_list of `struct aws_s3_request_metrics *` that the request failed. */
+        struct aws_array_list fail_metrics;
     } synced_data;
 
     /* record data from the upload_review_callback */
@@ -323,7 +334,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
 /* Wait for the correct number of aws_s3_tester_notify_meta_request_finished to be called */
 void aws_s3_tester_wait_for_meta_request_finish(struct aws_s3_tester *tester);
 
-/* Wait forthe correct number of aws_s3_tester_notify_meta_request_shutdown to be called. */
+/* Wait for the correct number of aws_s3_tester_notify_meta_request_shutdown to be called. */
 void aws_s3_tester_wait_for_meta_request_shutdown(struct aws_s3_tester *tester);
 
 /* Notify the tester that a meta request has finished. */
@@ -472,7 +483,7 @@ int aws_s3_tester_validate_put_object_results(
 void aws_s3_tester_wait_for_client_shutdown(struct aws_s3_tester *tester);
 
 /*
- * Value to populate test stream with. Useful for cases where we need to verify that cheksums fail.
+ * Value to populate test stream with. Useful for cases where we need to verify that checksums fail.
  */
 enum aws_s3_test_stream_value {
     TEST_STREAM_VALUE_1,
@@ -526,7 +537,7 @@ extern const struct aws_byte_cursor g_put_object_prefix;
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 extern struct aws_byte_cursor g_test_bucket_name;
-/* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public
  */
 extern struct aws_byte_cursor g_test_public_bucket_name;

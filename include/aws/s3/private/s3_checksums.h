@@ -14,11 +14,15 @@ struct aws_s3_upload_request_checksum_context;
 
 /* List to check the checksum algorithm to use based on the priority. */
 static const enum aws_s3_checksum_algorithm s_checksum_algo_priority_list[] = {
+    AWS_SCA_XXHASH3_128,
+    AWS_SCA_XXHASH3_64,
     AWS_SCA_CRC64NVME,
     AWS_SCA_CRC32C,
     AWS_SCA_CRC32,
-    AWS_SCA_SHA1,
+    AWS_SCA_XXHASH64,
+    AWS_SCA_SHA512,
     AWS_SCA_SHA256,
+    AWS_SCA_SHA1,
 };
 AWS_STATIC_ASSERT(AWS_ARRAY_SIZE(s_checksum_algo_priority_list) == (AWS_SCA_END - AWS_SCA_INIT + 1));
 
@@ -26,6 +30,8 @@ struct aws_checksum_vtable {
     void (*destroy)(struct aws_s3_checksum *checksum);
     int (*update)(struct aws_s3_checksum *checksum, const struct aws_byte_cursor *buf);
     int (*finalize)(struct aws_s3_checksum *checksum, struct aws_byte_buf *out);
+    /* Optional. NULL for algorithms that cannot be combined. See aws_checksum_combine_digest. */
+    int (*combine)(struct aws_s3_checksum *head, uint64_t tail_value, uint64_t tail_length);
 };
 
 struct aws_s3_checksum {
@@ -36,6 +42,7 @@ struct aws_s3_checksum {
     bool good;
     union {
         struct aws_hash *hash;
+        struct aws_xxhash *xxhash;
         uint32_t crc_val_32bit;
         uint64_t crc_val_64bit;
     } impl;
@@ -51,6 +58,7 @@ struct aws_s3_meta_request_checksum_config_storage {
 
     enum aws_s3_checksum_location location;
     enum aws_s3_checksum_algorithm checksum_algorithm;
+    struct aws_byte_buf unknown_checksum_algo; /* if checksum algo is unknown this will have checksum name */
     bool validate_response_checksum;
     struct {
         bool crc64nvme;
@@ -58,6 +66,10 @@ struct aws_s3_meta_request_checksum_config_storage {
         bool crc32;
         bool sha1;
         bool sha256;
+        bool sha512;
+        bool xxhash64;
+        bool xxhash3_64;
+        bool xxhash3_128;
     } response_checksum_algorithms;
 };
 
@@ -211,6 +223,38 @@ int aws_checksum_update(struct aws_s3_checksum *checksum, const struct aws_byte_
  */
 AWS_S3_API
 int aws_checksum_finalize(struct aws_s3_checksum *checksum, struct aws_byte_buf *output);
+
+/**
+ * True if checksums of the algorithm can be combined via aws_checksum_combine_digest.
+ * Only the CRC algorithms (CRC32, CRC32C, CRC64NVME) can be.
+ */
+AWS_S3_API
+bool aws_checksum_algorithm_is_combinable(enum aws_s3_checksum_algorithm algorithm);
+
+/* Largest digest produced by an algorithm that satisfies aws_checksum_algorithm_is_combinable.
+ * The combinable algorithms are all CRCs, so sizeof(uint64_t) covers CRC64NVME and CRC32s. */
+#define AWS_S3_COMBINABLE_DIGEST_MAX_LEN sizeof(uint64_t)
+
+/**
+ * Folds the digest of one data block into `head`, so that `head` becomes the checksum of its own data
+ * followed by that block, without re-scanning either:
+ *
+ *   head = checksum(block_head)
+ *   tail_digest = checksum_finalize(block_tail)
+ *   aws_checksum_combine_digest(head, tail_digest, block_tail_length)
+ *   -> head == checksum(block_head || block_tail)
+ *
+ * Taking a digest rather than a live checksum lets the caller fold in a block long after the
+ * checksum that produced it is gone. `tail_length` is the length in bytes of the data that produced
+ * `tail_digest`, not the digest size.
+ *
+ * `head`'s algorithm must satisfy aws_checksum_algorithm_is_combinable.
+ * AWS_ERROR_UNSUPPORTED_OPERATION for a non-combinable algorithm,
+ * AWS_ERROR_INVALID_STATE if `head` is already finalized,
+ * AWS_ERROR_INVALID_ARGUMENT if `tail_digest` is not exactly the algorithm's digest size.
+ */
+AWS_S3_API
+int aws_checksum_combine_digest(struct aws_s3_checksum *head, struct aws_byte_cursor tail_digest, uint64_t tail_length);
 
 AWS_S3_API
 int aws_s3_meta_request_checksum_config_storage_init(

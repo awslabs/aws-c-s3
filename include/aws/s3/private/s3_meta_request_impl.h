@@ -54,6 +54,22 @@ struct aws_s3_prepare_request_payload {
     void *user_data;
 };
 
+/* One part's contribution to the meta request's whole-object checksum. Lives in
+ * aws_s3_meta_request.combine_slots at index (part_number - 1).
+ *
+ * Deliberately plain data: it owns nothing and points at nothing, so its lifetime is the meta
+ * request's and is independent of the request. That is what lets a request tear down its own running
+ * checksums at stream completion while its contribution to the whole-object checksum outlives it. */
+struct aws_s3_combine_slot {
+    /* Length in bytes of the part body the digest covers. */
+    uint64_t length;
+    /* Raw (not base64) digest of the part body, `digest_len` bytes. */
+    uint8_t digest[AWS_S3_COMBINABLE_DIGEST_MAX_LEN];
+    /* Zero until this part records its digest. A slot still zero when the meta request finishes means
+     * the part never completed, so the whole-object checksum cannot be assembled. */
+    size_t digest_len;
+};
+
 /* An event to be delivered on the meta-request's io_event_loop thread. */
 struct aws_s3_meta_request_event {
     enum aws_s3_meta_request_event_type {
@@ -124,6 +140,11 @@ struct aws_s3_meta_request_vtable {
     /* Pause the given request */
     int (*pause)(struct aws_s3_meta_request *meta_request, struct aws_s3_meta_request_resume_token **resume_token);
 
+    /* Optional. Build a resume token from current synced state; called with the synced-data lock held
+     * when a pause was requested (or an error occurred and on_error_resume_token is set).
+     * May return NULL to indicate no resumable state (caller must restart from the beginning). */
+    struct aws_s3_meta_request_resume_token *(*build_resume_token_synced)(struct aws_s3_meta_request *meta_request);
+
 #ifdef AWS_C_S3_ENABLE_TEST_STUBS
     /********************* TEST ONLY STUB **************************/
     /* A stub to the update implementation from meta request with the lock held. Only for tests. */
@@ -184,6 +205,8 @@ struct aws_s3_meta_request {
     aws_s3_meta_request_receive_body_callback_fn *body_callback;
     aws_s3_meta_request_receive_body_callback_ex_fn *body_callback_ex;
     aws_s3_meta_request_finish_fn *finish_callback;
+
+    aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
     aws_s3_meta_request_shutdown_fn *shutdown_callback;
     aws_s3_meta_request_progress_fn *progress_callback;
     aws_s3_meta_request_telemetry_fn *telemetry_callback;
@@ -223,6 +246,13 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
+        /* Total number of response-body bytes successfully delivered to the caller's sink
+         * (file or body callback), in order with no gaps. Used to build the download resume
+         * token on pause/error.
+         * TODO: delivery is strictly sequential today, so this is both the contiguous prefix and the total; a future
+         * parallel-write delivery path will need to track the two separately. */
+        uint64_t num_bytes_delivered;
+
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
          * If `event_delivery_task_scheduled` is true, then this task is scheduled.
@@ -246,6 +276,12 @@ struct aws_s3_meta_request {
         /* True if the finish result has been set. */
         uint32_t finish_result_set : 1;
 
+        /* Pause state (see aws_s3_meta_request_pause_async). Set once when a pause is requested;
+         * consumed during finish to build a resume token and fire the pause callback. */
+        uint32_t async_pause_requested : 1;
+        aws_s3_meta_request_pause_complete_fn *pause_complete_callback;
+        void *pause_complete_user_data;
+
         /* To track aws_s3_requests with cancellable HTTP streams */
         struct aws_linked_list cancellable_http_streams_list;
 
@@ -265,9 +301,14 @@ struct aws_s3_meta_request {
             struct aws_byte_buf buffered_data;
             struct aws_s3_buffer_ticket *buffered_data_ticket;
 
+            /* Set while we're waiting on the buffer pool to fulfill a (deferred) ticket reservation
+             * for buffered_data_ticket. While set, poll_write() returns result.is_pending. */
+            struct aws_future_s3_buffer_ticket *buffered_data_ticket_future;
+
             /* Waker callback.
              * Stored if a poll_write() call returns result.is_pending
-             * because we already had 1 part's worth of data.
+             * (because we already had 1 part's worth of data, or because we're
+             * waiting on the buffer pool to fulfill a ticket reservation).
              * Invoked when we're ready to accept another poll_write() call. */
             aws_simple_completion_callback *waker;
             void *waker_user_data;
@@ -300,6 +341,20 @@ struct aws_s3_meta_request {
         /* Total number of bytes that have been attempted to be delivered. (Will equal the sum of succeeded and
          * failed.)*/
         uint64_t num_bytes_delivery_completed;
+
+        /* Priority queue of requests that have acquired their buffer ticket but must wait
+         * for earlier parts to be dispatched for prepare first. This ensures sequential
+         * input stream reads happen in part-number order even when buffer pool reservations
+         * complete out of order.
+         * Note: each element is the pending request, callback to the next state and some user data
+         * (aws_s3_pending_prepare_entry). */
+        struct aws_priority_queue pending_put_prepare_queue;
+
+        /* Next part number that should be dispatched from pending_put_prepare_queue. */
+        uint32_t next_put_part_to_prepare;
+
+        /* Expected offset for the next sequential stream read. Used to detect out-of-order reads. */
+        uint64_t next_read_offset;
     } io_threaded_data;
 
     const bool should_compute_content_md5;
@@ -313,13 +368,49 @@ struct aws_s3_meta_request {
     /* running checksum of all the parts of a default get, or ranged get meta request*/
     struct aws_s3_checksum *meta_request_level_running_response_sum;
 
+    /* True when meta_request_level_running_response_sum uses an algorithm that aws_checksum_combine supports
+     * (the CRCs). In that case each part computes a digest of its own body on its connection's thread and
+     * records it in combine_slots, and the whole-object sum is assembled from those digests with an O(1)
+     * combine per part when the meta request finishes, so no thread re-reads the body. Otherwise the delivery
+     * thread feeds bytes into the running sum directly, which requires delivery to be in object order. */
+    bool meta_request_level_checksum_combinable;
+
+    /* Per-part digests will be folded into meta_request_level_running_response_sum, indexed by
+     * (part_number - 1). NULL unless meta_request_level_checksum_combinable is true.
+     *
+     * Not protected by the synced data lock, and does not need to be: the array is allocated once, before any
+     * part is dispatched, and never resized, so slot addresses are stable; each part writes only its own slot
+     * and touches no shared bookkeeping. */
+    struct aws_s3_combine_slot *combine_slots;
+    /* Number of entries in combine_slots. Zero when combine_slots is NULL. */
+    uint32_t combine_slot_count;
+
     /* The receiving file handler */
     FILE *recv_file;
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
+    /* When true, use O_DIRECT for writing received data to file */
+    bool recv_file_direct_io;
+    /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
+     * existing file size for CREATE_OR_APPEND. The actual write offset for each part is
+     * base_position + delivery_range_start. Only meaningful when recv_file_direct_io is true. */
+    uint64_t recv_file_direct_io_base_position;
+    /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
+     * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)
+     * also increment this counter. The warning is only logged when this transitions from 0,
+     * to avoid log spam. */
+    size_t recv_file_direct_io_fallback_count;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
+};
+
+/* Entry in the pending_put_prepare_queue. Holds a request that has acquired its buffer
+ * ticket but must wait for earlier parts to dispatch for prepare first. */
+struct aws_s3_pending_prepare_entry {
+    struct aws_s3_request *request;
+    aws_s3_meta_request_prepare_request_callback_fn *callback;
+    void *user_data;
 };
 
 /* Info for each part, that we need to remember until we send CompleteMultipartUpload */
@@ -423,6 +514,26 @@ AWS_S3_API
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request);
+
+/* Decides how the whole-object response checksum will be built, once the discovery response has told us which
+ * algorithm the object uses and how many parts it has. Call after aws_s3_check_headers_for_checksum() has run
+ * at the meta request level, before any part is dispatched, with the meta request's synced data lock HELD.
+ *
+ * For the CRCs, each part checksums its own body on its own connection's thread and records the digest in
+ * meta_request->combine_slots, which this function allocates. The digests are folded together with an O(1)
+ * combine per part when the meta request finishes, so no thread ever re-reads the object. Everything else
+ * falls back to feeding the running sum from the delivery thread.
+ *
+ * `discovery_request` is the request whose response headers were just inspected. If it carried body bytes of
+ * its own (a partNumber=1 GET rather than a HEAD), its digest is computed here, since its body may arrive before
+ * the algorithm was known.
+ *
+ * Only worth calling for multipart downloads; with a single request there are no parts to combine. */
+AWS_S3_API
+int aws_s3_meta_request_setup_checksum_combine_synced(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *discovery_request,
+    uint32_t total_num_parts);
 
 /* Add an event for delivery on the meta-request's io_event_loop thread.
  * These events usually correspond to callbacks that must fire sequentially and non-overlapping,

@@ -21,7 +21,7 @@ static int s_test_upload_request_checksum_context_get_checksum_cursor(struct aws
 
     /* Test get checksum cursor with context that has no calculated checksum */
     struct aws_s3_upload_request_checksum_context *context =
-        aws_s3_upload_request_checksum_context_new(allocator, &config);
+        aws_s3_upload_request_checksum_context_new(allocator, &config, false);
     ASSERT_NOT_NULL(context);
 
     struct aws_byte_cursor cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
@@ -32,8 +32,8 @@ static int s_test_upload_request_checksum_context_get_checksum_cursor(struct aws
 
     /* Test get checksum cursor with context that has calculated checksum */
     struct aws_byte_cursor existing_checksum = aws_byte_cursor_from_c_str("dGVzdA==");
-    context =
-        aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(allocator, &config, existing_checksum);
+    context = aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
+        allocator, &config, existing_checksum, false);
     ASSERT_NOT_NULL(context);
 
     cursor = aws_s3_upload_request_checksum_context_get_checksum_cursor(context);
@@ -49,6 +49,7 @@ static int s_test_upload_request_checksum_context_get_checksum_cursor(struct aws
 
     return AWS_OP_SUCCESS;
 }
+
 AWS_TEST_CASE(
     test_upload_request_checksum_context_get_checksum_cursor,
     s_test_upload_request_checksum_context_get_checksum_cursor)
@@ -68,7 +69,7 @@ static int s_test_upload_request_checksum_context_error_cases(struct aws_allocat
     struct aws_byte_cursor wrong_size_checksum = aws_byte_cursor_from_c_str("short");
     struct aws_s3_upload_request_checksum_context *context =
         aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
-            allocator, &config, wrong_size_checksum);
+            allocator, &config, wrong_size_checksum, false);
     ASSERT_NULL(context);
 
     /* Test helper functions with NULL context */
@@ -79,6 +80,35 @@ static int s_test_upload_request_checksum_context_error_cases(struct aws_allocat
     /* Test acquire/release with NULL context */
     ASSERT_NULL(aws_s3_upload_request_checksum_context_acquire(NULL));
     ASSERT_NULL(aws_s3_upload_request_checksum_context_release(NULL));
+
+    /* unknown algo */
+    struct aws_s3_meta_request_checksum_config_storage config2 = {
+        .allocator = allocator,
+        .checksum_algorithm = AWS_SCA_UNKNOWN,
+        .location = AWS_SCL_NONE,
+        .has_full_object_checksum = false,
+    };
+    struct aws_s3_upload_request_checksum_context *context2 =
+        aws_s3_upload_request_checksum_context_new(allocator, &config2, false);
+
+    ASSERT_NOT_NULL(context2);
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(context2));
+
+    /* unknown algo */
+    struct aws_s3_meta_request_checksum_config_storage config3 = {
+        .allocator = allocator,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .location = AWS_SCL_NONE,
+        .has_full_object_checksum = false,
+    };
+    struct aws_s3_upload_request_checksum_context *context3 =
+        aws_s3_upload_request_checksum_context_new(allocator, &config3, false);
+
+    ASSERT_NOT_NULL(context3);
+    ASSERT_FALSE(aws_s3_upload_request_checksum_context_should_calculate(context3));
+
+    aws_s3_upload_request_checksum_context_release(context2);
+    aws_s3_upload_request_checksum_context_release(context3);
 
     return AWS_OP_SUCCESS;
 }
@@ -101,7 +131,7 @@ static int s_test_upload_request_checksum_context_different_algorithms(struct aw
         AWS_ZERO_STRUCT(config.full_object_checksum);
 
         struct aws_s3_upload_request_checksum_context *context =
-            aws_s3_upload_request_checksum_context_new(allocator, &config);
+            aws_s3_upload_request_checksum_context_new(allocator, &config, false);
         ASSERT_NOT_NULL(context);
         ASSERT_INT_EQUALS(algorithms[i], context->algorithm);
         ASSERT_INT_EQUALS(AWS_SCL_HEADER, context->location);

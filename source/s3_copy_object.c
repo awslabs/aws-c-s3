@@ -8,6 +8,7 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <aws/common/xml_parser.h>
 
 /* Objects with size smaller than the constant below are bypassed as S3 CopyObject instead of multipart copy */
 static const size_t s_multipart_copy_minimum_object_size = GB_TO_BYTES(1);
@@ -488,14 +489,17 @@ static struct aws_future_void *s_s3_copy_object_prepare_request(struct aws_s3_re
             aws_byte_buf_reset(&request->request_body, false);
 
             /* Build the message to complete our multipart upload, which includes a payload describing all of our
-             * completed parts. */
-            message = aws_s3_complete_multipart_message_new(
+             * completed parts. The object size (discovered via the HEAD on the source) is passed explicitly so the
+             * x-amz-mp-object-size header matches what S3 computes from the copied parts; the base CopyObject request
+             * is bodyless, so its Content-Length cannot be used as the source of that value. */
+            message = aws_s3_complete_multipart_message_with_object_size_new(
                 meta_request->allocator,
                 meta_request->initial_request_message,
                 &request->request_body,
                 copy_object->upload_id,
                 &copy_object->synced_data.part_list,
-                NULL);
+                NULL,
+                copy_object->synced_data.content_length);
 
             break;
         }
@@ -569,7 +573,9 @@ static struct aws_string *s_etag_new_from_upload_part_copy_response(
     const char *xml_path[] = {"CopyPartResult", "ETag", NULL};
     aws_xml_get_body_at_path(allocator, xml_doc, xml_path, &etag_within_xml_quotes);
 
-    struct aws_byte_buf etag_within_quotes_byte_buf = aws_replace_quote_entities(allocator, etag_within_xml_quotes);
+    struct aws_byte_buf etag_within_quotes_byte_buf;
+    aws_byte_buf_init(&etag_within_quotes_byte_buf, allocator, 20);
+    aws_byte_buf_append_unescaped_xml(allocator, etag_within_xml_quotes, &etag_within_quotes_byte_buf);
 
     struct aws_string *stripped_etag =
         aws_strip_quotes(allocator, aws_byte_cursor_from_buf(&etag_within_quotes_byte_buf));
@@ -770,13 +776,20 @@ static void s_s3_copy_object_request_finished(
                 const char *xml_path[] = {"CompleteMultipartUploadResult", "ETag", NULL};
                 aws_xml_get_body_at_path(meta_request->allocator, xml_doc, xml_path, &etag_header_value);
                 if (etag_header_value.len > 0) {
-                    struct aws_byte_buf etag_header_value_byte_buf =
-                        aws_replace_quote_entities(meta_request->allocator, etag_header_value);
-
-                    aws_http_headers_set(
-                        request->send_data.response_headers,
-                        g_etag_header_name,
-                        aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
+                    struct aws_byte_buf etag_header_value_byte_buf;
+                    aws_byte_buf_init(&etag_header_value_byte_buf, meta_request->allocator, 20);
+                    if (aws_byte_buf_append_unescaped_xml(
+                            meta_request->allocator, etag_header_value, &etag_header_value_byte_buf)) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST, "Server returned unexpected etag format. skipping etag unescaping");
+                        aws_http_headers_set(
+                            request->send_data.response_headers, g_etag_header_name, etag_header_value);
+                    } else {
+                        aws_http_headers_set(
+                            request->send_data.response_headers,
+                            g_etag_header_name,
+                            aws_byte_cursor_from_buf(&etag_header_value_byte_buf));
+                    }
 
                     aws_byte_buf_clean_up(&etag_header_value_byte_buf);
                 }

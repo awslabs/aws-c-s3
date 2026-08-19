@@ -124,7 +124,7 @@ static int s_stream_chunk(
 
     /* Create checksum context */
     struct aws_s3_upload_request_checksum_context *context =
-        aws_s3_upload_request_checksum_context_new(allocator, &config);
+        aws_s3_upload_request_checksum_context_new(allocator, &config, false);
     if (!context) {
         return AWS_OP_ERR;
     }

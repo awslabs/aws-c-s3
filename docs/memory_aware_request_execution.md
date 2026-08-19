@@ -16,7 +16,7 @@ put or get, breaks it into smaller part-sized requests and executes those in
 parallel. CRT S3 client used to allocate part sized buffer for each of those
 requests and release it right after the request was done. That approach,
 resulted in a lot of very short lived allocations and allocator thrashing,
-overall leading to memory use spikes considerably higher than whats needed. To
+overall leading to memory use spikes considerably higher than what's needed. To
 address that, the client is switching to a pooled buffer approach, discussed
 below.
 
@@ -55,7 +55,9 @@ One complication is "forced" buffers. A forced buffer is one that
 comes from primary or secondary storage as usual, but it is allowed to exceed
 the memory limit. Forced buffers are only used when waiting for a normal ticket
 reservation could cause deadlock. (At time of writing, they're only used for
-async-writes)
+async-writes.) A custom buffer pool may instead *defer* such a reservation, returning a
+pending future it completes later when memory frees; see the `can_block` contract in
+`s3_buffer_pool.h`.
 
 ### Scheduling
 Running out of memory is a terminal condition within CRT and in general its not

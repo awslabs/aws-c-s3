@@ -37,6 +37,14 @@ static void s_s3_meta_request_default_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+/* Default meta requests have no resumable state. Returning NULL means pause is supported,
+ * but resuming must restart the request from the beginning. */
+static struct aws_s3_meta_request_resume_token *s_s3_meta_request_default_build_resume_token_synced(
+    struct aws_s3_meta_request *meta_request) {
+    (void)meta_request;
+    return NULL;
+}
+
 static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .update = s_s3_meta_request_default_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -46,6 +54,7 @@ static struct aws_s3_meta_request_vtable s_s3_meta_request_default_vtable = {
     .finished_request = s_s3_meta_request_default_request_finished,
     .destroy = s_s3_meta_request_default_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .build_resume_token_synced = s_s3_meta_request_default_build_resume_token_synced,
 };
 
 /* Allocate a new default meta request. */
@@ -108,6 +117,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_default_new(
     }
 
     meta_request_default->content_length = (size_t)content_length;
+    meta_request_default->request_body = options->request_body;
 
     /* If request_type is unknown, look it up from operation name */
     if (request_type != AWS_S3_REQUEST_TYPE_UNKNOWN) {
@@ -283,7 +293,21 @@ static struct aws_future_void *s_s3_default_prepare_request(struct aws_s3_reques
     request_prep->request = request;
     request_prep->on_complete = aws_future_void_acquire(asyncstep_prepare_request);
 
-    if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
+    if (meta_request_default->request_body.len > 0 && request->num_times_prepared == 0) {
+        /* Zero-copy: the caller donated memory holding the entire body. Borrow it directly instead of
+         * allocating a new buffer and copying into it.
+         *
+         * `request->request_body` is a non-owning view over the caller's memory: its allocator is NULL,
+         * so aws_byte_buf clean-up is a no-op and we never free or realloc the caller's memory. The view
+         * persists on the request across any retries. The caller's memory must stay valid until the meta
+         * request is fully torn down.
+         */
+        request->request_body =
+            aws_byte_buf_from_array(meta_request_default->request_body.ptr, meta_request_default->request_body.len);
+
+        /* Body is already in memory; skip the async read and go straight to building the message. */
+        s_s3_default_prepare_request_finish(request_prep, AWS_ERROR_SUCCESS);
+    } else if (meta_request_default->content_length > 0 && request->num_times_prepared == 0) {
         aws_byte_buf_init(&request->request_body, meta_request->allocator, meta_request_default->content_length);
 
         /* Kick off the async read */
@@ -347,7 +371,7 @@ static void s_s3_default_prepare_request_finish(
     struct aws_http_message *message = aws_s3_message_util_copy_http_message_no_body_all_headers(
         meta_request->allocator, meta_request->initial_request_message);
 
-    bool flexible_checksum = meta_request->checksum_config.location != AWS_SCL_NONE;
+    bool flexible_checksum = meta_request->checksum_config.checksum_algorithm != AWS_SCA_NONE;
     if (!flexible_checksum && meta_request->should_compute_content_md5) {
         /* If flexible checksum used, client MUST skip Content-MD5 header computation */
         aws_s3_message_util_add_content_md5_header(meta_request->allocator, &request->request_body, message);
@@ -362,8 +386,17 @@ static void s_s3_default_prepare_request_finish(
         /* Only PUT Object and Upload part support trailing checksum, that needs the special encoding even if the body
          * has 0 length. */
         /* Create checksum context from config if needed */
-        struct aws_s3_upload_request_checksum_context *checksum_context =
-            aws_s3_upload_request_checksum_context_new(meta_request->allocator, &meta_request->checksum_config);
+        struct aws_s3_upload_request_checksum_context *checksum_context = NULL;
+
+        /**
+         * Note: CompleteMPU is unique in the sense that checksum on the object level is the full object checksum for
+         * all parts and not checksum of the body. So avoid any additional checksum handling if default req is
+         * completeMPU.
+         */
+        if (meta_request_default->request_type != AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD) {
+            checksum_context = aws_s3_upload_request_checksum_context_new(
+                meta_request->allocator, &meta_request->checksum_config, meta_request->upload_review_callback != NULL);
+        }
 
         aws_s3_message_util_assign_body(
             meta_request->allocator, &request->request_body, NULL, message, checksum_context);

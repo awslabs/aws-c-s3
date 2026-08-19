@@ -22,13 +22,16 @@ const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Content-MD5"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc64nvme"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-metadata-directive"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging-directive"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-annotation-directive"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-if-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-if-modified-since"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-if-unmodified-since"),
 };
 
 const size_t g_s3_create_multipart_upload_excluded_headers_count =
@@ -58,13 +61,11 @@ const struct aws_byte_cursor g_s3_upload_part_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc64nvme"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32c"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-crc32"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha1"),
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-sha256"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-metadata-directive"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging-directive"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-annotation-directive"),
 };
 
 const size_t g_s3_upload_part_excluded_headers_count = AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers);
@@ -253,6 +254,20 @@ static const struct aws_byte_cursor s_checksum_type_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-checksum-type");
 static const struct aws_byte_cursor s_checksum_type_full_object = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("full_object");
 
+static const struct {
+    struct aws_byte_cursor src_name;
+    struct aws_byte_cursor dst_name;
+} s_copy_source_forwarded_headers[] = {
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-request-payer"),
+    },
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-source-expected-bucket-owner"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-expected-bucket-owner"),
+    },
+};
+
 const size_t g_s3_abort_multipart_upload_excluded_headers_count =
     AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers);
 
@@ -299,7 +314,8 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
         base_message,
         g_s3_create_multipart_upload_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_create_multipart_upload_excluded_headers),
-        false /*exclude_x_amz_meta*/);
+        false /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         return NULL;
@@ -322,7 +338,12 @@ struct aws_http_message *aws_s3_create_multipart_upload_message_new(
     }
 
     if (checksum_config && (checksum_config->location != AWS_SCL_NONE || checksum_config->has_full_object_checksum)) {
-        if (checksum_config->checksum_algorithm) {
+        if (checksum_config->checksum_algorithm == AWS_SCA_UNKNOWN) {
+            struct aws_byte_cursor checksum_name = aws_byte_cursor_from_buf(&checksum_config->unknown_checksum_algo);
+            if (aws_http_headers_set(headers, g_checksum_algorithm_header_name, checksum_name)) {
+                goto error_clean_up;
+            }
+        } else if (checksum_config->checksum_algorithm) {
             if (aws_http_headers_set(
                     headers,
                     g_checksum_algorithm_header_name,
@@ -374,7 +395,8 @@ struct aws_http_message *aws_s3_upload_part_message_new_streaming(
         base_message,
         g_s3_upload_part_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         return NULL;
@@ -429,7 +451,8 @@ struct aws_http_message *aws_s3_upload_part_message_new(
         base_message,
         g_s3_upload_part_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         return NULL;
@@ -477,7 +500,8 @@ struct aws_http_message *aws_s3_upload_part_copy_message_new(
         base_message,
         g_s3_upload_part_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_upload_part_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (message == NULL) {
         goto error_clean_up;
@@ -526,6 +550,44 @@ error_clean_up:
 }
 
 static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+
+/**
+ * Forward the request-scoped headers from the original CopyObject request onto the source-object HEAD that is used to
+ * size the copy. This HEAD is built from a fresh message, so headers that gate access to the source object are dropped
+ * unless we copy them explicitly:
+ *  - x-amz-request-payer: required, or the HEAD is rejected with 403 on a Requester Pays bucket.
+ *  - x-amz-source-expected-bucket-owner: on a CopyObject this asserts the *source* bucket owner, which maps to
+ *    x-amz-expected-bucket-owner on a HEAD of the source object. (The plain x-amz-expected-bucket-owner on a CopyObject
+ *    asserts the *destination* owner and must NOT be forwarded to the source HEAD.)
+ */
+static int s_s3_copy_source_object_head_forward_headers(
+    struct aws_http_message *base_message,
+    struct aws_http_message *message) {
+
+    struct aws_http_headers *base_headers = aws_http_message_get_headers(base_message);
+    if (base_headers == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_copy_source_forwarded_headers); ++i) {
+        struct aws_byte_cursor value;
+        if (aws_http_headers_get(base_headers, s_copy_source_forwarded_headers[i].src_name, &value) == AWS_OP_SUCCESS) {
+            struct aws_http_header header = {
+                .name = s_copy_source_forwarded_headers[i].dst_name,
+                .value = value,
+            };
+            if (aws_http_message_add_header(message, header)) {
+                return AWS_OP_ERR;
+            }
+        } else {
+            /* Avoid leaking the error code. */
+            aws_reset_error();
+        }
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 /**
  * For the CopyObject operation, create the initial HEAD message to retrieve the size of the copy source.
  */
@@ -562,6 +624,10 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         }
 
         if (aws_http_message_set_request_path(message, path)) {
+            goto error_cleanup;
+        }
+
+        if (s_s3_copy_source_object_head_forward_headers(base_message, message)) {
             goto error_cleanup;
         }
         return message;
@@ -648,6 +714,10 @@ struct aws_http_message *aws_s3_get_source_object_size_message_new(
         goto error_cleanup;
     }
 
+    if (s_s3_copy_source_object_head_forward_headers(base_message, message)) {
+        goto error_cleanup;
+    }
+
     aws_byte_buf_clean_up(&head_object_host_header);
     return message;
 
@@ -678,13 +748,14 @@ static const struct aws_byte_cursor s_open_end_bracket = AWS_BYTE_CUR_INIT_FROM_
 static const struct aws_byte_cursor s_close_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">");
 static const struct aws_byte_cursor s_close_bracket_new_line = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">\n");
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
-struct aws_http_message *aws_s3_complete_multipart_message_new(
+struct aws_http_message *aws_s3_complete_multipart_message_with_object_size_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
     struct aws_byte_buf *body_buffer,
     const struct aws_string *upload_id,
     const struct aws_array_list *parts,
-    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config,
+    uint64_t object_size) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
     AWS_PRECONDITION(body_buffer);
@@ -696,8 +767,6 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
     struct aws_http_message *message = NULL;
     bool set_checksums =
         checksum_config && (checksum_config->location != AWS_SCL_NONE || checksum_config->has_full_object_checksum);
-    const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
-    AWS_ASSERT(initial_message_headers);
     if (set_checksums) {
         mpu_algorithm_checksum_name =
             aws_get_completed_part_name_from_checksum_algorithm(checksum_config->checksum_algorithm);
@@ -706,7 +775,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             base_message,
             g_s3_complete_multipart_upload_with_checksum_excluded_headers,
             AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_with_checksum_excluded_headers),
-            true /*exclude_x_amz_meta*/);
+            true /*exclude_x_amz_meta*/,
+            false /*exclude_x_checksum_meta*/);
 
     } else {
         message = aws_s3_message_util_copy_http_message_no_body_filter_headers(
@@ -714,7 +784,8 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             base_message,
             g_s3_complete_multipart_upload_excluded_headers,
             AWS_ARRAY_SIZE(g_s3_complete_multipart_upload_excluded_headers),
-            true /*exclude_x_amz_meta*/);
+            true /*exclude_x_amz_meta*/,
+            false /*exclude_x_checksum_meta*/);
     }
 
     struct aws_http_headers *headers = NULL;
@@ -748,11 +819,15 @@ struct aws_http_message *aws_s3_complete_multipart_message_new(
             goto error_clean_up;
         }
     }
-    struct aws_byte_cursor content_length_cursor;
-    if (aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor) ==
-        AWS_OP_SUCCESS) {
-        /* Set content-length from base message as x-amz-mp-object-size. */
-        if (aws_http_headers_set(headers, aws_byte_cursor_from_c_str("x-amz-mp-object-size"), content_length_cursor)) {
+    /* Send the total object size as x-amz-mp-object-size so S3 can validate the assembled object. object_size of 0
+     * means "unknown" (e.g. a streaming upload of unknown length); in that case the header is omitted, matching the
+     * prior behavior of skipping it when the base message had no Content-Length. */
+    if (object_size > 0) {
+        char object_size_buffer[32];
+        int object_size_len = snprintf(object_size_buffer, sizeof(object_size_buffer), "%" PRIu64, object_size);
+        struct aws_byte_cursor object_size_cursor =
+            aws_byte_cursor_from_array(object_size_buffer, (size_t)object_size_len);
+        if (aws_http_headers_set(headers, aws_byte_cursor_from_c_str("x-amz-mp-object-size"), object_size_cursor)) {
             goto error_clean_up;
         }
     }
@@ -853,6 +928,32 @@ error_clean_up:
     return NULL;
 }
 
+struct aws_http_message *aws_s3_complete_multipart_message_new(
+    struct aws_allocator *allocator,
+    struct aws_http_message *base_message,
+    struct aws_byte_buf *body_buffer,
+    const struct aws_string *upload_id,
+    const struct aws_array_list *parts,
+    const struct aws_s3_meta_request_checksum_config_storage *checksum_config) {
+
+    /* Derive the object size from the base message's Content-Length, as the multipart upload path expects. A missing
+     * or unparseable Content-Length (e.g. a streaming upload of unknown length) yields 0, which tells the delegate to
+     * omit the x-amz-mp-object-size header. */
+    uint64_t object_size = 0;
+    struct aws_byte_cursor content_length_cursor;
+    const struct aws_http_headers *initial_message_headers = aws_http_message_get_headers(base_message);
+    if (initial_message_headers != NULL &&
+        aws_http_headers_get(initial_message_headers, g_content_length_header_name, &content_length_cursor) ==
+            AWS_OP_SUCCESS) {
+        if (aws_byte_cursor_utf8_parse_u64(content_length_cursor, &object_size)) {
+            object_size = 0;
+        }
+    }
+
+    return aws_s3_complete_multipart_message_with_object_size_new(
+        allocator, base_message, body_buffer, upload_id, parts, checksum_config, object_size);
+}
+
 struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
     struct aws_allocator *allocator,
     struct aws_http_message *base_message,
@@ -863,7 +964,8 @@ struct aws_http_message *aws_s3_abort_multipart_upload_message_new(
         base_message,
         g_s3_abort_multipart_upload_excluded_headers,
         AWS_ARRAY_SIZE(g_s3_abort_multipart_upload_excluded_headers),
-        true /*exclude_x_amz_meta*/);
+        true /*exclude_x_amz_meta*/,
+        true /*exclude_x_checksum_meta*/);
 
     if (aws_s3_message_util_set_multipart_request_path(allocator, upload_id, 0, false, message)) {
         goto error_clean_up;
@@ -1141,7 +1243,7 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_all_heade
     struct aws_allocator *allocator,
     struct aws_http_message *base_message) {
 
-    return aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false);
+    return aws_s3_message_util_copy_http_message_no_body_filter_headers(allocator, base_message, NULL, 0, false, false);
 }
 
 struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_headers(
@@ -1149,7 +1251,8 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     struct aws_http_message *base_message,
     const struct aws_byte_cursor *excluded_header_array,
     size_t excluded_header_array_size,
-    bool exclude_x_amz_meta) {
+    bool exclude_x_amz_meta,
+    bool exclude_x_amz_checksum) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(base_message);
@@ -1178,7 +1281,12 @@ struct aws_http_message *aws_s3_message_util_copy_http_message_no_body_filter_he
     }
 
     aws_s3_message_util_copy_headers(
-        base_message, message, excluded_header_array, excluded_header_array_size, exclude_x_amz_meta);
+        base_message,
+        message,
+        excluded_header_array,
+        excluded_header_array_size,
+        exclude_x_amz_meta,
+        exclude_x_amz_checksum);
 
     return message;
 
@@ -1192,7 +1300,8 @@ void aws_s3_message_util_copy_headers(
     struct aws_http_message *dest_message,
     const struct aws_byte_cursor *excluded_header_array,
     size_t excluded_header_array_size,
-    bool exclude_x_amz_meta) {
+    bool exclude_x_amz_meta,
+    bool exclude_x_amz_checksum) {
 
     size_t num_headers = aws_http_message_get_header_count(source_message);
 
@@ -1218,6 +1327,12 @@ void aws_s3_message_util_copy_headers(
 
         if (exclude_x_amz_meta) {
             if (aws_byte_cursor_starts_with_ignore_case(&header.name, &s_x_amz_meta_prefix)) {
+                continue;
+            }
+        }
+
+        if (exclude_x_amz_checksum) {
+            if (aws_s3_is_checksum_value_header_name(header.name)) {
                 continue;
             }
         }

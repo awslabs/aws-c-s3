@@ -9,6 +9,7 @@
 #include "aws/s3/private/s3_request_messages.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/common/string.h>
+#include <aws/common/system_info.h>
 #include <inttypes.h>
 
 /* Dont use buffer pool when we know response size, and its below this number,
@@ -33,6 +34,9 @@ static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_request *request,
     int error_code);
 
+static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_synced(
+    struct aws_s3_meta_request *meta_request);
+
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .update = s_s3_auto_ranged_get_update,
     .send_request_finish = aws_s3_meta_request_send_request_finish_default,
@@ -42,6 +46,7 @@ static struct aws_s3_meta_request_vtable s_s3_auto_ranged_get_vtable = {
     .finished_request = s_s3_auto_ranged_get_request_finished,
     .destroy = s_s3_meta_request_auto_ranged_get_destroy,
     .finish = aws_s3_meta_request_finish_default,
+    .build_resume_token_synced = s_build_download_resume_token_synced,
 };
 
 static int s_s3_auto_ranged_get_success_status(struct aws_s3_meta_request *meta_request) {
@@ -119,6 +124,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
     }
+
     AWS_LOGF_DEBUG(
         AWS_LS_S3_META_REQUEST, "id=%p Created new Auto-Ranged Get Meta Request.", (void *)&auto_ranged_get->base);
 
@@ -136,6 +142,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
+    aws_string_destroy(auto_ranged_get->s3_object_last_modified);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -173,16 +180,17 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
                    : AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
     }
 
+    /* If the object_size_hint indicates that it fits in a single part, try to get the file directly.
+     * This avoids a HEAD request and sizes the buffer reservation to the hint rather than full part_size.
+     * If the hint is wrong and the object is larger, the request will be cancelled and retried with ranged gets. */
+    if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0 &&
+        auto_ranged_get->object_size_hint <= meta_request->part_size) {
+        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
+    }
+
     /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
     if (!meta_request->checksum_config.validate_response_checksum) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE;
-    }
-
-    /* If the object_size_hint indicates that it is a small one part file, then try to get the file directly
-     * TODO: Bypass memory limiter so that we don't overallocate memory for small files
-     */
-    if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint <= meta_request->part_size) {
-        return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 
     /* Otherwise, do a headObject so that we can validate checksum if the file was uploaded as a single part */
@@ -265,10 +273,17 @@ static bool s_s3_auto_ranged_get_update(
                             1 /*part_number*/,
                             AWS_S3_REQUEST_FLAG_RECORD_RESPONSE_HEADERS |
                                 AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
-                        /* Note: our current default logic is to do part 1, discover size and then abort if payload its
-                         * too huge We optimistically reserve part size for it */
+                        /* Reserve only as much buffer as the hint suggests, capped at part_size.
+                         * If the hint is absent or zero, fall back to the full part_size reservation.
+                         * If the hint turns out to be too small, the cancellation in
+                         * s_s3_meta_request_headers_block_done fires before the body arrives, and the
+                         * mismatch handling below keeps the discovered size and fetches the data as
+                         * ranged gets instead of re-issuing a partNumber request. */
                         request->part_range_start = 0;
-                        request->part_range_end = meta_request->part_size - 1;
+                        request->part_range_end =
+                            (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0)
+                                ? aws_min_u64(auto_ranged_get->object_size_hint, meta_request->part_size) - 1
+                                : meta_request->part_size - 1;
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
                         break;
@@ -608,8 +623,8 @@ static int s_discover_object_range_and_size(
                 break;
             }
 
-            /* if the inital message had a ranged header, there should also be a Content-Range header that specifies the
-             * object range and total object size. Otherwise, the size and range should be equal to the
+            /* if the initial message had a ranged header, there should also be a Content-Range header that specifies
+             * the object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_size = content_length;
@@ -749,7 +764,8 @@ static void s_s3_auto_ranged_get_request_finished(
 
     bool found_object_size = false;
     bool request_failed = error_code != AWS_ERROR_SUCCESS;
-    bool first_part_size_mismatch = (error_code == AWS_ERROR_S3_INTERNAL_PART_SIZE_MISMATCH_RETRYING_WITH_RANGE);
+    bool first_part_buffer_size_mismatch =
+        (error_code == AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE);
     bool empty_file_error = false;
 
     if (request->discovers_object_size) {
@@ -769,9 +785,8 @@ static void s_s3_auto_ranged_get_request_finished(
             goto update_synced_data;
         }
         /* Always extract ETag header for part size estimation */
-        if (!request_failed || first_part_size_mismatch) {
+        if (!request_failed || first_part_buffer_size_mismatch) {
             struct aws_byte_cursor etag_header_value;
-            AWS_ASSERT(auto_ranged_get->etag == NULL);
             if (aws_http_headers_get(request->send_data.response_headers, g_etag_header_name, &etag_header_value) ==
                 AWS_OP_SUCCESS) {
                 AWS_LOGF_TRACE(
@@ -781,7 +796,10 @@ static void s_s3_auto_ranged_get_request_finished(
                     AWS_BYTE_CURSOR_PRI(etag_header_value));
 
                 if (!auto_ranged_get->initial_message_has_if_match_header) {
-                    /* Store ETag if needed for If-Match header */
+                    /* Store ETag if needed for If-Match header. A second discovery request can
+                     * finish after an empty-file redo: free any previously captured value so the
+                     * latest discovery wins and nothing leaks. */
+                    aws_string_destroy(auto_ranged_get->etag);
                     auto_ranged_get->etag =
                         aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
                 }
@@ -790,6 +808,18 @@ static void s_s3_auto_ranged_get_request_finished(
                 aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
                 error_code = AWS_ERROR_S3_MISSING_ETAG;
                 goto update_synced_data;
+            }
+
+            /* Capture Last-Modified for resume token. A second discovery request can finish after
+             * an empty-file redo: free any previously captured value so the latest discovery wins
+             * and nothing leaks. */
+            struct aws_byte_cursor last_modified_value;
+            struct aws_byte_cursor last_modified_name = aws_byte_cursor_from_c_str("Last-Modified");
+            if (aws_http_headers_get(request->send_data.response_headers, last_modified_name, &last_modified_value) ==
+                AWS_OP_SUCCESS) {
+                aws_string_destroy(auto_ranged_get->s3_object_last_modified);
+                auto_ranged_get->s3_object_last_modified =
+                    aws_string_new_from_cursor(meta_request->allocator, &last_modified_value);
             }
             /* Extract number of parts stored in S3 from ETag and calculate estimated part size */
             uint32_t num_parts = 0;
@@ -805,6 +835,8 @@ static void s_s3_auto_ranged_get_request_finished(
                     num_parts,
                     auto_ranged_get->estimated_object_stored_part_size);
             } else {
+                /* avoid leaking the error code */
+                aws_reset_error();
                 num_parts = 1;
                 /* Failed to parse ETags */
                 AWS_LOGF_WARN(
@@ -812,7 +844,6 @@ static void s_s3_auto_ranged_get_request_finished(
                     "id=%p Failed to parse ETags, fallback to default part size.",
                     (void *)meta_request);
                 auto_ranged_get->estimated_object_stored_part_size = g_default_part_size_fallback;
-                goto update_synced_data;
             }
             auto_ranged_get->num_stored_parts = num_parts;
         }
@@ -837,6 +868,15 @@ static void s_s3_auto_ranged_get_request_finished(
                 /* Apply a buffer pool alignment to the calculated result. */
                 out_request_optimal_range_size = aws_s3_buffer_pool_derive_aligned_buffer_size(
                     meta_request->client->buffer_pool, out_request_optimal_range_size);
+                /* For O_DIRECT download, also ensure page alignment.
+                 * Buffer pool typically aligns to chunk_size which is page-aligned, but apply
+                 * a defensive round-up here to guarantee the invariant. */
+                if (meta_request->recv_file_direct_io) {
+                    size_t page_size = aws_system_info_page_size();
+                    if (out_request_optimal_range_size % page_size != 0) {
+                        out_request_optimal_range_size = ((out_request_optimal_range_size / page_size) + 1) * page_size;
+                    }
+                }
                 AWS_LOGF_INFO(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Override the part size to be optimal. part_size=%" PRIu64 ".",
@@ -961,7 +1001,11 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
-            if (!first_part_size_mismatch && first_part_size) {
+            auto_ranged_get->synced_data.object_size = object_size;
+            if (!first_part_buffer_size_mismatch && first_part_size) {
+                /* Only record the discovered first-part size on a successful partNumber request.
+                 * On a buffer-size mismatch the request was cancelled before the body arrived, so
+                 * we fall back to ranged gets using the client part_size (already the default). */
                 auto_ranged_get->synced_data.first_part_size = first_part_size;
             }
             if (auto_ranged_get->synced_data.object_range_empty == 0) {
@@ -970,6 +1014,15 @@ update_synced_data:
                     auto_ranged_get->synced_data.first_part_size,
                     object_range_start,
                     object_range_end);
+            }
+
+            /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding
+             * here also means every part dispatched afterwards sees the decision already made. */
+            if (meta_request->checksum_config.validate_response_checksum && error_code == AWS_ERROR_SUCCESS) {
+                if (aws_s3_meta_request_setup_checksum_combine_synced(
+                        meta_request, request, auto_ranged_get->synced_data.total_num_parts) != AWS_OP_SUCCESS) {
+                    error_code = aws_last_error_or_unknown();
+                }
             }
         }
 
@@ -980,9 +1033,13 @@ update_synced_data:
                 break;
             case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
                 AWS_LOGF_DEBUG(AWS_LS_S3_META_REQUEST, "id=%p Get Part Number completed.", (void *)meta_request);
-                if (first_part_size_mismatch && found_object_size) {
-                    /* We canceled GET_OBJECT_WITH_PART_NUMBER_1 request because the Content-Length was bigger than
-                     * part_size. Try to fetch the first part again as a ranged get */
+                if (first_part_buffer_size_mismatch && found_object_size) {
+                    /* The hint-sized buffer was too small to hold the first part, so the partNumber
+                     * request was cancelled before its body arrived. We already parsed the object size
+                     * from the cancelled response's headers, so we keep that discovered range and fetch
+                     * the data as ranged gets using the client part_size. Note: the recovery ranged gets
+                     * may not align to stored part boundaries, so per-part checksum validation may not
+                     * be possible in this case. */
                     auto_ranged_get->synced_data.num_parts_requested = 0;
                     break;
                 }
@@ -1067,4 +1124,41 @@ update_synced_data:
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+}
+
+static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_synced(
+    struct aws_s3_meta_request *meta_request) {
+
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+
+    struct aws_s3_meta_request_resume_token *token = aws_s3_meta_request_resume_token_new(meta_request->allocator);
+    token->type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT;
+    token->part_size = meta_request->part_size;
+    token->total_num_parts = auto_ranged_get->synced_data.total_num_parts;
+    /* Range fields stay 0 when the object size was never discovered (paused before the
+     * first response) or the object is empty. */
+    if (auto_ranged_get->synced_data.object_range_known && !auto_ranged_get->synced_data.object_range_empty) {
+        token->object_range_start = auto_ranged_get->synced_data.object_range_start;
+        token->object_range_end = auto_ranged_get->synced_data.object_range_end;
+        /* Full object size: for a ranged download this is larger than the range being fetched. */
+        token->object_size = auto_ranged_get->synced_data.object_size;
+    }
+    token->num_parts_completed = auto_ranged_get->synced_data.num_parts_successful;
+
+    if (auto_ranged_get->etag) {
+        token->etag = aws_string_new_from_string(meta_request->allocator, auto_ranged_get->etag);
+    }
+
+    if (auto_ranged_get->s3_object_last_modified) {
+        token->s3_object_last_modified =
+            aws_string_new_from_string(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
+    }
+
+    /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
+     * prefix and the total. A parallel-write delivery path will need to track the two
+     * separately, diverging total (may have gaps) from continues (gap-free prefix). */
+    token->continuous_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+
+    return token;
 }

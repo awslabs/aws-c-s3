@@ -66,7 +66,7 @@ const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LIT
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
-/* If `$CRT_S3_TEST_BUCKET_NAME` envrionment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
+/* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use `$CRT_S3_TEST_BUCKET_NAME-public`; otherwise, use
  * aws-c-s3-test-bucket-public */
 struct aws_byte_cursor g_test_public_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket-public");
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use
@@ -194,6 +194,7 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_error_code = result->error_code;
     meta_request_test_results->did_validate = result->did_validate;
     meta_request_test_results->validation_algorithm = result->validation_algorithm;
+    meta_request_test_results->recv_file_direct_io_fallback_count = meta_request->recv_file_direct_io_fallback_count;
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -263,6 +264,8 @@ static void s_s3_test_meta_request_telemetry(
     aws_array_list_push_back(&meta_request_test_results->synced_data.metrics, &metrics);
     if (aws_s3_request_metrics_get_error_code(metrics) == AWS_ERROR_SUCCESS) {
         aws_array_list_push_back(&meta_request_test_results->synced_data.succeed_metrics, &metrics);
+    } else {
+        aws_array_list_push_back(&meta_request_test_results->synced_data.fail_metrics, &metrics);
     }
     aws_s3_request_metrics_acquire(metrics);
     aws_s3_tester_unlock_synced_data(tester);
@@ -560,6 +563,8 @@ void aws_s3_meta_request_test_results_init(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.succeed_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
+    aws_array_list_init_dynamic(
+        &test_meta_request->synced_data.fail_metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
 }
 
 void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_results *test_meta_request) {
@@ -577,8 +582,10 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
         aws_s3_request_metrics_release(metrics);
     }
     aws_array_list_clean_up(&test_meta_request->synced_data.metrics);
-    /* We don't need to release the metrics from the succeed list, since it's already released from the main list. */
+    /* We don't need to release the metrics from succeed/fail lists, since they're already released from the main list.
+     */
     aws_array_list_clean_up(&test_meta_request->synced_data.succeed_metrics);
+    aws_array_list_clean_up(&test_meta_request->synced_data.fail_metrics);
 
     for (size_t i = 0; i < test_meta_request->upload_review.part_count; ++i) {
         aws_string_destroy(test_meta_request->upload_review.part_checksums_array[i]);
@@ -1418,6 +1425,7 @@ int aws_s3_tester_client_new(
         .max_active_connections_override = options->max_active_connections_override,
         .enable_s3express = options->s3express_provider_override_factory != NULL,
         .memory_limit_in_bytes = options->memory_limit_in_bytes,
+        .buffer_pool_factory_fn = options->buffer_pool_factory_fn,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,
@@ -1547,6 +1555,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .object_size_hint = options->object_size_hint,
         .fio_opts = options->fio_opts,
         .part_size = options->part_size,
+        .on_error_resume_token = options->on_error_resume_token,
     };
 
     if (options->mock_server) {
@@ -1625,6 +1634,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 meta_request_options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
                 meta_request_options.recv_file_option = options->get_options.recv_file_option;
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
+                meta_request_options.recv_file_delete_on_failure = options->get_options.recv_file_delete_on_failure;
             }
             meta_request_options.message = message;
             meta_request_options.force_dynamic_part_size = options->get_options.force_dynamic_part_size;
@@ -2368,6 +2378,15 @@ static struct aws_http_message *s_copy_object_request_new(
 
     struct aws_http_header host_header = {.name = g_host_header_name, .value = endpoint};
     if (aws_http_message_add_header(message, host_header)) {
+        goto error_clean_up_message;
+    }
+
+    /* Copy Object request has a content length of 0 */
+    struct aws_http_header content_length_header = {
+        .name = g_content_length_header_name,
+        .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("0"),
+    };
+    if (aws_http_message_add_header(message, content_length_header)) {
         goto error_clean_up_message;
     }
 
