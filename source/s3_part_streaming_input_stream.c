@@ -40,8 +40,8 @@ struct aws_s3_part_streaming_input_stream_impl {
     size_t chunk_load_size;
 
     /* The reading counters */
-    /* Incase the `offset` is not aligned with page size. The offset - page_aligned_offset will be aligned the page size
-     * to load the chunk. And read from the chunk can start from this `page_aligned_offset` */
+    /* In case the `offset` is not aligned with page size. The offset - page_aligned_offset will be aligned the page
+     * size to load the chunk. And read from the chunk can start from this `page_aligned_offset` */
     size_t page_aligned_offset;
     /* The offset of the chunk in the `reading_chunk_buf` that will start reading. */
     size_t in_chunk_offset;
@@ -92,7 +92,7 @@ static void s_kick_off_next_load(struct aws_s3_part_streaming_input_stream_impl 
         /* Align the remaining length with the page size. */
         if (remaining_length < impl->chunk_load_size) {
             size_t aligned_remaining_length = remaining_length % impl->page_size;
-            /* Read more tha needed to align with the page size. */
+            /* Read more than needed to align with the page size. */
             if (aligned_remaining_length > 0) {
                 remaining_length = remaining_length + impl->page_size - aligned_remaining_length;
                 AWS_LOGF_TRACE(

@@ -623,8 +623,8 @@ static int s_discover_object_range_and_size(
                 break;
             }
 
-            /* if the inital message had a ranged header, there should also be a Content-Range header that specifies the
-             * object range and total object size. Otherwise, the size and range should be equal to the
+            /* if the initial message had a ranged header, there should also be a Content-Range header that specifies
+             * the object range and total object size. Otherwise, the size and range should be equal to the
              * total_content_length. */
             if (!auto_ranged_get->initial_message_has_range_header) {
                 object_size = content_length;
@@ -835,6 +835,8 @@ static void s_s3_auto_ranged_get_request_finished(
                     num_parts,
                     auto_ranged_get->estimated_object_stored_part_size);
             } else {
+                /* avoid leaking the error code */
+                aws_reset_error();
                 num_parts = 1;
                 /* Failed to parse ETags */
                 AWS_LOGF_WARN(
@@ -842,7 +844,6 @@ static void s_s3_auto_ranged_get_request_finished(
                     "id=%p Failed to parse ETags, fallback to default part size.",
                     (void *)meta_request);
                 auto_ranged_get->estimated_object_stored_part_size = g_default_part_size_fallback;
-                goto update_synced_data;
             }
             auto_ranged_get->num_stored_parts = num_parts;
         }
