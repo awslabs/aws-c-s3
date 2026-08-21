@@ -222,6 +222,11 @@ struct aws_s3_meta_request {
     /* Track the number of requests being prepared for this meta request. */
     struct aws_atomic_var num_request_being_prepared;
 
+    /* Number of parts accepted for parallel write but not yet written: writes in flight plus
+     * requests parked on `synced_data.pending_write_list`. Mutated only under the synced-data
+     * lock; declared atomic so the client's process-work thread can read it without the lock. */
+    struct aws_atomic_var num_parts_pending_write;
+
     struct {
         struct aws_mutex lock;
 
@@ -287,6 +292,12 @@ struct aws_s3_meta_request {
 
         /* To track aws_future_s3_buffers that might need to be cleaned up on cancel */
         struct aws_linked_list pending_buffer_futures;
+
+        /* Requests on the parallel-write path that are holding a ref (and their buffer ticket) while
+         * they wait for a write slot, because `max_pending_writes` writes are already in flight.
+         * A completing write task pops the front entry and schedules it, so this list is non-empty
+         * only while a write task is in flight and the drain cannot stall. */
+        struct aws_linked_list pending_write_list;
 
         /* Data for async-writes. */
         struct aws_s3_async_write_data {
@@ -406,6 +417,11 @@ struct aws_s3_meta_request {
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;
+
+    /* Resolved cap on how many parallel writes may be in flight at once. Requests beyond the cap
+     * park on `synced_data.pending_write_list`. Zero means no cap (every part dispatches
+     * immediately), which is the behavior when the parallel-write path is not bounded. */
+    uint32_t max_pending_writes;
 };
 
 /* Entry in the pending_put_prepare_queue. Holds a request that has acquired its buffer

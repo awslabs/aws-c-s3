@@ -1988,6 +1988,16 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
+    /* Don't start new parts while this meta request already has a full queue of received parts waiting
+     * on the disk. Those parts are each holding a buffer, so without this the pile-up would keep
+     * growing until it drained the buffer pool and stalled every meta request on the client, rather
+     * than just slowing this one to the speed of its disk. Zero means the meta request is not on the
+     * bounded parallel-write path, so there is nothing to throttle. */
+    if (meta_request->max_pending_writes > 0 &&
+        aws_atomic_load_int(&meta_request->num_parts_pending_write) >= meta_request->max_pending_writes) {
+        return false;
+    }
+
     /* Nothing blocks the meta request to create more requests */
     return true;
 }

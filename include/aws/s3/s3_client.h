@@ -382,6 +382,25 @@ struct aws_s3_file_io_options {
      * In summary, O_DIRECT is a potentially powerful tool that should be used with caution.
      */
     bool direct_io;
+
+    /**
+     * Approximate number of received parts allowed to be waiting on a disk write at once, for
+     * downloads that write to `recv_filepath` with `direct_io` enabled.
+     *
+     * The network is typically faster than the disk. Without a bound, received parts pile up
+     * waiting to be written, each holding its part buffer, until they consume the client's whole
+     * memory limit -- at which point no new part can reserve memory and the transfer stalls in
+     * bursts instead of settling at disk speed. This caps the pile-up and stops the meta request
+     * from starting new parts while the queue is full, so the transfer converges on disk speed
+     * with the connections kept busy.
+     *
+     * Lower values serialize the disk and give up the benefit of writing parts in parallel; higher
+     * values keep the device queue deep at the cost of holding more part buffers.
+     *
+     * Default to the number of connections the meta request is allowed to keep active, which
+     * already accounts for `disk_throughput_gbps` when `should_stream` is set.
+     **/
+    uint32_t max_pending_writes;
 };
 
 /**

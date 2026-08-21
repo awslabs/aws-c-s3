@@ -205,6 +205,10 @@ struct aws_s3_request {
     /* Linked list node used for tracking buffer acquire futures. */
     struct aws_linked_list_node pending_buffer_future_list_node;
 
+    /* Linked list node used to park this request when the parallel-write queue is at its cap.
+     * Only used on the parallel-write delivery path. */
+    struct aws_linked_list_node pending_write_list_node;
+
     /* The meta request lock must be held to access the data */
     struct {
         /* The underlying http stream, only valid when the request is active from HTTP level */

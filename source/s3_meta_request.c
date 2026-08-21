@@ -219,8 +219,10 @@ int aws_s3_meta_request_init_base(
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_atomic_init_int(&meta_request->num_requests_network, 0);
     aws_atomic_init_int(&meta_request->num_request_being_prepared, 0);
+    aws_atomic_init_int(&meta_request->num_parts_pending_write, 0);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
+    aws_linked_list_init(&meta_request->synced_data.pending_write_list);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -435,11 +437,24 @@ int aws_s3_meta_request_init_base(
         if (direct_io) {
             meta_request->recv_file_direct_io = true;
             meta_request->recv_file_direct_io_base_position = direct_io_base_position;
+
+            /* Bound the parallel-write queue. Default to the connections this meta request may keep
+             * active, which already tracks `disk_throughput_gbps` when `should_stream` is set, so the
+             * queue depth follows the caller's own disk estimate rather than a magic number.
+             * Clamped to at least 1: a zero cap here would park every part with no write in flight
+             * to pop it, and the meta request would never finish. */
+            meta_request->max_pending_writes = meta_request->fio_opts.max_pending_writes > 0
+                                                   ? meta_request->fio_opts.max_pending_writes
+                                                   : aws_s3_client_get_max_active_connections(client, meta_request);
+            meta_request->max_pending_writes = aws_max_u32(meta_request->max_pending_writes, 1);
+
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT enabled for download write path. base_position=%" PRIu64,
+                "id=%p: O_DIRECT enabled for download write path. base_position=%" PRIu64
+                " max_pending_writes=%" PRIu32,
                 (void *)meta_request,
-                direct_io_base_position);
+                direct_io_base_position,
+                meta_request->max_pending_writes);
         }
     }
 
@@ -751,6 +766,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
 
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.cancellable_http_streams_list));
     AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_buffer_futures));
+    AWS_ASSERT(aws_linked_list_empty(&meta_request->synced_data.pending_write_list));
 
     aws_s3_meta_request_result_clean_up(meta_request, &meta_request->synced_data.finish_result);
 
@@ -2266,6 +2282,15 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
 static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
+/* Schedule `request`'s parallel write on one of the body-streaming event loops.
+ * Caller must have already accounted for the request in `num_parts_pending_write`. */
+static void s_s3_parallel_write_schedule(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
+    aws_task_init(&request->write_task, s_s3_parallel_write_task, request, "s3_parallel_write");
+    aws_event_loop_schedule_task_now(loop, &request->write_task);
+}
+
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
@@ -2280,9 +2305,18 @@ void aws_s3_meta_request_stream_response_body_synced(
     if (meta_request->recv_file_direct_io && request->part_number > 1) {
         ++meta_request->synced_data.num_parts_delivery_sent;
         aws_s3_request_acquire(request); /* prevent release while write task is pending */
-        struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
-        aws_task_init(&request->write_task, s_s3_parallel_write_task, request, "s3_parallel_write");
-        aws_event_loop_schedule_task_now(loop, &request->write_task);
+
+        /* The network is typically faster than the disk, so an unbounded dispatch here lets
+         * write-pending buffers consume the whole buffer pool and stall the client. Cap the writes
+         * in flight and park the overflow instead. `num_parts_pending_write` counts writes in flight
+         * plus parked requests, so exceeding the cap means the in-flight writes are already at it. */
+        size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
+        if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
+            aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &request->pending_write_list_node);
+            return;
+        }
+
+        s_s3_parallel_write_schedule(request);
         return;
     }
 
@@ -2538,12 +2572,30 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
         s_deliver_body_to_sink(meta_request, &response_body, write_offset, request);
     }
 
-    /* Increment delivery counters and finish metrics (same as delivery task would do) */
+    /* Increment delivery counters and finish metrics (same as delivery task would do).
+     * This runs for every task status, including a canceled event loop, so the parked-request
+     * chain below always keeps moving and the meta request can reach its finish state. */
+    struct aws_s3_request *next_request = NULL;
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
         ++meta_request->synced_data.num_parts_delivery_completed;
         aws_s3_request_finish_up_metrics_synced(request, meta_request);
+
+        aws_atomic_fetch_sub(&meta_request->num_parts_pending_write, 1);
+
+        /* Hand the freed write slot to the request that has been waiting longest. Popping in the
+         * same critical section as the decrement keeps the writes in flight pinned at the cap
+         * while anything is parked, which is what lets the dispatch check use a single counter. */
+        if (!aws_linked_list_empty(&meta_request->synced_data.pending_write_list)) {
+            struct aws_linked_list_node *node =
+                aws_linked_list_pop_front(&meta_request->synced_data.pending_write_list);
+            next_request = AWS_CONTAINER_OF(node, struct aws_s3_request, pending_write_list_node);
+        }
         aws_s3_meta_request_unlock_synced_data(meta_request);
+    }
+
+    if (next_request != NULL) {
+        s_s3_parallel_write_schedule(next_request);
     }
 
     aws_s3_client_schedule_process_work(meta_request->client);
