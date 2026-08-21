@@ -275,6 +275,11 @@ struct aws_s3_client {
     /* The calculated ideal number of HTTP connections, based on throughput target and throughput per connection. */
     const uint32_t ideal_connection_count;
 
+    /* Client-wide cap on parts waiting on a disk write at once, across all meta requests. The buffer
+     * pool is client-wide, so this is what actually bounds how much of it write-pending parts can hold.
+     * Resolved from `fio_opts.max_pending_writes` when set, otherwise from `ideal_connection_count`. */
+    const uint32_t max_pending_writes;
+
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
@@ -371,6 +376,13 @@ struct aws_s3_client {
 
         /* Number of overall requests currently streaming the request body instead of buffering. */
         struct aws_atomic_var num_requests_streaming_request_body;
+
+        /* Number of received parts across all meta requests that have been accepted for parallel write
+         * but not yet written: writes in flight plus requests parked waiting for a write slot. Each of
+         * these holds a buffer from the client's pool, so this is the client-wide memory bound on the
+         * parallel-write path. Only the parallel-write path contributes, so it stays 0 for clients that
+         * do no direct-IO downloads. */
+        struct aws_atomic_var num_parts_pending_write;
     } stats;
 
     struct {

@@ -447,6 +447,14 @@ struct aws_s3_client *aws_s3_client_new(
         client->fio_options_set = true;
     }
 
+    /* Resolve the client-wide parallel-write bound. Default to the ideal connection count, which is the
+     * same basis a meta request uses for its own cap, so with a single transfer the two coincide and with
+     * several the client-wide bound is what binds. Clamped to at least 1 because a zero cap would block
+     * every meta request from starting parts. */
+    *((uint32_t *)&client->max_pending_writes) = aws_max_u32(
+        client->fio_opts.max_pending_writes > 0 ? client->fio_opts.max_pending_writes : client->ideal_connection_count,
+        1);
+
     struct aws_s3_buffer_pool_config buffer_pool_config = {
         .client = client,
         .part_size = part_size,
@@ -521,6 +529,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
+    aws_atomic_init_int(&client->stats.num_parts_pending_write, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -1965,6 +1974,16 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
     if (num_requests_in_flight >= max_requests_in_flight) {
+        return false;
+    }
+
+    /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
+     * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
+     * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
+     * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
+     * is the case for a client struct built directly rather than through aws_s3_client_new. */
+    if (client->max_pending_writes > 0 &&
+        aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
         return false;
     }
 

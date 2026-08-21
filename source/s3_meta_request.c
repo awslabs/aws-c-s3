@@ -2309,7 +2309,10 @@ void aws_s3_meta_request_stream_response_body_synced(
         /* The network is typically faster than the disk, so an unbounded dispatch here lets
          * write-pending buffers consume the whole buffer pool and stall the client. Cap the writes
          * in flight and park the overflow instead. `num_parts_pending_write` counts writes in flight
-         * plus parked requests, so exceeding the cap means the in-flight writes are already at it. */
+         * plus parked requests, so exceeding the cap means the in-flight writes are already at it.
+         * The client-wide counter tracks the same quantity aggregated across meta requests, and is
+         * what bounds how much of the shared buffer pool write-pending parts can hold. */
+        aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
         size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
         if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
             aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &request->pending_write_list_node);
@@ -2582,6 +2585,7 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
         aws_s3_request_finish_up_metrics_synced(request, meta_request);
 
         aws_atomic_fetch_sub(&meta_request->num_parts_pending_write, 1);
+        aws_atomic_fetch_sub(&meta_request->client->stats.num_parts_pending_write, 1);
 
         /* Hand the freed write slot to the request that has been waiting longest. Popping in the
          * same critical section as the decrement keeps the writes in flight pinned at the cap
