@@ -2540,6 +2540,9 @@ static void s_s3_client_acquired_retry_token(
 
     aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns);
 
+    aws_http_connection_manager_fetch_metrics(
+        endpoint->http_connection_manager, &request->send_data.metrics->http_manager_metrics);
+
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);
 

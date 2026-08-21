@@ -8,6 +8,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/ref_count.h>
+#include <aws/http/connection_manager.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_buffer_pool.h>
@@ -1797,6 +1798,16 @@ void aws_s3_request_metrics_get_host_address(
  */
 AWS_S3_API
 bool aws_s3_request_metrics_get_is_https(const struct aws_s3_request_metrics *metrics);
+
+/**
+ * Get a snapshot of the endpoint's HTTP connection manager metrics, taken right before this request
+ * asks for a connection. This reflects the manager's overall state at that instant, not just this
+ * request. This will always be available.
+ */
+AWS_S3_API
+void aws_s3_request_metrics_get_http_manager_metrics(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_manager_metrics *out_metrics);
 
 /**
  * Get the IP address of the request connected to.

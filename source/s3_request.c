@@ -581,6 +581,14 @@ bool aws_s3_request_metrics_get_is_https(const struct aws_s3_request_metrics *me
     return metrics->req_resp_info_metrics.is_https;
 }
 
+void aws_s3_request_metrics_get_http_manager_metrics(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_manager_metrics *out_metrics) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_metrics);
+    *out_metrics = metrics->http_manager_metrics;
+}
+
 int aws_s3_request_metrics_get_ip_address(
     const struct aws_s3_request_metrics *metrics,
     const struct aws_string **ip_address) {

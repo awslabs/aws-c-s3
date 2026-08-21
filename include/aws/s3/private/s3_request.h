@@ -10,6 +10,7 @@
 #include <aws/common/linked_list.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/thread.h>
+#include <aws/http/connection_manager.h>
 #include <aws/s3/s3.h>
 
 #include <aws/s3/private/s3_checksums.h>
@@ -154,6 +155,11 @@ struct aws_s3_request_metrics {
         /* The type of request made */
         enum aws_s3_request_type request_type;
     } req_resp_info_metrics;
+
+    /* Snapshot of the endpoint's HTTP connection manager metrics, taken right before this request asks
+     * for a connection (i.e. right as the request goes to be sent). This reflects the manager's overall
+     * state at that instant, not anything specific to this request alone. */
+    struct aws_http_manager_metrics http_manager_metrics;
 
     struct {
         /* The IP address of the request connected to */
