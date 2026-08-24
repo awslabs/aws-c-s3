@@ -105,6 +105,10 @@ static void s_aws_input_checksum_stream_destroy(struct aws_checksum_stream *impl
     aws_mem_release(impl->allocator, impl);
 }
 
+static void s_aws_input_checksum_stream_destroy_wrap(void *user_data) {
+    s_aws_input_checksum_stream_destroy(user_data);
+}
+
 static struct aws_input_stream_vtable s_aws_input_checksum_stream_vtable = {
     .seek = s_aws_input_checksum_stream_seek,
     .read = s_aws_input_checksum_stream_read,
@@ -129,7 +133,7 @@ static struct aws_checksum_stream *s_aws_checksum_input_checksum_stream_new(
     aws_byte_buf_init(&impl->checksum_result, allocator, impl->checksum->digest_size);
     impl->old_stream = aws_input_stream_acquire(existing_stream);
     aws_ref_count_init(
-        &impl->base.ref_count, impl, (aws_simple_completion_callback *)s_aws_input_checksum_stream_destroy);
+        &impl->base.ref_count, impl, s_aws_input_checksum_stream_destroy_wrap);
     return impl;
 on_error:
     aws_mem_release(impl->allocator, impl);

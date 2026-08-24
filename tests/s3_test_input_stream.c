@@ -93,6 +93,10 @@ static void s_aws_s3_test_input_stream_destroy(struct aws_s3_test_input_stream_i
     aws_mem_release(test_input_stream->allocator, test_input_stream);
 }
 
+static void s_aws_s3_test_input_stream_destroy_wrap(void *user_data) {
+    s_aws_s3_test_input_stream_destroy(user_data);
+}
+
 static struct aws_input_stream_vtable s_aws_s3_test_input_stream_vtable_1 = {
     .seek = s_aws_s3_test_input_stream_seek,
     .read = s_aws_s3_test_input_stream_read_1,
@@ -121,7 +125,7 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     aws_ref_count_init(
         &test_input_stream->base.ref_count,
         test_input_stream,
-        (aws_simple_completion_callback *)s_aws_s3_test_input_stream_destroy);
+        s_aws_s3_test_input_stream_destroy_wrap);
 
     struct aws_input_stream *input_stream = &test_input_stream->base;
 

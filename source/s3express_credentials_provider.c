@@ -914,6 +914,11 @@ static void s_bg_refresh_task(struct aws_task *task, void *arg, enum aws_task_st
     }
 }
 
+static void s_provider_vtable_destroy_wrap(void *user_data) {
+    struct aws_s3express_credentials_provider *provider = user_data;
+    provider->vtable->destroy(provider);
+}
+
 void aws_s3express_credentials_provider_init_base(
     struct aws_s3express_credentials_provider *provider,
     struct aws_allocator *allocator,
@@ -926,7 +931,19 @@ void aws_s3express_credentials_provider_init_base(
     provider->allocator = allocator;
     provider->vtable = vtable;
     provider->impl = impl;
-    aws_ref_count_init(&provider->ref_count, provider, (aws_simple_completion_callback *)provider->vtable->destroy);
+    aws_ref_count_init(&provider->ref_count, provider, s_provider_vtable_destroy_wrap);
+}
+
+static bool s_string_eq(const void *a, const void *b) {
+    return aws_string_eq(a, b);
+}
+
+static void s_s3express_session_destroy(void *value) {
+    s_aws_s3express_session_destroy(value);
+}
+
+static void s_finish_provider_destroy_wrap(void *user_data) {
+    s_finish_provider_destroy(user_data);
 }
 
 struct aws_s3express_credentials_provider *aws_s3express_credentials_provider_new_default(
@@ -969,9 +986,9 @@ struct aws_s3express_credentials_provider *aws_s3express_credentials_provider_ne
     impl->synced_data.cache = aws_cache_new_lru(
         allocator,
         aws_hash_string,
-        (aws_hash_callback_eq_fn *)aws_string_eq,
+        s_string_eq,
         NULL,
-        (aws_hash_callback_destroy_fn *)s_aws_s3express_session_destroy,
+        s_s3express_session_destroy,
         s_default_cache_capacity);
     AWS_ASSERT(impl->synced_data.cache);
 
@@ -989,7 +1006,7 @@ struct aws_s3express_credentials_provider *aws_s3express_credentials_provider_ne
     provider->shutdown_complete_callback = options->shutdown_complete_callback;
     provider->shutdown_user_data = options->shutdown_user_data;
     aws_mutex_init(&impl->synced_data.lock);
-    aws_ref_count_init(&impl->internal_ref, provider, (aws_simple_completion_callback *)s_finish_provider_destroy);
+    aws_ref_count_init(&impl->internal_ref, provider, s_finish_provider_destroy_wrap);
 
     /* Init the background refresh task */
     impl->bg_refresh_task = aws_mem_calloc(provider->allocator, 1, sizeof(struct aws_task));
