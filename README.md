@@ -74,6 +74,12 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
    The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 
+## Versioning
+
+This library uses a three-part `Major.Minor.Patch` version scheme. See
+[VERSIONING.md](VERSIONING.md) for what each part means and our API/ABI
+stability policy.
+
 ## License
 
 This library is licensed under the Apache 2.0 License.
