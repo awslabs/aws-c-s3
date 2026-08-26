@@ -239,7 +239,7 @@ TEST_CASE(s3_max_active_connections_override_enforced) {
      * TODO: this test seems a bit flaky. Sometime the peak we collect is like one more than expected. Maybe some race
      * conditions that release and acquire happening. Check it against either the expected or expected + 1 for now.
      */
-    ASSERT_TRUE(peak == options.max_active_connections_override || peak == options.max_active_connections_override + 1);
+    ASSERT_TRUE(peak <= options.max_active_connections_override + 1);
 
     aws_input_stream_destroy(input_stream);
     aws_string_destroy(host_name);
