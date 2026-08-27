@@ -343,16 +343,6 @@ struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_
     return aws_string_new_from_cursor(allocator, &in_cur);
 }
 
-int aws_last_error_or_unknown(void) {
-    int error = aws_last_error();
-    AWS_ASSERT(error != AWS_ERROR_SUCCESS); /* Someone forgot to call aws_raise_error() */
-    if (error == AWS_ERROR_SUCCESS) {
-        return AWS_ERROR_UNKNOWN;
-    }
-
-    return error;
-}
-
 void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);

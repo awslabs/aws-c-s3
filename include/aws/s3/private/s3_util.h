@@ -241,10 +241,6 @@ int aws_xml_get_body_at_path(
 AWS_S3_API
 struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_byte_cursor in_cur);
 
-/* TODO could be moved to aws-c-common. */
-AWS_S3_API
-int aws_last_error_or_unknown(void);
-
 AWS_S3_API
 void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message);
 
