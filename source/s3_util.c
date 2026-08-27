@@ -343,6 +343,7 @@ struct aws_string *aws_strip_quotes(struct aws_allocator *allocator, struct aws_
     return aws_string_new_from_cursor(allocator, &in_cur);
 }
 
+
 void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message) {
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
