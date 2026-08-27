@@ -1977,16 +1977,6 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
-    /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
-     * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
-     * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
-     * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
-     * is the case for a client struct built directly rather than through aws_s3_client_new. */
-    if (client->max_pending_writes > 0 &&
-        aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
-        return false;
-    }
-
     /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
      * ramping up requests just yet. If there is already enough in the queue for one address (even if those
      * aren't for this particular endpoint) we skip over this meta request for now. */
@@ -2004,6 +1994,16 @@ static bool s_s3_client_should_update_meta_request(
     size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
     if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
         /* Don't prepare more than it's allowed for the meta request */
+        return false;
+    }
+
+    /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
+     * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
+     * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
+     * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
+     * is the case for a client struct built directly rather than through aws_s3_client_new. */
+    if (client->max_pending_writes > 0 &&
+        aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
         return false;
     }
 
