@@ -2282,13 +2282,13 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
 static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-/* Schedule `request`'s parallel write on one of the body-streaming event loops.
- * Caller must have already accounted for the request in `num_parts_pending_write`. */
-static void s_s3_parallel_write_schedule(struct aws_s3_request *request) {
-    struct aws_s3_meta_request *meta_request = request->meta_request;
+/* Schedule `delivery`'s write on one of the body-streaming event loops.
+ * Caller must have already accounted for it in `num_parts_pending_write`. */
+static void s_s3_parallel_write_schedule(struct aws_s3_body_delivery *delivery) {
+    struct aws_s3_meta_request *meta_request = delivery->meta_request;
     struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
-    aws_task_init(&request->write_task, s_s3_parallel_write_task, request, "s3_parallel_write");
-    aws_event_loop_schedule_task_now(loop, &request->write_task);
+    aws_task_init(&delivery->task, s_s3_parallel_write_task, delivery, "s3_parallel_write");
+    aws_event_loop_schedule_task_now(loop, &delivery->task);
 }
 
 void aws_s3_meta_request_stream_response_body_synced(
@@ -2304,22 +2304,25 @@ void aws_s3_meta_request_stream_response_body_synced(
      * and increments delivery counters directly. No ordering needed for offset-based writes. */
     if (meta_request->recv_file_direct_io && request->part_number > 1) {
         ++meta_request->synced_data.num_parts_delivery_sent;
-        aws_s3_request_acquire(request); /* prevent release while write task is pending */
+
+        /* Hand the body off to a delivery. The request owns nothing the write still needs, so the
+         * caller's release can destroy it now instead of the pending write pinning it alive. */
+        struct aws_s3_body_delivery *delivery = aws_s3_body_delivery_new_from_request(request);
 
         /* The network is typically faster than the disk, so an unbounded dispatch here lets
          * write-pending buffers consume the whole buffer pool and stall the client. Cap the writes
          * in flight and park the overflow instead. `num_parts_pending_write` counts writes in flight
-         * plus parked requests, so exceeding the cap means the in-flight writes are already at it.
+         * plus parked deliveries, so exceeding the cap means the in-flight writes are already at it.
          * The client-wide counter tracks the same quantity aggregated across meta requests, and is
          * what bounds how much of the shared buffer pool write-pending parts can hold. */
         aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
         size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
         if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
-            aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &request->pending_write_list_node);
+            aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
             return;
         }
 
-        s_s3_parallel_write_schedule(request);
+        s_s3_parallel_write_schedule(delivery);
         return;
     }
 
@@ -2509,12 +2512,14 @@ static int s_write_body_to_file(
     return s_buffered_write_to_recv_file(meta_request, body);
 }
 
-/* Deliver response body to the appropriate sink: file (O_DIRECT or buffered) or user callback. */
+/* Deliver response body to the appropriate sink: file (O_DIRECT or buffered) or user callback.
+ * `ticket` backs `body` and is handed to body_callback_ex; may be NULL when the body owns its
+ * own memory. */
 static int s_deliver_body_to_sink(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t delivery_range_start,
-    struct aws_s3_request *request) {
+    struct aws_s3_buffer_ticket *ticket) {
 
     int error_code = AWS_ERROR_SUCCESS;
 
@@ -2534,7 +2539,7 @@ static int s_deliver_body_to_sink(
             meta_request,
             body,
             (struct aws_s3_meta_request_receive_body_extra_info){
-                .range_start = delivery_range_start, .ticket = request->ticket},
+                .range_start = delivery_range_start, .ticket = ticket},
             meta_request->user_data)) {
         error_code = aws_last_error_or_unknown();
         AWS_LOGF_ERROR(
@@ -2561,49 +2566,60 @@ static int s_deliver_body_to_sink(
     return AWS_ERROR_SUCCESS;
 }
 
-/* Deliver events in event_delivery_array.
-Parallel write task -- does pwrite and handles delivery counters directly. */
+/* Parallel write task -- does pwrite and handles delivery counters directly. */
 static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
-    struct aws_s3_request *request = arg;
-    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_body_delivery *delivery = arg;
+    struct aws_s3_meta_request *meta_request = delivery->meta_request;
 
     if (task_status == AWS_TASK_STATUS_RUN_READY && meta_request->recv_filepath) {
-        uint64_t write_offset = meta_request->recv_file_base_position + request->part_range_start;
+        AWS_LOGF_TRACE(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Writing part %" PRIu32 ", %zu bytes at object offset %" PRIu64 ".",
+            (void *)meta_request,
+            delivery->part_number,
+            delivery->body.len,
+            delivery->range_start);
 
-        struct aws_byte_cursor response_body = aws_byte_cursor_from_buf(&request->send_data.response_body);
-        s_deliver_body_to_sink(meta_request, &response_body, write_offset, request);
+        struct aws_byte_cursor body = aws_byte_cursor_from_buf(&delivery->body);
+        /* s_deliver_body_to_sink() applies the file's base position itself, so pass the object
+         * offset unmodified.
+         * TODO: the write error is dropped here -- a failed write still counts as delivered and
+         * never reaches the meta request's finish result. */
+        s_deliver_body_to_sink(meta_request, &body, delivery->range_start, delivery->ticket);
     }
 
     /* Increment delivery counters and finish metrics (same as delivery task would do).
-     * This runs for every task status, including a canceled event loop, so the parked-request
+     * This runs for every task status, including a canceled event loop, so the parked-delivery
      * chain below always keeps moving and the meta request can reach its finish state. */
-    struct aws_s3_request *next_request = NULL;
+    struct aws_s3_body_delivery *next_delivery = NULL;
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
         ++meta_request->synced_data.num_parts_delivery_completed;
-        aws_s3_request_finish_up_metrics_synced(request, meta_request);
+        aws_s3_metrics_finish_up_synced(&delivery->metrics, meta_request);
 
         aws_atomic_fetch_sub(&meta_request->num_parts_pending_write, 1);
         aws_atomic_fetch_sub(&meta_request->client->stats.num_parts_pending_write, 1);
 
-        /* Hand the freed write slot to the request that has been waiting longest. Popping in the
+        /* Hand the freed write slot to the delivery that has been waiting longest. Popping in the
          * same critical section as the decrement keeps the writes in flight pinned at the cap
          * while anything is parked, which is what lets the dispatch check use a single counter. */
         if (!aws_linked_list_empty(&meta_request->synced_data.pending_write_list)) {
             struct aws_linked_list_node *node =
                 aws_linked_list_pop_front(&meta_request->synced_data.pending_write_list);
-            next_request = AWS_CONTAINER_OF(node, struct aws_s3_request, pending_write_list_node);
+            next_delivery = AWS_CONTAINER_OF(node, struct aws_s3_body_delivery, node);
         }
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
 
-    if (next_request != NULL) {
-        s_s3_parallel_write_schedule(next_request);
+    if (next_delivery != NULL) {
+        s_s3_parallel_write_schedule(next_delivery);
     }
 
     aws_s3_client_schedule_process_work(meta_request->client);
-    aws_s3_request_release(request);
+
+    /* Releases the buffer ticket, which is what frees this part's pool memory. */
+    aws_s3_body_delivery_destroy(delivery);
 }
 
 /* This task runs on the meta-request's io_event_loop thread. */
@@ -2740,7 +2756,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             (uint64_t *)&request->send_data.metrics->time_metrics.deliver_start_timestamp_ns);
                     }
 
-                    error_code = s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request);
+                    error_code =
+                        s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request->ticket);
 
                     if (request->send_data.metrics) {
                         struct aws_s3_request_metrics *metric = request->send_data.metrics;

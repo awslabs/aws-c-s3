@@ -748,25 +748,35 @@ int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_b
     return AWS_ERROR_UNKNOWN;
 }
 
-void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request) {
+void aws_s3_metrics_finish_up_synced(
+    struct aws_s3_request_metrics **inout_metrics,
+    struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(meta_request);
-    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(inout_metrics);
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
-    if (request->send_data.metrics != NULL) {
-        /* Request is done, complete the metrics for the request now. */
-        struct aws_s3_request_metrics *metrics = request->send_data.metrics;
-        aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
-        metrics->time_metrics.total_duration_ns =
-            metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
-
-        if (meta_request->telemetry_callback != NULL) {
-            struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
-            event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metrics);
-            aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
-        }
-        request->send_data.metrics = aws_s3_request_metrics_release(metrics);
+    struct aws_s3_request_metrics *metrics = *inout_metrics;
+    if (metrics == NULL) {
+        return;
     }
+
+    /* The work these metrics cover is done, complete them now. */
+    aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.end_timestamp_ns);
+    metrics->time_metrics.total_duration_ns =
+        metrics->time_metrics.end_timestamp_ns - metrics->time_metrics.start_timestamp_ns;
+
+    if (meta_request->telemetry_callback != NULL) {
+        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_TELEMETRY};
+        event.u.telemetry.metrics = aws_s3_request_metrics_acquire(metrics);
+        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+    }
+    *inout_metrics = aws_s3_request_metrics_release(metrics);
+}
+
+void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(request);
+
+    aws_s3_metrics_finish_up_synced(&request->send_data.metrics, meta_request);
 }
 
 int aws_s3_check_headers_for_checksum(

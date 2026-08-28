@@ -205,10 +205,6 @@ struct aws_s3_request {
     /* Linked list node used for tracking buffer acquire futures. */
     struct aws_linked_list_node pending_buffer_future_list_node;
 
-    /* Linked list node used to park this request when the parallel-write queue is at its cap.
-     * Only used on the parallel-write delivery path. */
-    struct aws_linked_list_node pending_write_list_node;
-
     /* The meta request lock must be held to access the data */
     struct {
         /* The underlying http stream, only valid when the request is active from HTTP level */
@@ -295,9 +291,6 @@ struct aws_s3_request {
     /* Set when AIO write has been submitted (delivery task must wait for completion) */
     bool aio_write_submitted;
 
-    /* Task for parallel file write */
-    struct aws_task write_task;
-
     /* Get request only, if there was an attached checksum to validate did it match the computed checksum */
     bool checksum_match;
 
@@ -381,6 +374,45 @@ struct aws_s3_request {
     uint32_t was_previously_uploaded : 1;
 };
 
+/* One part's response body, detached from the aws_s3_request that received it.
+ *
+ * Delivery outlives the request that produced the bytes: the request is done the moment its own
+ * completion accounting is finished, but the body still has to reach the caller's sink. Rather than
+ * hold the whole request alive for that, a delivery takes ownership of just the pieces the sink
+ * needs, letting the request be released immediately.
+ *
+ * A delivery has a single owner at any time -- either a scheduled `task` or the queue it is parked
+ * on via `node` -- so it is not ref-counted. */
+struct aws_s3_body_delivery {
+    struct aws_allocator *allocator;
+
+    /* Owning ref. A delivery may be the last thing keeping the meta request alive. */
+    struct aws_s3_meta_request *meta_request;
+
+    /* Keeps `body`'s bytes alive when they came from the buffer pool, since
+     * aws_s3_buffer_ticket_claim() hands back a non-owning view of ticket-held memory.
+     * NULL when `body` was grown dynamically and owns its own allocation. */
+    struct aws_s3_buffer_ticket *ticket;
+
+    /* The bytes to deliver. */
+    struct aws_byte_buf body;
+
+    /* Moved off the request, because aws_s3_request_clean_up_send_data() asserts that a request
+     * being torn down no longer holds started metrics. Whoever completes the delivery is
+     * responsible for finishing these before destroying it. */
+    struct aws_s3_request_metrics *metrics;
+
+    /* Offset of `body` within the object. */
+    uint64_t range_start;
+
+    /* Part number the body came from. */
+    uint32_t part_number;
+
+    /* Scheduling state. Owned by whichever delivery path is driving this body. */
+    struct aws_task task;
+    struct aws_linked_list_node node;
+};
+
 AWS_EXTERN_C_BEGIN
 
 /* Create a new s3 request structure with the given options. */
@@ -411,6 +443,19 @@ struct aws_s3_request *aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
 struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request);
+
+/* Detach `request`'s response body into a delivery that can outlive the request.
+ *
+ * Moves the body buffer, its buffer-pool ticket, and the request metrics out of `request`, leaving
+ * those members cleared. The caller may release `request` as soon as this returns; it no longer owns
+ * anything the delivery needs. */
+AWS_S3_API
+struct aws_s3_body_delivery *aws_s3_body_delivery_new_from_request(struct aws_s3_request *request);
+
+/* Destroy a delivery. Its metrics must already have been finished (see
+ * aws_s3_metrics_finish_up_synced), otherwise this part's telemetry callback would be dropped. */
+AWS_S3_API
+void aws_s3_body_delivery_destroy(struct aws_s3_body_delivery *delivery);
 
 AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *allocator);

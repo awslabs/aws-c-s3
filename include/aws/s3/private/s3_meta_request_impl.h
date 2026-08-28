@@ -293,8 +293,8 @@ struct aws_s3_meta_request {
         /* To track aws_future_s3_buffers that might need to be cleaned up on cancel */
         struct aws_linked_list pending_buffer_futures;
 
-        /* Requests on the parallel-write path that are holding a ref (and their buffer ticket) while
-         * they wait for a write slot, because `max_pending_writes` writes are already in flight.
+        /* Deliveries on the parallel-write path holding their buffer ticket while they wait for a
+         * write slot, because `max_pending_writes` writes are already in flight.
          * A completing write task pops the front entry and schedules it, so this list is non-empty
          * only while a write task is in flight and the drain cannot stall. */
         struct aws_linked_list pending_write_list;
@@ -402,8 +402,6 @@ struct aws_s3_meta_request {
     bool recv_file_delete_on_failure;
     /* When true, use O_DIRECT for writing received data to file */
     bool recv_file_direct_io;
-    /* Base file position for O_DIRECT writes (from recv_file_position option) */
-    uint64_t recv_file_base_position;
 
     /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
      * existing file size for CREATE_OR_APPEND. The actual write offset for each part is

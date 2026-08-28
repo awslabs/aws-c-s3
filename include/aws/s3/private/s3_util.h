@@ -325,6 +325,13 @@ void aws_s3_calculate_auto_ranged_get_part_range(
 AWS_S3_API
 int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string);
 
+/* Complete `*inout_metrics`, queueing the telemetry callback if one is set, then release them and
+ * clear the caller's pointer. No-op when already NULL. */
+AWS_S3_API
+void aws_s3_metrics_finish_up_synced(
+    struct aws_s3_request_metrics **inout_metrics,
+    struct aws_s3_meta_request *meta_request);
+
 AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
