@@ -468,7 +468,7 @@ static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void
     (void)ctx;
 
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
-        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = MB_TO_BYTES(512)});
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = MB_TO_BYTES(128)});
     ASSERT_NULL(buffer_pool);
     ASSERT_INT_EQUALS(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, aws_last_error());
 

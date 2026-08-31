@@ -192,11 +192,11 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
 
     size_t chunk_size = config.part_size;
 
-    if (config.memory_limit < GB_TO_BYTES(1)) {
+    if (config.memory_limit < MB_TO_BYTES(256)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to initialize buffer pool. "
-            "Minimum supported value for Memory Limit is 1GB.");
+            "Minimum supported value for Memory Limit is 256MB.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         return NULL;
     }
