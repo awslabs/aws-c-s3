@@ -497,11 +497,6 @@ AWS_S3_API
 uint32_t aws_s3_client_get_max_requests_prepare(struct aws_s3_client *client);
 
 AWS_S3_API
-uint32_t aws_s3_client_get_max_active_connections(
-    struct aws_s3_client *client,
-    struct aws_s3_meta_request *meta_request);
-
-AWS_S3_API
 uint32_t aws_s3_client_get_max_requests_in_flight(struct aws_s3_client *client);
 
 AWS_S3_API
