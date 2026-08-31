@@ -2312,13 +2312,6 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 } else {
                     request->tracked_by_client = true;
 
-                    /* Move the meta request to the back so that the other meta requests get a turn before we come
-                     * back to this one. Without this, the meta request at the front of the list keeps yielding
-                     * requests until the preparation budget is exhausted, starving every meta request behind it. */
-                    aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
-                    aws_linked_list_push_back(
-                        &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
-
                     ++client->threaded_data.num_requests_being_prepared;
                     aws_atomic_fetch_add(&meta_request->num_request_being_prepared, 1);
 
