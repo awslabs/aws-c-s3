@@ -2323,6 +2323,18 @@ void aws_s3_meta_request_stream_response_body_synced(
             aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
             return;
         }
+        // /* The network is typically faster than the disk, so an unbounded dispatch here lets
+        //  * write-pending buffers consume the whole buffer pool and stall the client. Cap the writes
+        //  * in flight and park the overflow instead. `num_parts_pending_write` counts writes in flight
+        //  * plus parked deliveries, so exceeding the cap means the in-flight writes are already at it.
+        //  * The client-wide counter tracks the same quantity aggregated across meta requests, and is
+        //  * what bounds how much of the shared buffer pool write-pending parts can hold. */
+        // aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
+        // size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
+        // if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
+        //     aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
+        //     return;
+        // }
 
         s_s3_parallel_write_schedule(delivery);
         return;
@@ -2611,7 +2623,7 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
          * freed by aws_s3_request_clean_up_send_data() on the destroy path, so this reads the same
          * length that was added at enqueue. */
         aws_atomic_fetch_sub(
-            &meta_request->client->stats.bytes_pending_write, request->send_data.response_body.len);
+            &meta_request->client->stats.bytes_pending_write, next_delivery->body.len);
 
         /* Hand the freed write slot to the delivery that has been waiting longest. Popping in the
          * same critical section as the decrement keeps the writes in flight pinned at the cap

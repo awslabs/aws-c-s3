@@ -195,23 +195,12 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
+    (void) meta_request;
 
     uint32_t max_active_connections = client->ideal_connection_count;
     if (client->max_active_connections_override > 0 &&
         client->max_active_connections_override < max_active_connections) {
         max_active_connections = client->max_active_connections_override;
-    }
-    if (meta_request) {
-        if (meta_request->max_active_connections_override) {
-            /* Apply the meta request level override the max active connections, but less than the client side settings.
-             */
-            max_active_connections = aws_min_u32(meta_request->max_active_connections_override, max_active_connections);
-        }
-        if (meta_request->fio_opts.should_stream && meta_request->fio_opts.disk_throughput_gbps > 0) {
-            return aws_min_u32(
-                s_get_ideal_connection_number_from_throughput(meta_request->fio_opts.disk_throughput_gbps),
-                max_active_connections);
-        }
     }
     if (client->fio_opts.should_stream && client->fio_opts.disk_throughput_gbps > 0) {
         return aws_min_u32(
@@ -2133,45 +2122,45 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
-    /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
-     * ramping up requests just yet. If there is already enough in the queue for one address (even if those
-     * aren't for this particular endpoint) we skip over this meta request for now. */
-    struct aws_s3_endpoint *endpoint = meta_request->endpoint;
-    AWS_ASSERT(endpoint != NULL);
-    AWS_ASSERT(client->vtable->get_host_address_count);
-    size_t num_known_vips = client->vtable->get_host_address_count(
-        client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
-    if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
-                                client->threaded_data.request_queue_size) >= g_min_num_connections) {
-        return false;
-    }
+    // /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
+    //  * ramping up requests just yet. If there is already enough in the queue for one address (even if those
+    //  * aren't for this particular endpoint) we skip over this meta request for now. */
+    // struct aws_s3_endpoint *endpoint = meta_request->endpoint;
+    // AWS_ASSERT(endpoint != NULL);
+    // AWS_ASSERT(client->vtable->get_host_address_count);
+    // size_t num_known_vips = client->vtable->get_host_address_count(
+    //     client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
+    // if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
+    //                             client->threaded_data.request_queue_size) >= g_min_num_connections) {
+    //     return false;
+    // }
 
-    /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
-    size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
-    if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
-        /* Don't prepare more than it's allowed for the meta request */
-        return false;
-    }
+    // /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
+    // size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
+    // if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
+    //     /* Don't prepare more than it's allowed for the meta request */
+    //     return false;
+    // }
 
-    /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
-     * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
-     * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
-     * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
-     * is the case for a client struct built directly rather than through aws_s3_client_new. */
-    if (client->max_pending_writes > 0 &&
-        aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
-        return false;
-    }
+    // /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
+    //  * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
+    //  * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
+    //  * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
+    //  * is the case for a client struct built directly rather than through aws_s3_client_new. */
+    // if (client->max_pending_writes > 0 &&
+    //     aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
+    //     return false;
+    // }
 
-    /* Don't start new parts while this meta request already has a full queue of received parts waiting
-     * on the disk. Those parts are each holding a buffer, so without this the pile-up would keep
-     * growing until it drained the buffer pool and stalled every meta request on the client, rather
-     * than just slowing this one to the speed of its disk. Zero means the meta request is not on the
-     * bounded parallel-write path, so there is nothing to throttle. */
-    if (meta_request->max_pending_writes > 0 &&
-        aws_atomic_load_int(&meta_request->num_parts_pending_write) >= meta_request->max_pending_writes) {
-        return false;
-    }
+    // /* Don't start new parts while this meta request already has a full queue of received parts waiting
+    //  * on the disk. Those parts are each holding a buffer, so without this the pile-up would keep
+    //  * growing until it drained the buffer pool and stalled every meta request on the client, rather
+    //  * than just slowing this one to the speed of its disk. Zero means the meta request is not on the
+    //  * bounded parallel-write path, so there is nothing to throttle. */
+    // if (meta_request->max_pending_writes > 0 &&
+    //     aws_atomic_load_int(&meta_request->num_parts_pending_write) >= meta_request->max_pending_writes) {
+    //     return false;
+    // }
 
     /* Nothing blocks the meta request to create more requests */
     return true;
@@ -2468,12 +2457,12 @@ void aws_s3_client_update_meta_requests_threaded(struct aws_s3_client *client) {
                 } else {
                     request->tracked_by_client = true;
 
-                    /* Move the meta request to the back so that the other meta requests get a turn before we come
-                     * back to this one. Without this, the meta request at the front of the list keeps yielding
-                     * requests until the preparation budget is exhausted, starving every meta request behind it. */
-                    aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
-                    aws_linked_list_push_back(
-                        &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
+                    // /* Move the meta request to the back so that the other meta requests get a turn before we come
+                    //  * back to this one. Without this, the meta request at the front of the list keeps yielding
+                    //  * requests until the preparation budget is exhausted, starving every meta request behind it. */
+                    // aws_linked_list_remove(&meta_request->client_process_work_threaded_data.node);
+                    // aws_linked_list_push_back(
+                    //     &client->threaded_data.meta_requests, &meta_request->client_process_work_threaded_data.node);
 
                     ++client->threaded_data.num_requests_being_prepared;
                     aws_atomic_fetch_add(&meta_request->num_request_being_prepared, 1);
