@@ -2316,8 +2316,7 @@ void aws_s3_meta_request_stream_response_body_synced(
          * The client-wide counter tracks the same quantity aggregated across meta requests, and is
          * what bounds how much of the shared buffer pool write-pending parts can hold. */
         aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
-        aws_atomic_fetch_add(
-            &meta_request->client->stats.bytes_pending_write, request->send_data.response_body.len);
+        aws_atomic_fetch_add(&meta_request->client->stats.bytes_pending_write, delivery->body.len);
         size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
         if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
             aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
@@ -2557,8 +2556,7 @@ static int s_deliver_body_to_sink(
         meta_request->body_callback_ex(
             meta_request,
             body,
-            (struct aws_s3_meta_request_receive_body_extra_info){
-                .range_start = delivery_range_start, .ticket = ticket},
+            (struct aws_s3_meta_request_receive_body_extra_info){.range_start = delivery_range_start, .ticket = ticket},
             meta_request->user_data)) {
         error_code = aws_last_error_or_unknown();
         AWS_LOGF_ERROR(
@@ -2619,11 +2617,9 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
 
         aws_atomic_fetch_sub(&meta_request->num_parts_pending_write, 1);
         aws_atomic_fetch_sub(&meta_request->client->stats.num_parts_pending_write, 1);
-        /* The write task holds a reference until its final statement, and `response_body` is only
-         * freed by aws_s3_request_clean_up_send_data() on the destroy path, so this reads the same
-         * length that was added at enqueue. */
-        aws_atomic_fetch_sub(
-            &meta_request->client->stats.bytes_pending_write, next_delivery->body.len);
+        /* The delivery owns the buffer until it is destroyed at the end of this task, so this reads
+         * the same length that was added at enqueue. */
+        aws_atomic_fetch_sub(&meta_request->client->stats.bytes_pending_write, delivery->body.len);
 
         /* Hand the freed write slot to the delivery that has been waiting longest. Popping in the
          * same critical section as the decrement keeps the writes in flight pinned at the cap

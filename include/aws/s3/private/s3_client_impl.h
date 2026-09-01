@@ -361,11 +361,10 @@ struct aws_s3_client {
     struct aws_byte_cursor *network_interface_names_cursor_array;
     size_t num_network_interface_names;
 
-    /* Destination for the periodic write-counter snapshot, plus the sibling temp file the snapshot
-     * is staged in before being moved into place. Both NULL unless `AWS_CRT_S3_STATS_FILE` is set,
-     * which is also what gates the snapshot task from ever being scheduled. */
+    /* Destination for the periodic write-counter snapshot, overwritten in place each interval.
+     * NULL unless `AWS_CRT_S3_STATS_FILE` is set, which is also what gates the snapshot task from
+     * ever being scheduled. */
     struct aws_string *stats_filepath;
-    struct aws_string *stats_temp_filepath;
 
     struct {
         /* Number of overall requests currently being processed by the client. */
