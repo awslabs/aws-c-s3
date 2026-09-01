@@ -336,8 +336,7 @@ struct aws_s3_client *aws_s3_client_new(
         struct aws_string *mem_limit_bytes_str = aws_get_env_nonempty(allocator, s_memory_limit_bytes_env_var);
         if (mem_limit_bytes_str) {
             uint64_t mem_limit_from_env = 0;
-            if (aws_byte_cursor_utf8_parse_u64(
-                    aws_byte_cursor_from_string(mem_limit_bytes_str), &mem_limit_from_env)) {
+            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_bytes_str), &mem_limit_from_env)) {
                 aws_string_destroy(mem_limit_bytes_str);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
@@ -352,37 +351,37 @@ struct aws_s3_client *aws_s3_client_new(
         }
 
         if (mem_limit_configured == 0) {
-        /* Try to read from the environment variable for memory limit */
-        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
-        if (memory_limit_from_env_var) {
-            uint64_t mem_limit_in_gib = 0;
-            if (aws_byte_cursor_utf8_parse_u64(
-                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+            /* Try to read from the environment variable for memory limit */
+            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
+            if (memory_limit_from_env_var) {
+                uint64_t mem_limit_in_gib = 0;
+                if (aws_byte_cursor_utf8_parse_u64(
+                        aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                    aws_string_destroy(memory_limit_from_env_var);
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
+                        "integers supported.",
+                        s_memory_limit_env_var);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
                 aws_string_destroy(memory_limit_from_env_var);
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
-                    "integers supported.",
-                    s_memory_limit_env_var);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-            aws_string_destroy(memory_limit_from_env_var);
-            uint64_t mem_limit_in_bytes = 0;
-            /* Convert mem_limit_in_gib to bytes */
-            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, overflow detected.",
-                    s_memory_limit_env_var);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
+                uint64_t mem_limit_in_bytes = 0;
+                /* Convert mem_limit_in_gib to bytes */
+                if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "Cannot create client from client_config; environment variable: %s, overflow detected.",
+                        s_memory_limit_env_var);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
 
-            mem_limit_configured = mem_limit_in_bytes;
-        }
+                mem_limit_configured = mem_limit_in_bytes;
+            }
         } /* end _IN_BYTES == 0 fallback to _IN_GIB */
     } else {
         mem_limit_configured = client_config->memory_limit_in_bytes;
