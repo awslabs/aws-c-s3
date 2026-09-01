@@ -2322,6 +2322,18 @@ void aws_s3_meta_request_stream_response_body_synced(
             aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
             return;
         }
+        // /* The network is typically faster than the disk, so an unbounded dispatch here lets
+        //  * write-pending buffers consume the whole buffer pool and stall the client. Cap the writes
+        //  * in flight and park the overflow instead. `num_parts_pending_write` counts writes in flight
+        //  * plus parked deliveries, so exceeding the cap means the in-flight writes are already at it.
+        //  * The client-wide counter tracks the same quantity aggregated across meta requests, and is
+        //  * what bounds how much of the shared buffer pool write-pending parts can hold. */
+        // aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
+        // size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
+        // if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
+        //     aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
+        //     return;
+        // }
 
         s_s3_parallel_write_schedule(delivery);
         return;
@@ -2544,8 +2556,7 @@ static int s_deliver_body_to_sink(
         meta_request->body_callback_ex(
             meta_request,
             body,
-            (struct aws_s3_meta_request_receive_body_extra_info){
-                .range_start = delivery_range_start, .ticket = ticket},
+            (struct aws_s3_meta_request_receive_body_extra_info){.range_start = delivery_range_start, .ticket = ticket},
             meta_request->user_data)) {
         error_code = aws_last_error_or_unknown();
         AWS_LOGF_ERROR(
