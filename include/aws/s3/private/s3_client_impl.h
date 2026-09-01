@@ -361,6 +361,12 @@ struct aws_s3_client {
     struct aws_byte_cursor *network_interface_names_cursor_array;
     size_t num_network_interface_names;
 
+    /* Destination for the periodic write-counter snapshot, plus the sibling temp file the snapshot
+     * is staged in before being moved into place. Both NULL unless `AWS_CRT_S3_STATS_FILE` is set,
+     * which is also what gates the snapshot task from ever being scheduled. */
+    struct aws_string *stats_filepath;
+    struct aws_string *stats_temp_filepath;
+
     struct {
         /* Number of overall requests currently being processed by the client. */
         struct aws_atomic_var num_requests_in_flight;
@@ -383,6 +389,18 @@ struct aws_s3_client {
          * parallel-write path. Only the parallel-write path contributes, so it stays 0 for clients that
          * do no direct-IO downloads. */
         struct aws_atomic_var num_parts_pending_write;
+
+        /* Cumulative bytes successfully written to a `recv_filepath` destination across all meta
+         * requests, counting both the O_DIRECT and the buffered path. Monotonic, so a sampler reads
+         * it once per interval and diffs consecutive samples to get a write rate. */
+        struct aws_atomic_var bytes_written_to_disk;
+
+        /* Bytes of received body accepted for parallel write but not yet written: bytes held by
+         * writes in flight plus bytes held by requests parked waiting for a write slot. This is
+         * `num_parts_pending_write` measured in bytes, which is the quantity that actually bounds
+         * how much of the buffer pool the parallel-write path can hold, since the last part of an
+         * object is short. */
+        struct aws_atomic_var bytes_pending_write;
     } stats;
 
     struct {
@@ -410,6 +428,11 @@ struct aws_s3_client {
 
         /* Task to cleanup endpoints */
         struct aws_task endpoints_cleanup_task;
+
+        /* Task for snapshotting the write counters to `stats_filepath`. Reschedules itself, so
+         * exactly one tick is outstanding from client construction until it is canceled during
+         * finish-destroy. Only ever scheduled when `stats_filepath` is set. */
+        struct aws_task stats_file_task;
 
         /* Number of endpoints currently allocated. Used during clean up to know how many endpoints are still in
          * memory.*/
