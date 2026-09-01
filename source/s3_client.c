@@ -1704,11 +1704,18 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         "timestamp_ns %" PRIu64 "\n"
         "bytes_written_to_disk %zu\n"
         "bytes_pending_write %zu\n"
-        "parts_pending_write %zu\n",
+        "parts_pending_write %zu\n"
+        "requests_in_flight %zu\n"
+        "requests_being_prepared %" PRIu32 "\n",
         timestamp_ns,
         aws_atomic_load_int(&client->stats.bytes_written_to_disk),
         aws_atomic_load_int(&client->stats.bytes_pending_write),
-        aws_atomic_load_int(&client->stats.num_parts_pending_write));
+        aws_atomic_load_int(&client->stats.num_parts_pending_write),
+        aws_atomic_load_int(&client->stats.num_requests_in_flight),
+        /* Not atomic, but only ever mutated on process_work_event_loop, which is the loop this task
+         * runs on. The one off-loop caller is the baseline write during client construction, where
+         * no request exists yet and the value is still zero. */
+        client->threaded_data.num_requests_being_prepared);
 
     if (snapshot_len < 0 || (size_t)snapshot_len >= sizeof(snapshot)) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
