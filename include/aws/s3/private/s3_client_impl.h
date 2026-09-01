@@ -241,11 +241,41 @@ struct aws_s3_client {
      * Separate from body_streaming_elg because a write is a blocking pwrite that can occupy its
      * thread for hundreds of milliseconds. Sharing threads with body streaming would let one slow
      * disk write stall unrelated delivery work. */
-    struct aws_event_loop_group *write_elg;
+    struct {
+        /* One ELG per cpu group when `numa_aware`, otherwise a single unpinned ELG. Per-group ELGs
+         * rather than one big ELG because aws_event_loop_group_options carries a single cpu_group,
+         * so one group is the most a single ELG can be pinned to. */
+        struct aws_event_loop_group **elgs;
+        uint16_t num_elgs;
 
-    /* Round-robin cursor handing out write_elg loop indices to deliveries. Only ever incremented;
-     * callers take the value modulo the loop count. */
-    struct aws_atomic_var next_write_loop_index;
+        /* Flat worker table across all ELGs. An index into this is a delivery's write_loop_index and
+         * equally the index of the meta request's descriptor slot, so this is the count that
+         * recv_file_direct_io_fd_slots is sized by. */
+        struct aws_event_loop **worker_loops;
+        size_t num_workers;
+
+        /* Workers of cpu group g are worker_loops[group_offsets[g] .. group_offsets[g + 1]).
+         * Length num_elgs + 1. */
+        size_t *group_offsets;
+
+        /* Round-robin cursor per cpu group (length num_elgs), and one for deliveries whose group is
+         * unknown or has no workers. Only ever incremented; readers take the value modulo the count
+         * of the range they are drawing from. */
+        struct aws_atomic_var *group_cursors;
+        struct aws_atomic_var fallback_cursor;
+
+        /* Deliveries routed to each group's own workers (length num_elgs), and deliveries that had to
+         * use the fallback because their cpu group was unknown, out of range, or had no workers.
+         * Purely diagnostic: no credential-free test reaches the parallel write path, so these
+         * counters are the only way to see whether routing is doing anything. */
+        struct aws_atomic_var *group_write_counts;
+        struct aws_atomic_var fallback_write_count;
+
+        /* False when the machine reports a single cpu group or NUMA information is unavailable, in
+         * which case every delivery uses fallback_cursor over the one ELG. That is byte-for-byte the
+         * flat round-robin this pool used before it became NUMA aware. */
+        bool numa_aware;
+    } write_worker_pool;
 
     /* Region of the S3 bucket. */
     struct aws_string *region;
@@ -454,6 +484,11 @@ struct aws_s3_client {
          * memory.*/
         uint32_t num_endpoints_allocated;
 
+        /* Write worker pool ELGs whose shutdown callback has not fired yet. Replaces the single
+         * allocated flag this pool had when it was one ELG: destruction has to wait for all of them,
+         * and they shut down independently. */
+        uint32_t num_write_elgs_allocated;
+
         /* Whether or not the client has started cleaning up all of its resources */
         uint32_t active : 1;
 
@@ -469,10 +504,6 @@ struct aws_s3_client {
         /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
          * shutdown callback has not yet been called.*/
         uint32_t body_streaming_elg_allocated : 1;
-
-        /* Whether or not the parallel write ELG is allocated. If write_elg is NULL but this is true,
-         * the shutdown callback has not yet been called. */
-        uint32_t write_elg_allocated : 1;
 
         /* Whether or not a S3 Express provider is active with the client.*/
         uint32_t s3express_provider_active : 1;

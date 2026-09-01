@@ -117,6 +117,14 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
 static void s_s3_client_write_elg_shutdown(void *user_data);
 
+static int s_s3_client_write_worker_pool_init(
+    struct aws_s3_client *client,
+    uint16_t num_groups,
+    uint16_t total_workers,
+    bool numa_aware);
+static void s_s3_client_write_worker_pool_release_elgs(struct aws_s3_client *client);
+static void s_s3_client_write_worker_pool_clean_up(struct aws_s3_client *client);
+
 static void s_s3_client_create_connection_for_request(struct aws_s3_client *client, struct aws_s3_request *request);
 
 static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
@@ -538,7 +546,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_parts_pending_write, 0);
     aws_atomic_init_int(&client->stats.bytes_written_to_disk, 0);
     aws_atomic_init_int(&client->stats.bytes_pending_write, 0);
-    aws_atomic_init_int(&client->next_write_loop_index, 0);
+
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -698,7 +706,11 @@ struct aws_s3_client *aws_s3_client_new(
     /* Set up the parallel write worker pool. Kept separate from body_streaming_elg because a write is
      * a blocking pwrite: parking a shared thread for the duration would stall unrelated delivery
      * work on that loop. One worker per loop, and each worker owns its own descriptor per meta
-     * request, so a write never contends with another worker for a file position or a struct file. */
+     * request, so a write never contends with another worker for a file position or a struct file.
+     *
+     * The workers are spread across cpu groups so a delivery can be written by a worker on the same
+     * NUMA node the buffer was faulted onto (see aws_s3_buffer_ticket::cpu_group). One ELG per group,
+     * because an ELG can only be pinned to a single cpu group. */
     {
         uint16_t num_write_threads = (uint16_t)client_config->num_parallel_write_threads;
         if (num_write_threads == 0) {
@@ -709,21 +721,29 @@ struct aws_s3_client *aws_s3_client_new(
             num_write_threads = 1;
         }
 
-        struct aws_shutdown_callback_options write_elg_shutdown_options = {
-            .shutdown_callback_fn = s_s3_client_write_elg_shutdown,
-            .shutdown_callback_user_data = client,
-        };
+        /* num_parallel_write_threads is a total to divide across groups, not a per-group count, so
+         * turning on NUMA awareness never changes how many write threads exist. */
+        uint16_t num_groups = aws_get_cpu_group_count();
+        bool numa_aware = num_groups > 1;
+        if (!numa_aware) {
+            num_groups = 1;
+        } else if (num_groups > num_write_threads) {
+            /* Every ELG needs at least one loop, so stop making groups once we run out of threads.
+             * Deliveries whose group falls outside the ones we built route through the fallback. */
+            num_groups = num_write_threads;
+        }
 
-        client->write_elg =
-            aws_event_loop_group_new_default(client->allocator, num_write_threads, &write_elg_shutdown_options);
-
-        if (!client->write_elg) {
+        if (s_s3_client_write_worker_pool_init(client, num_groups, num_write_threads, numa_aware)) {
             goto on_error;
         }
-        client->synced_data.write_elg_allocated = true;
 
         AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT, "id=%p Parallel write worker pool has %u workers.", (void *)client, num_write_threads);
+            AWS_LS_S3_CLIENT,
+            "id=%p Parallel write worker pool has %u workers across %u cpu group(s), numa_aware=%d.",
+            (void *)client,
+            num_write_threads,
+            (unsigned)num_groups,
+            (int)numa_aware);
     }
     /* Setup cannot fail after this point. */
 
@@ -886,8 +906,7 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
-    aws_event_loop_group_release(client->write_elg);
-    client->write_elg = NULL;
+    s_s3_client_write_worker_pool_release_elgs(client);
     aws_s3express_credentials_provider_release(client->s3express_provider);
 
     /* BEGIN CRITICAL SECTION */
@@ -924,6 +943,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_string_destroy(client->region);
     client->region = NULL;
+
+    /* Safe here and not at ELG-release time: finish_destroy only runs once every write ELG has
+     * reported shutdown, so no worker can still be reading the tables. */
+    s_s3_client_write_worker_pool_clean_up(client);
 
     if (client->tls_connection_options) {
         aws_tls_connection_options_clean_up(client->tls_connection_options);
@@ -1006,11 +1029,112 @@ static void s_s3_client_write_elg_shutdown(void *user_data) {
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_client_lock_synced_data(client);
-        client->synced_data.write_elg_allocated = false;
+        AWS_ASSERT(client->synced_data.num_write_elgs_allocated > 0);
+        --client->synced_data.num_write_elgs_allocated;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
     /* END CRITICAL SECTION */
+}
+
+/* Allocate the write worker pool: one ELG per cpu group, `total_workers` loops divided between them,
+ * and a flat worker table so a delivery can name a worker by a single index. Must be called before
+ * any meta request exists, because the flat worker count sizes each meta request's descriptor slot
+ * table. */
+static int s_s3_client_write_worker_pool_init(
+    struct aws_s3_client *client,
+    uint16_t num_groups,
+    uint16_t total_workers,
+    bool numa_aware) {
+
+    AWS_PRECONDITION(num_groups >= 1);
+    AWS_PRECONDITION(total_workers >= num_groups);
+
+    struct aws_allocator *allocator = client->allocator;
+
+    client->write_worker_pool.numa_aware = numa_aware;
+    client->write_worker_pool.num_elgs = num_groups;
+    client->write_worker_pool.elgs = aws_mem_calloc(allocator, num_groups, sizeof(struct aws_event_loop_group *));
+    client->write_worker_pool.group_offsets = aws_mem_calloc(allocator, (size_t)num_groups + 1, sizeof(size_t));
+    client->write_worker_pool.group_cursors = aws_mem_calloc(allocator, num_groups, sizeof(struct aws_atomic_var));
+    client->write_worker_pool.group_write_counts =
+        aws_mem_calloc(allocator, num_groups, sizeof(struct aws_atomic_var));
+    client->write_worker_pool.worker_loops =
+        aws_mem_calloc(allocator, total_workers, sizeof(struct aws_event_loop *));
+
+    aws_atomic_init_int(&client->write_worker_pool.fallback_cursor, 0);
+    aws_atomic_init_int(&client->write_worker_pool.fallback_write_count, 0);
+
+    struct aws_shutdown_callback_options shutdown_options = {
+        .shutdown_callback_fn = s_s3_client_write_elg_shutdown,
+        .shutdown_callback_user_data = client,
+    };
+
+    /* Divide the total as evenly as possible; the first `remainder` groups take one extra. */
+    uint16_t base = total_workers / num_groups;
+    uint16_t remainder = total_workers % num_groups;
+
+    size_t next_worker = 0;
+    for (uint16_t group_idx = 0; group_idx < num_groups; ++group_idx) {
+        uint16_t loop_count = base + (group_idx < remainder ? 1 : 0);
+
+        struct aws_event_loop_group_options options = {
+            .loop_count = loop_count,
+            .shutdown_options = &shutdown_options,
+        };
+        /* Unpinned when there is nothing to gain from pinning, so single-node machines behave exactly
+         * as they did before. */
+        if (numa_aware) {
+            options.cpu_group = &group_idx;
+        }
+
+        struct aws_event_loop_group *elg = aws_event_loop_group_new(allocator, &options);
+        if (elg == NULL) {
+            /* Release what we built. Their shutdown callbacks decrement the outstanding count, so the
+             * client cannot finish destroying until they have all drained. */
+            for (uint16_t i = 0; i < group_idx; ++i) {
+                aws_event_loop_group_release(client->write_worker_pool.elgs[i]);
+                client->write_worker_pool.elgs[i] = NULL;
+            }
+            return AWS_OP_ERR;
+        }
+
+        client->write_worker_pool.elgs[group_idx] = elg;
+        /* No lock: client_new is single threaded, and nothing can call the shutdown callback until an
+         * ELG is released. The count has to be accurate before any release, which it is. */
+        ++client->synced_data.num_write_elgs_allocated;
+
+        client->write_worker_pool.group_offsets[group_idx] = next_worker;
+        aws_atomic_init_int(&client->write_worker_pool.group_cursors[group_idx], 0);
+        aws_atomic_init_int(&client->write_worker_pool.group_write_counts[group_idx], 0);
+
+        for (uint16_t loop_idx = 0; loop_idx < loop_count; ++loop_idx) {
+            client->write_worker_pool.worker_loops[next_worker++] = aws_event_loop_group_get_loop_at(elg, loop_idx);
+        }
+    }
+
+    client->write_worker_pool.group_offsets[num_groups] = next_worker;
+    client->write_worker_pool.num_workers = next_worker;
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Release the ELGs. Their shutdown callbacks fire asynchronously, so the bookkeeping arrays are freed
+ * separately in s_s3_client_write_worker_pool_clean_up once destruction actually finishes. */
+static void s_s3_client_write_worker_pool_release_elgs(struct aws_s3_client *client) {
+    for (uint16_t i = 0; i < client->write_worker_pool.num_elgs; ++i) {
+        aws_event_loop_group_release(client->write_worker_pool.elgs[i]);
+        client->write_worker_pool.elgs[i] = NULL;
+    }
+}
+
+static void s_s3_client_write_worker_pool_clean_up(struct aws_s3_client *client) {
+    aws_mem_release(client->allocator, client->write_worker_pool.elgs);
+    aws_mem_release(client->allocator, client->write_worker_pool.worker_loops);
+    aws_mem_release(client->allocator, client->write_worker_pool.group_offsets);
+    aws_mem_release(client->allocator, client->write_worker_pool.group_cursors);
+    aws_mem_release(client->allocator, client->write_worker_pool.group_write_counts);
+    AWS_ZERO_STRUCT(client->write_worker_pool);
 }
 
 uint32_t aws_s3_client_queue_requests_threaded(
@@ -1760,7 +1884,25 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         mem_pool_used = pool.primary_used + pool.secondary_used + pool.special_blocks_used + pool.forced_used;
     }
 
-    char snapshot[512];
+    /* Per-cpu-group write routing, as a comma separated list indexed by group. Truncated rather than
+     * failed if a machine has more groups than fit, since losing a diagnostic is better than losing
+     * the whole snapshot. */
+    char group_writes[256];
+    size_t group_writes_len = 0;
+    for (uint16_t i = 0; i < client->write_worker_pool.num_elgs; ++i) {
+        int written = snprintf(
+            group_writes + group_writes_len,
+            sizeof(group_writes) - group_writes_len,
+            "%s%zu",
+            i == 0 ? "" : ",",
+            aws_atomic_load_int(&client->write_worker_pool.group_write_counts[i]));
+        if (written < 0 || (size_t)written >= sizeof(group_writes) - group_writes_len) {
+            break;
+        }
+        group_writes_len += (size_t)written;
+    }
+
+    char snapshot[1024];
     int snapshot_len = snprintf(
         snapshot,
         sizeof(snapshot),
@@ -1773,7 +1915,11 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         "part_size %zu\n"
         "optimal_range_size %" PRIu64 "\n"
         "mem_pool_limit %zu\n"
-        "mem_pool_used %zu\n",
+        "mem_pool_used %zu\n"
+        "write_numa_aware %d\n"
+        "write_workers %zu\n"
+        "writes_per_cpu_group %s\n"
+        "writes_cpu_group_unknown %zu\n",
         timestamp_ns,
         aws_atomic_load_int(&client->stats.bytes_written_to_disk),
         aws_atomic_load_int(&client->stats.bytes_pending_write),
@@ -1791,7 +1937,11 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         client->part_size,
         client->optimal_range_size,
         mem_pool_limit,
-        mem_pool_used);
+        mem_pool_used,
+        (int)client->write_worker_pool.numa_aware,
+        client->write_worker_pool.num_workers,
+        group_writes,
+        aws_atomic_load_int(&client->write_worker_pool.fallback_write_count));
 
     if (snapshot_len < 0 || (size_t)snapshot_len >= sizeof(snapshot)) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
@@ -2117,7 +2267,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         bool finish_destroy =
             client->synced_data.active == false && client->synced_data.start_destroy_executing == false &&
             client->synced_data.body_streaming_elg_allocated == false &&
-            client->synced_data.write_elg_allocated == false &&
+            client->synced_data.num_write_elgs_allocated == 0 &&
             client->synced_data.process_work_task_scheduled == false &&
             client->synced_data.process_work_task_in_progress == false &&
             client->synced_data.s3express_provider_active == false && client->synced_data.num_endpoints_allocated == 0;
@@ -2128,13 +2278,13 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
                 "id=%p Client shutdown progress: starting_destroy_executing=%d  body_streaming_elg_allocated=%d  "
-                "write_elg_allocated=%d  "
+                "num_write_elgs_allocated=%d  "
                 "process_work_task_scheduled=%d  process_work_task_in_progress=%d  num_endpoints_allocated=%d "
                 "s3express_provider_active=%d finish_destroy=%d",
                 (void *)client,
                 (int)client->synced_data.start_destroy_executing,
                 (int)client->synced_data.body_streaming_elg_allocated,
-                (int)client->synced_data.write_elg_allocated,
+                (int)client->synced_data.num_write_elgs_allocated,
                 (int)client->synced_data.process_work_task_scheduled,
                 (int)client->synced_data.process_work_task_in_progress,
                 (int)client->synced_data.num_endpoints_allocated,

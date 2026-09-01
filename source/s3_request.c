@@ -248,6 +248,11 @@ struct aws_s3_body_delivery *aws_s3_body_delivery_new_from_request(struct aws_s3
     delivery->ticket = request->ticket;
     request->ticket = NULL;
 
+    /* Read it here rather than at schedule time so it survives the ticket being released early, and
+     * so a delivery that gets re-scheduled keeps routing to the same group. Deliveries whose body is
+     * not pool backed have no ticket and stay unknown, which routes them through the fallback. */
+    delivery->cpu_group = delivery->ticket != NULL ? delivery->ticket->cpu_group : AWS_CPU_GROUP_UNKNOWN;
+
     delivery->body = request->send_data.response_body;
     AWS_ZERO_STRUCT(request->send_data.response_body);
 

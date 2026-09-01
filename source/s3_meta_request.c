@@ -461,7 +461,7 @@ int aws_s3_meta_request_init_base(
              * and never resized, which is what lets each worker touch its own slot without a lock.
              * Slots open lazily; AWS_FILE_INVALID_FD means "not opened yet", so the table cannot be
              * calloc'd to zero. */
-            size_t write_worker_count = aws_event_loop_group_get_loop_count(client->write_elg);
+            size_t write_worker_count = client->write_worker_pool.num_workers;
             meta_request->recv_file_direct_io_fd_slots =
                 aws_mem_calloc(meta_request->allocator, write_worker_count, sizeof(int));
             meta_request->recv_file_direct_io_fd_slot_count = write_worker_count;
@@ -2333,22 +2333,43 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
 static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-/* Schedule `delivery`'s write on one of the body-streaming event loops.
+/* Schedule `delivery`'s write on one of the write worker loops.
  * Caller must have already accounted for it in `num_parts_pending_write`. */
 static void s_s3_parallel_write_schedule(struct aws_s3_body_delivery *delivery) {
     struct aws_s3_meta_request *meta_request = delivery->meta_request;
     struct aws_s3_client *client = meta_request->client;
 
-    /* Pick a worker by round robin and remember which one, so the write task can use that worker's
-     * descriptor slot. get_loop_at() rather than get_next_loop() because the index has to be known,
-     * not just the loop. */
-    size_t loop_count = aws_event_loop_group_get_loop_count(client->write_elg);
-    size_t loop_index = aws_atomic_fetch_add(&client->next_write_loop_index, 1) % loop_count;
-    delivery->write_loop_index = loop_index;
+    /* Prefer a worker on the same cpu group the buffer was faulted onto, so the write is submitted
+     * from the node that owns the pages. Falls back to a cursor spanning every worker when the group
+     * is unknown, out of range, or has no workers of its own -- a suboptimal worker costs locality,
+     * never correctness, since each write carries its own absolute file offset. */
+    size_t range_start = 0;
+    size_t range_len = client->write_worker_pool.num_workers;
+    struct aws_atomic_var *cursor = &client->write_worker_pool.fallback_cursor;
+    struct aws_atomic_var *route_count = &client->write_worker_pool.fallback_write_count;
 
-    struct aws_event_loop *loop = aws_event_loop_group_get_loop_at(client->write_elg, loop_index);
+    int32_t cpu_group = delivery->cpu_group;
+    if (client->write_worker_pool.numa_aware && cpu_group != AWS_CPU_GROUP_UNKNOWN &&
+        (uint16_t)cpu_group < client->write_worker_pool.num_elgs) {
+
+        size_t group_start = client->write_worker_pool.group_offsets[cpu_group];
+        size_t group_end = client->write_worker_pool.group_offsets[cpu_group + 1];
+        if (group_end > group_start) {
+            range_start = group_start;
+            range_len = group_end - group_start;
+            cursor = &client->write_worker_pool.group_cursors[cpu_group];
+            route_count = &client->write_worker_pool.group_write_counts[cpu_group];
+        }
+    }
+
+    aws_atomic_fetch_add(route_count, 1);
+
+    /* Remember which worker, so the write task uses that worker's descriptor slot. */
+    size_t worker_index = range_start + (aws_atomic_fetch_add(cursor, 1) % range_len);
+    delivery->write_loop_index = worker_index;
+
     aws_task_init(&delivery->task, s_s3_parallel_write_task, delivery, "s3_parallel_write");
-    aws_event_loop_schedule_task_now(loop, &delivery->task);
+    aws_event_loop_schedule_task_now(client->write_worker_pool.worker_loops[worker_index], &delivery->task);
 }
 
 /* Descriptor this worker should write through. Called only on the worker that owns `slot_index`, so

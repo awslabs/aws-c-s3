@@ -408,11 +408,16 @@ struct aws_s3_body_delivery {
     /* Part number the body came from. */
     uint32_t part_number;
 
-    /* Which write worker owns this delivery: an index into the client's write_elg, and equally the
-     * index of the meta request's descriptor slot this write uses. Assigned when the delivery is
-     * scheduled, so a delivery that gets parked and re-scheduled may land on a different worker --
-     * harmless, because every write carries its own absolute file offset. */
+    /* Which write worker owns this delivery: an index into the client's flat write worker table, and
+     * equally the index of the meta request's descriptor slot this write uses. Assigned when the
+     * delivery is scheduled, so a delivery that gets parked and re-scheduled may land on a different
+     * worker -- harmless, because every write carries its own absolute file offset. */
     size_t write_loop_index;
+
+    /* Cpu group (NUMA node) the body buffer belongs to, copied off the ticket, or
+     * AWS_CPU_GROUP_UNKNOWN. Used to pick a write worker on that node. A hint, not a guarantee --
+     * see aws_s3_buffer_ticket::cpu_group. */
+    int32_t cpu_group;
 
     /* Scheduling state. Owned by whichever delivery path is driving this body. */
     struct aws_task task;

@@ -2,6 +2,7 @@
 #define AWS_S3_BUFFER_POOL_H
 
 #include <aws/common/ref_count.h>
+#include <aws/common/system_info.h>
 #include <aws/io/future.h>
 #include <aws/s3/s3.h>
 
@@ -88,6 +89,16 @@ struct aws_s3_buffer_ticket {
     struct aws_s3_buffer_ticket_vtable *vtable;
     struct aws_ref_count ref_count;
     void *impl;
+
+    /* Cpu group (NUMA node) of the thread that first claimed this ticket's buffer, or
+     * AWS_CPU_GROUP_UNKNOWN.
+     *
+     * The claiming thread is the one that then writes the response body into the buffer, so for a
+     * buffer being used for the first time this is the group whose memory the pages are faulted
+     * onto. Once the pool recycles a buffer to a thread in another group the two can diverge, so
+     * treat this as a routing hint and not a guarantee. Pool implementations that do not track it
+     * leave it at AWS_CPU_GROUP_UNKNOWN. */
+    int32_t cpu_group;
 };
 
 AWS_S3_API struct aws_byte_buf aws_s3_buffer_ticket_claim(struct aws_s3_buffer_ticket *ticket);
