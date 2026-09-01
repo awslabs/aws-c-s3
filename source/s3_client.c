@@ -97,6 +97,7 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
  * The environment variable name for memory limit control.
  */
 static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
+static const char *s_memory_limit_bytes_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_BYTES";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -331,6 +332,26 @@ struct aws_s3_client *aws_s3_client_new(
     }
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
+        /* Try _IN_BYTES first (allows sub-GiB values), then fall back to _IN_GIB */
+        struct aws_string *mem_limit_bytes_str = aws_get_env_nonempty(allocator, s_memory_limit_bytes_env_var);
+        if (mem_limit_bytes_str) {
+            uint64_t mem_limit_from_env = 0;
+            if (aws_byte_cursor_utf8_parse_u64(
+                    aws_byte_cursor_from_string(mem_limit_bytes_str), &mem_limit_from_env)) {
+                aws_string_destroy(mem_limit_bytes_str);
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
+                    "integers supported.",
+                    s_memory_limit_bytes_env_var);
+                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                return NULL;
+            }
+            aws_string_destroy(mem_limit_bytes_str);
+            mem_limit_configured = mem_limit_from_env;
+        }
+
+        if (mem_limit_configured == 0) {
         /* Try to read from the environment variable for memory limit */
         struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
         if (memory_limit_from_env_var) {
@@ -362,6 +383,7 @@ struct aws_s3_client *aws_s3_client_new(
 
             mem_limit_configured = mem_limit_in_bytes;
         }
+        } /* end _IN_BYTES == 0 fallback to _IN_GIB */
     } else {
         mem_limit_configured = client_config->memory_limit_in_bytes;
     }
