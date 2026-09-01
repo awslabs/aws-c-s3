@@ -235,6 +235,18 @@ struct aws_s3_client {
     /* Event loop group for streaming request bodies back to the user. */
     struct aws_event_loop_group *body_streaming_elg;
 
+    /* Worker pool for O_DIRECT writes to `recv_filepath`. One worker per loop, each with its own
+     * persistent file descriptor per meta request (see recv_file_direct_io_fd_slots).
+     *
+     * Separate from body_streaming_elg because a write is a blocking pwrite that can occupy its
+     * thread for hundreds of milliseconds. Sharing threads with body streaming would let one slow
+     * disk write stall unrelated delivery work. */
+    struct aws_event_loop_group *write_elg;
+
+    /* Round-robin cursor handing out write_elg loop indices to deliveries. Only ever incremented;
+     * callers take the value modulo the loop count. */
+    struct aws_atomic_var next_write_loop_index;
+
     /* Region of the S3 bucket. */
     struct aws_string *region;
 
@@ -457,6 +469,10 @@ struct aws_s3_client {
         /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
          * shutdown callback has not yet been called.*/
         uint32_t body_streaming_elg_allocated : 1;
+
+        /* Whether or not the parallel write ELG is allocated. If write_elg is NULL but this is true,
+         * the shutdown callback has not yet been called. */
+        uint32_t write_elg_allocated : 1;
 
         /* Whether or not a S3 Express provider is active with the client.*/
         uint32_t s3express_provider_active : 1;

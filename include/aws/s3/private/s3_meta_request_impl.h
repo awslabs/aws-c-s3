@@ -403,6 +403,36 @@ struct aws_s3_meta_request {
     /* When true, use O_DIRECT for writing received data to file */
     bool recv_file_direct_io;
 
+    /* Descriptor every O_DIRECT write goes through, or AWS_FILE_INVALID_FD when there is none.
+     *
+     * Opened once while setting up the receiving file and closed in s_s3_meta_request_destroy, so a
+     * download pays one open/close for the whole transfer instead of a pair per part. Destroy is the
+     * only safe close point: a meta request can finish early on error while parallel write tasks are
+     * still queued, and each queued delivery holds a reference, so nothing can still be writing by
+     * the time the last one drops.
+     *
+     * No lock: this is written before any part is dispatched and never changes afterwards, so every
+     * write thread reads the same value. Concurrent writes through it are safe because
+     * aws_file_write_to_offset_direct_io() carries its own offset and never touches the descriptor's
+     * file position. */
+    int recv_file_direct_io_fd;
+
+    /* One O_DIRECT descriptor per write worker, or AWS_FILE_INVALID_FD for a slot not opened yet.
+     * Length is recv_file_direct_io_fd_slot_count, which is the client's write_elg loop count.
+     *
+     * Giving each worker its own descriptor keeps every write single-writer: two workers never share
+     * a struct file, so they never contend on its reference count, and a slot needs no lock because
+     * only its own worker thread ever touches it.
+     *
+     * Opened lazily by the owning worker on its first write, since a meta request that only ever
+     * uses a few workers should not pay for the whole pool. A slot that fails to open falls back to
+     * recv_file_direct_io_fd, which was opened and validated at init.
+     *
+     * No lock: the array is allocated before any part is dispatched and never resized, and each
+     * element is owned exclusively by one worker thread. Same argument as combine_slots. */
+    int *recv_file_direct_io_fd_slots;
+    size_t recv_file_direct_io_fd_slot_count;
+
     /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
      * existing file size for CREATE_OR_APPEND. The actual write offset for each part is
      * base_position + delivery_range_start. Only meaningful when recv_file_direct_io is true. */

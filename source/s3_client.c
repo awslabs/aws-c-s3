@@ -115,6 +115,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 
 /* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
+static void s_s3_client_write_elg_shutdown(void *user_data);
 
 static void s_s3_client_create_connection_for_request(struct aws_s3_client *client, struct aws_s3_request *request);
 
@@ -195,7 +196,7 @@ uint32_t aws_s3_client_get_max_active_connections(
     struct aws_s3_client *client,
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(client);
-    (void) meta_request;
+    (void)meta_request;
 
     uint32_t max_active_connections = client->ideal_connection_count;
     if (client->max_active_connections_override > 0 &&
@@ -537,6 +538,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_parts_pending_write, 0);
     aws_atomic_init_int(&client->stats.bytes_written_to_disk, 0);
     aws_atomic_init_int(&client->stats.bytes_pending_write, 0);
+    aws_atomic_init_int(&client->next_write_loop_index, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -691,6 +693,37 @@ struct aws_s3_client *aws_s3_client_new(
             goto on_error;
         }
         client->synced_data.body_streaming_elg_allocated = true;
+    }
+
+    /* Set up the parallel write worker pool. Kept separate from body_streaming_elg because a write is
+     * a blocking pwrite: parking a shared thread for the duration would stall unrelated delivery
+     * work on that loop. One worker per loop, and each worker owns its own descriptor per meta
+     * request, so a write never contends with another worker for a file position or a struct file. */
+    {
+        uint16_t num_write_threads = (uint16_t)client_config->num_parallel_write_threads;
+        if (num_write_threads == 0) {
+            num_write_threads =
+                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+        }
+        if (num_write_threads < 1) {
+            num_write_threads = 1;
+        }
+
+        struct aws_shutdown_callback_options write_elg_shutdown_options = {
+            .shutdown_callback_fn = s_s3_client_write_elg_shutdown,
+            .shutdown_callback_user_data = client,
+        };
+
+        client->write_elg =
+            aws_event_loop_group_new_default(client->allocator, num_write_threads, &write_elg_shutdown_options);
+
+        if (!client->write_elg) {
+            goto on_error;
+        }
+        client->synced_data.write_elg_allocated = true;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p Parallel write worker pool has %u workers.", (void *)client, num_write_threads);
     }
     /* Setup cannot fail after this point. */
 
@@ -853,6 +886,8 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
+    aws_event_loop_group_release(client->write_elg);
+    client->write_elg = NULL;
     aws_s3express_credentials_provider_release(client->s3express_provider);
 
     /* BEGIN CRITICAL SECTION */
@@ -956,6 +991,22 @@ static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.body_streaming_elg_allocated = false;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+}
+
+static void s_s3_client_write_elg_shutdown(void *user_data) {
+    struct aws_s3_client *client = user_data;
+    AWS_PRECONDITION(client);
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client parallel write ELG shutdown.", (void *)client);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.write_elg_allocated = false;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
@@ -2066,6 +2117,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         bool finish_destroy =
             client->synced_data.active == false && client->synced_data.start_destroy_executing == false &&
             client->synced_data.body_streaming_elg_allocated == false &&
+            client->synced_data.write_elg_allocated == false &&
             client->synced_data.process_work_task_scheduled == false &&
             client->synced_data.process_work_task_in_progress == false &&
             client->synced_data.s3express_provider_active == false && client->synced_data.num_endpoints_allocated == 0;
@@ -2076,11 +2128,13 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
                 "id=%p Client shutdown progress: starting_destroy_executing=%d  body_streaming_elg_allocated=%d  "
+                "write_elg_allocated=%d  "
                 "process_work_task_scheduled=%d  process_work_task_in_progress=%d  num_endpoints_allocated=%d "
                 "s3express_provider_active=%d finish_destroy=%d",
                 (void *)client,
                 (int)client->synced_data.start_destroy_executing,
                 (int)client->synced_data.body_streaming_elg_allocated,
+                (int)client->synced_data.write_elg_allocated,
                 (int)client->synced_data.process_work_task_scheduled,
                 (int)client->synced_data.process_work_task_in_progress,
                 (int)client->synced_data.num_endpoints_allocated,
@@ -2139,45 +2193,45 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
-    // /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
-    //  * ramping up requests just yet. If there is already enough in the queue for one address (even if those
-    //  * aren't for this particular endpoint) we skip over this meta request for now. */
-    // struct aws_s3_endpoint *endpoint = meta_request->endpoint;
-    // AWS_ASSERT(endpoint != NULL);
-    // AWS_ASSERT(client->vtable->get_host_address_count);
-    // size_t num_known_vips = client->vtable->get_host_address_count(
-    //     client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
-    // if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
-    //                             client->threaded_data.request_queue_size) >= g_min_num_connections) {
-    //     return false;
-    // }
+    /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
+     * ramping up requests just yet. If there is already enough in the queue for one address (even if those
+     * aren't for this particular endpoint) we skip over this meta request for now. */
+    struct aws_s3_endpoint *endpoint = meta_request->endpoint;
+    AWS_ASSERT(endpoint != NULL);
+    AWS_ASSERT(client->vtable->get_host_address_count);
+    size_t num_known_vips = client->vtable->get_host_address_count(
+        client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
+    if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
+                                client->threaded_data.request_queue_size) >= g_min_num_connections) {
+        return false;
+    }
 
-    // /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
-    // size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
-    // if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
-    //     /* Don't prepare more than it's allowed for the meta request */
-    //     return false;
-    // }
+    /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
+    size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
+    if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
+        /* Don't prepare more than it's allowed for the meta request */
+        return false;
+    }
 
-    // /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
-    //  * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
-    //  * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
-    //  * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
-    //  * is the case for a client struct built directly rather than through aws_s3_client_new. */
-    // if (client->max_pending_writes > 0 &&
-    //     aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
-    //     return false;
-    // }
+    /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
+     * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
+     * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
+     * hold stays bounded regardless of how many transfers are running. Zero means unconfigured, which
+     * is the case for a client struct built directly rather than through aws_s3_client_new. */
+    if (client->max_pending_writes > 0 &&
+        aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
+        return false;
+    }
 
-    // /* Don't start new parts while this meta request already has a full queue of received parts waiting
-    //  * on the disk. Those parts are each holding a buffer, so without this the pile-up would keep
-    //  * growing until it drained the buffer pool and stalled every meta request on the client, rather
-    //  * than just slowing this one to the speed of its disk. Zero means the meta request is not on the
-    //  * bounded parallel-write path, so there is nothing to throttle. */
-    // if (meta_request->max_pending_writes > 0 &&
-    //     aws_atomic_load_int(&meta_request->num_parts_pending_write) >= meta_request->max_pending_writes) {
-    //     return false;
-    // }
+    /* Don't start new parts while this meta request already has a full queue of received parts waiting
+     * on the disk. Those parts are each holding a buffer, so without this the pile-up would keep
+     * growing until it drained the buffer pool and stalled every meta request on the client, rather
+     * than just slowing this one to the speed of its disk. Zero means the meta request is not on the
+     * bounded parallel-write path, so there is nothing to throttle. */
+    if (meta_request->max_pending_writes > 0 &&
+        aws_atomic_load_int(&meta_request->num_parts_pending_write) >= meta_request->max_pending_writes) {
+        return false;
+    }
 
     /* Nothing blocks the meta request to create more requests */
     return true;

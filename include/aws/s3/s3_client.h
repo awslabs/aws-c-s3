@@ -542,6 +542,19 @@ struct aws_s3_client_config {
     struct aws_s3_file_io_options *fio_opts;
 
     /**
+     * Optional.
+     * Number of worker threads dedicated to O_DIRECT writes of downloaded data to `recv_filepath`.
+     *
+     * Each worker owns one thread and one file descriptor per meta request, so this is the number of
+     * writes the client can have in flight at the device at once. Writes are blocking, so the bytes
+     * outstanding to the disk are roughly this count multiplied by the size of a delivered part --
+     * raise it to keep a deep device queue, lower it to hold fewer part buffers.
+     *
+     * Defaults to the number of event loops on the client bootstrap's event loop group.
+     */
+    uint32_t num_parallel_write_threads;
+
+    /**
      * Required.
      * Configure the signing for the requests made from the client.
      * - Credentials or credentials provider is required. Other configs are all optional, and will be default to what

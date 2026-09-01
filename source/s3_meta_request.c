@@ -220,6 +220,9 @@ int aws_s3_meta_request_init_base(
     aws_atomic_init_int(&meta_request->num_requests_network, 0);
     aws_atomic_init_int(&meta_request->num_request_being_prepared, 0);
     aws_atomic_init_int(&meta_request->num_parts_pending_write, 0);
+    /* Set before any `goto error` below, so a half-initialized meta request does not hand destroy a
+     * zero here and have it close someone else's descriptor 0. */
+    meta_request->recv_file_direct_io_fd = AWS_FILE_INVALID_FD;
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
     aws_linked_list_init(&meta_request->synced_data.pending_write_list);
@@ -434,9 +437,37 @@ int aws_s3_meta_request_init_base(
             ++meta_request->recv_file_direct_io_fallback_count;
         }
 
+        /* Last rung of the fallback ladder above. The write path needs a descriptor, so open it here
+         * while there is still somewhere to fall back to, rather than letting the first write
+         * discover the problem. The file is already on disk: every recv mode above opened it and the
+         * !recv_file check bailed out if that failed. */
+        if (direct_io &&
+            aws_file_open_direct_io_for_write(meta_request->recv_filepath, &meta_request->recv_file_direct_io_fd)) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Failed to open receive file with O_DIRECT. aws-error:%s. Falling back to buffered I/O.",
+                (void *)meta_request,
+                aws_error_name(aws_last_error()));
+            aws_reset_error();
+            direct_io = false;
+            ++meta_request->recv_file_direct_io_fallback_count;
+        }
+
         if (direct_io) {
             meta_request->recv_file_direct_io = true;
             meta_request->recv_file_direct_io_base_position = direct_io_base_position;
+
+            /* One descriptor slot per write worker. Allocated here, before any part can be dispatched,
+             * and never resized, which is what lets each worker touch its own slot without a lock.
+             * Slots open lazily; AWS_FILE_INVALID_FD means "not opened yet", so the table cannot be
+             * calloc'd to zero. */
+            size_t write_worker_count = aws_event_loop_group_get_loop_count(client->write_elg);
+            meta_request->recv_file_direct_io_fd_slots =
+                aws_mem_calloc(meta_request->allocator, write_worker_count, sizeof(int));
+            meta_request->recv_file_direct_io_fd_slot_count = write_worker_count;
+            for (size_t i = 0; i < write_worker_count; ++i) {
+                meta_request->recv_file_direct_io_fd_slots[i] = AWS_FILE_INVALID_FD;
+            }
 
             /* Bound the parallel-write queue. Default to the connections this meta request may keep
              * active, which already tracks `disk_throughput_gbps` when `should_stream` is set, so the
@@ -723,6 +754,26 @@ static void s_s3_meta_request_destroy(void *user_data) {
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
+
+    /* Not gated on recv_file_direct_io: a write that fails at runtime clears that flag from a write
+     * thread while leaving the descriptor open, so gating on it would leak the descriptor. Safe to
+     * call unconditionally -- it is a no-op on AWS_FILE_INVALID_FD. Released before the
+     * delete-on-failure paths below so the last reference to the file is gone by the time it is
+     * unlinked. */
+    aws_file_close_direct_io(meta_request->recv_file_direct_io_fd);
+    meta_request->recv_file_direct_io_fd = AWS_FILE_INVALID_FD;
+
+    /* Every worker slot, for the same reason: destroy is the only point at which no write can still
+     * be in flight, because a queued delivery holds a reference to the meta request. Unopened slots
+     * hold AWS_FILE_INVALID_FD and close is a no-op on those. */
+    for (size_t i = 0; i < meta_request->recv_file_direct_io_fd_slot_count; ++i) {
+        aws_file_close_direct_io(meta_request->recv_file_direct_io_fd_slots[i]);
+        meta_request->recv_file_direct_io_fd_slots[i] = AWS_FILE_INVALID_FD;
+    }
+    aws_mem_release(meta_request->allocator, meta_request->recv_file_direct_io_fd_slots);
+    meta_request->recv_file_direct_io_fd_slots = NULL;
+    meta_request->recv_file_direct_io_fd_slot_count = 0;
+
     if (meta_request->recv_file) {
         fclose(meta_request->recv_file);
         meta_request->recv_file = NULL;
@@ -2286,9 +2337,55 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
  * Caller must have already accounted for it in `num_parts_pending_write`. */
 static void s_s3_parallel_write_schedule(struct aws_s3_body_delivery *delivery) {
     struct aws_s3_meta_request *meta_request = delivery->meta_request;
-    struct aws_event_loop *loop = aws_event_loop_group_get_next_loop(meta_request->client->body_streaming_elg);
+    struct aws_s3_client *client = meta_request->client;
+
+    /* Pick a worker by round robin and remember which one, so the write task can use that worker's
+     * descriptor slot. get_loop_at() rather than get_next_loop() because the index has to be known,
+     * not just the loop. */
+    size_t loop_count = aws_event_loop_group_get_loop_count(client->write_elg);
+    size_t loop_index = aws_atomic_fetch_add(&client->next_write_loop_index, 1) % loop_count;
+    delivery->write_loop_index = loop_index;
+
+    struct aws_event_loop *loop = aws_event_loop_group_get_loop_at(client->write_elg, loop_index);
     aws_task_init(&delivery->task, s_s3_parallel_write_task, delivery, "s3_parallel_write");
     aws_event_loop_schedule_task_now(loop, &delivery->task);
+}
+
+/* Descriptor this worker should write through. Called only on the worker that owns `slot_index`, so
+ * the lazy open needs no lock. Falls back to the meta request's own descriptor when the slot cannot
+ * be opened, which is always usable because init validated it before any part was dispatched. */
+static int s_parallel_write_worker_fd(struct aws_s3_meta_request *meta_request, size_t slot_index) {
+    if (meta_request->recv_file_direct_io_fd_slots == NULL ||
+        slot_index >= meta_request->recv_file_direct_io_fd_slot_count) {
+        return meta_request->recv_file_direct_io_fd;
+    }
+
+    int *slot = &meta_request->recv_file_direct_io_fd_slots[slot_index];
+    if (*slot != AWS_FILE_INVALID_FD) {
+        return *slot;
+    }
+
+    int fd = AWS_FILE_INVALID_FD;
+    if (aws_file_open_direct_io_for_write(meta_request->recv_filepath, &fd)) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Write worker %zu could not open its own O_DIRECT descriptor. aws-error:%s. Sharing the meta "
+            "request's descriptor instead.",
+            (void *)meta_request,
+            slot_index,
+            aws_error_name(aws_last_error()));
+        aws_reset_error();
+        return meta_request->recv_file_direct_io_fd;
+    }
+
+    *slot = fd;
+    AWS_LOGF_TRACE(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Write worker %zu opened O_DIRECT descriptor %d.",
+        (void *)meta_request,
+        slot_index,
+        fd);
+    return fd;
 }
 
 void aws_s3_meta_request_stream_response_body_synced(
@@ -2492,11 +2589,12 @@ static int s_buffered_write_to_recv_file(
 static int s_write_body_to_file(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
-    uint64_t file_offset) {
+    uint64_t file_offset,
+    int direct_io_fd) {
 
     if (meta_request->recv_file_direct_io) {
-        if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body) ==
-            AWS_OP_SUCCESS) {
+        AWS_ASSERT(direct_io_fd != AWS_FILE_INVALID_FD);
+        if (aws_file_write_to_offset_direct_io(direct_io_fd, file_offset, *body) == AWS_OP_SUCCESS) {
             /* We succeed. Early out. */
             aws_atomic_fetch_add(&meta_request->client->stats.bytes_written_to_disk, body->len);
             return AWS_OP_SUCCESS;
@@ -2537,7 +2635,8 @@ static int s_deliver_body_to_sink(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t delivery_range_start,
-    struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_buffer_ticket *ticket,
+    int direct_io_fd) {
 
     int error_code = AWS_ERROR_SUCCESS;
 
@@ -2545,7 +2644,7 @@ static int s_deliver_body_to_sink(
         uint64_t file_offset = meta_request->recv_file_direct_io
                                    ? meta_request->recv_file_direct_io_base_position + delivery_range_start
                                    : 0; /* unused — sequential FILE* path doesn't seek */
-        error_code = s_write_body_to_file(meta_request, body, file_offset);
+        error_code = s_write_body_to_file(meta_request, body, file_offset, direct_io_fd);
         if (meta_request->client->enable_read_backpressure) {
             aws_s3_meta_request_increment_read_window(meta_request, body->len);
         }
@@ -2603,7 +2702,12 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
          * offset unmodified.
          * TODO: the write error is dropped here -- a failed write still counts as delivered and
          * never reaches the meta request's finish result. */
-        s_deliver_body_to_sink(meta_request, &body, delivery->range_start, delivery->ticket);
+        s_deliver_body_to_sink(
+            meta_request,
+            &body,
+            delivery->range_start,
+            delivery->ticket,
+            s_parallel_write_worker_fd(meta_request, delivery->write_loop_index));
     }
 
     /* Increment delivery counters and finish metrics (same as delivery task would do).
@@ -2776,8 +2880,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             (uint64_t *)&request->send_data.metrics->time_metrics.deliver_start_timestamp_ns);
                     }
 
-                    error_code =
-                        s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request->ticket);
+                    /* Runs on io_event_loop, which owns no worker slot, so it writes through the
+                     * meta request's own descriptor. */
+                    error_code = s_deliver_body_to_sink(
+                        meta_request,
+                        &response_body,
+                        delivery_range_start,
+                        request->ticket,
+                        meta_request->recv_file_direct_io_fd);
 
                     if (request->send_data.metrics) {
                         struct aws_s3_request_metrics *metric = request->send_data.metrics;
