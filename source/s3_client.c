@@ -98,6 +98,15 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
  */
 static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 
+/* Opt-in path for the periodic write-counter snapshot. Unset means the snapshot task is never
+ * scheduled, leaving only the counter updates on the write path. */
+static const char *s_stats_file_env_var = "AWS_CRT_S3_STATS_FILE";
+
+/* How often the snapshot is rewritten. Deliberately half the once-per-second cadence that external
+ * resource monitors sample at: at equal periods an unsynchronized sampler would sometimes read the
+ * same snapshot twice and see a zero-length interval, which is not a rate it can report. */
+static const uint32_t s_stats_file_interval_in_ms = 500;
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -129,6 +138,12 @@ static void s_s3_client_schedule_process_work_synced_default(struct aws_s3_clien
 
 /* Actual task function that processes work. */
 static void s_s3_client_process_work_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
+static void s_s3_client_stats_file_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
+
+static void s_s3_client_schedule_stats_file_task(struct aws_s3_client *client);
+
+static int s_s3_client_write_stats_file(struct aws_s3_client *client);
 
 static void s_s3_client_process_work_default(struct aws_s3_client *client);
 
@@ -530,6 +545,8 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
     aws_atomic_init_int(&client->stats.num_parts_pending_write, 0);
+    aws_atomic_init_int(&client->stats.bytes_written_to_disk, 0);
+    aws_atomic_init_int(&client->stats.bytes_pending_write, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -733,6 +750,45 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
 
+    client->stats_filepath = aws_get_env_nonempty(allocator, s_stats_file_env_var);
+    if (client->stats_filepath != NULL) {
+        /* Stage the snapshot next to its destination, so the move that publishes it stays within one
+         * filesystem and is therefore a rename rather than a copy. */
+        struct aws_byte_cursor temp_suffix = aws_byte_cursor_from_c_str(".tmp");
+        struct aws_byte_buf temp_filepath_buf;
+        aws_byte_buf_init_copy_from_cursor(
+            &temp_filepath_buf, allocator, aws_byte_cursor_from_string(client->stats_filepath));
+        aws_byte_buf_append_dynamic(&temp_filepath_buf, &temp_suffix);
+        client->stats_temp_filepath = aws_string_new_from_buf(allocator, &temp_filepath_buf);
+        aws_byte_buf_clean_up(&temp_filepath_buf);
+
+        aws_task_init(
+            &client->synced_data.stats_file_task, s_s3_client_stats_file_task, client, "s3_client_stats_file_task");
+
+        /* Publish a baseline immediately rather than leaving the sampler with no file for the first
+         * interval. This also surfaces an unusable path as one error at startup instead of one per
+         * interval, in which case the snapshots are simply left off. */
+        if (s_s3_client_write_stats_file(client) == AWS_OP_SUCCESS) {
+            s_s3_client_schedule_stats_file_task(client);
+
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "id=%p Writing a stats snapshot to %s every %" PRIu32 "ms, per %s.",
+                (void *)client,
+                aws_string_c_str(client->stats_filepath),
+                s_stats_file_interval_in_ms,
+                s_stats_file_env_var);
+        } else {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Failed writing stats snapshot to %s. aws-error:%s. Snapshots disabled.",
+                (void *)client,
+                aws_string_c_str(client->stats_filepath),
+                aws_error_name(aws_last_error()));
+            aws_reset_error();
+        }
+    }
+
     return client;
 
 on_error:
@@ -839,6 +895,18 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     if (client->threaded_data.trim_buffer_pool_task_scheduled) {
         aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task);
+    }
+
+    /* Guarded on the path rather than on a scheduled flag: the path being set is what guarantees the
+     * task was initialized, and canceling an already-run task only re-invokes it with a canceled
+     * status, which it ignores. */
+    if (client->stats_filepath != NULL) {
+        aws_event_loop_cancel_task(client->process_work_event_loop, &client->synced_data.stats_file_task);
+
+        aws_string_destroy(client->stats_filepath);
+        client->stats_filepath = NULL;
+        aws_string_destroy(client->stats_temp_filepath);
+        client->stats_temp_filepath = NULL;
     }
 
     aws_string_destroy(client->region);
@@ -1639,6 +1707,94 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
         client->process_work_event_loop, &client->synced_data.trim_buffer_pool_task, trim_time);
 
     client->threaded_data.trim_buffer_pool_task_scheduled = true;
+}
+
+/* Snapshot the write counters into `client->stats_filepath` as `key value` lines, so an external
+ * sampler can parse it the same way it parses a /proc file. The snapshot is staged in a temp file
+ * and moved into place, so a reader sees either the previous snapshot or this one, never a file
+ * that is still being written. */
+static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client->stats_filepath);
+    AWS_PRECONDITION(client->stats_temp_filepath);
+
+    /* A monotonic timestamp lets a reader tell a counter that stopped moving apart from a writer
+     * that stopped running, which matters because a stalled write is the main thing these counters
+     * are here to diagnose. */
+    uint64_t timestamp_ns = 0;
+    aws_high_res_clock_get_ticks(&timestamp_ns);
+
+    char snapshot[256];
+    int snapshot_len = snprintf(
+        snapshot,
+        sizeof(snapshot),
+        "timestamp_ns %" PRIu64 "\n"
+        "bytes_written_to_disk %zu\n"
+        "bytes_pending_write %zu\n"
+        "parts_pending_write %zu\n",
+        timestamp_ns,
+        aws_atomic_load_int(&client->stats.bytes_written_to_disk),
+        aws_atomic_load_int(&client->stats.bytes_pending_write),
+        aws_atomic_load_int(&client->stats.num_parts_pending_write));
+
+    if (snapshot_len < 0 || (size_t)snapshot_len >= sizeof(snapshot)) {
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    struct aws_string *write_mode = aws_string_new_from_c_str(client->allocator, "w");
+    FILE *file = aws_fopen_safe(client->stats_temp_filepath, write_mode);
+    aws_string_destroy(write_mode);
+
+    if (file == NULL) {
+        /* aws_fopen_safe has already raised a translated error. */
+        return AWS_OP_ERR;
+    }
+
+    size_t bytes_written = fwrite(snapshot, 1, (size_t)snapshot_len, file);
+    fclose(file);
+
+    if (bytes_written != (size_t)snapshot_len) {
+        return aws_raise_error(AWS_ERROR_FILE_WRITE_FAILURE);
+    }
+
+    return aws_directory_or_file_move(client->stats_temp_filepath, client->stats_filepath);
+}
+
+static void s_s3_client_schedule_stats_file_task(struct aws_s3_client *client) {
+    uint64_t now_ns = 0;
+    aws_event_loop_current_clock_time(client->process_work_event_loop, &now_ns);
+
+    aws_event_loop_schedule_task_future(
+        client->process_work_event_loop,
+        &client->synced_data.stats_file_task,
+        now_ns + aws_timestamp_convert(s_stats_file_interval_in_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+}
+
+static void s_s3_client_stats_file_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+
+    struct aws_s3_client *client = arg;
+    AWS_PRECONDITION(client);
+
+    /* Canceled means finish-destroy is tearing the client down. Returning without rescheduling is
+     * what releases the loop so the client can reach its shutdown callback. */
+    if (task_status != AWS_TASK_STATUS_RUN_READY) {
+        return;
+    }
+
+    if (s_s3_client_write_stats_file(client) != AWS_OP_SUCCESS) {
+        /* The path is fixed at construction, so a failure here is a configuration problem that will
+         * not clear on its own. Stop instead of repeating the same error every interval. */
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Failed writing stats snapshot to %s. aws-error:%s. Further snapshots disabled.",
+            (void *)client,
+            aws_string_c_str(client->stats_filepath),
+            aws_error_name(aws_last_error()));
+        aws_reset_error();
+        return;
+    }
+
+    s_s3_client_schedule_stats_file_task(client);
 }
 
 static void s_s3_endpoints_cleanup_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {

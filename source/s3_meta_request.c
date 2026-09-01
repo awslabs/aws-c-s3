@@ -2316,6 +2316,8 @@ void aws_s3_meta_request_stream_response_body_synced(
          * The client-wide counter tracks the same quantity aggregated across meta requests, and is
          * what bounds how much of the shared buffer pool write-pending parts can hold. */
         aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
+        aws_atomic_fetch_add(
+            &meta_request->client->stats.bytes_pending_write, request->send_data.response_body.len);
         size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
         if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
             aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
@@ -2485,6 +2487,7 @@ static int s_write_body_to_file(
         if (aws_file_path_write_to_offset_direct_io(meta_request->recv_filepath, file_offset, *body) ==
             AWS_OP_SUCCESS) {
             /* We succeed. Early out. */
+            aws_atomic_fetch_add(&meta_request->client->stats.bytes_written_to_disk, body->len);
             return AWS_OP_SUCCESS;
         }
 
@@ -2509,7 +2512,11 @@ static int s_write_body_to_file(
     }
 
     /* Regular FILE* path — no seek needed, events arrive in order. */
-    return s_buffered_write_to_recv_file(meta_request, body);
+    if (s_buffered_write_to_recv_file(meta_request, body) != AWS_OP_SUCCESS) {
+        return AWS_OP_ERR;
+    }
+    aws_atomic_fetch_add(&meta_request->client->stats.bytes_written_to_disk, body->len);
+    return AWS_OP_SUCCESS;
 }
 
 /* Deliver response body to the appropriate sink: file (O_DIRECT or buffered) or user callback.
@@ -2600,6 +2607,11 @@ static void s_s3_parallel_write_task(struct aws_task *task, void *arg, enum aws_
 
         aws_atomic_fetch_sub(&meta_request->num_parts_pending_write, 1);
         aws_atomic_fetch_sub(&meta_request->client->stats.num_parts_pending_write, 1);
+        /* The write task holds a reference until its final statement, and `response_body` is only
+         * freed by aws_s3_request_clean_up_send_data() on the destroy path, so this reads the same
+         * length that was added at enqueue. */
+        aws_atomic_fetch_sub(
+            &meta_request->client->stats.bytes_pending_write, request->send_data.response_body.len);
 
         /* Hand the freed write slot to the delivery that has been waiting longest. Popping in the
          * same critical section as the decrement keeps the writes in flight pinned at the cap
