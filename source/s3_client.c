@@ -483,6 +483,7 @@ struct aws_s3_client *aws_s3_client_new(
     } else {
 
         client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
+        client->buffer_pool_is_default = true;
     }
 
     if (client->buffer_pool == NULL) {
@@ -1708,7 +1709,18 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
     uint64_t timestamp_ns = 0;
     aws_high_res_clock_get_ticks(&timestamp_ns);
 
-    char snapshot[256];
+    /* Pool usage is the backpressure mechanism on the download path, so a stall shows up here as
+     * used pinned at the limit. Only the default pool exposes stats; a custom pool leaves both
+     * values at zero rather than being read as the wrong type. */
+    size_t mem_pool_limit = 0;
+    size_t mem_pool_used = 0;
+    if (client->buffer_pool_is_default) {
+        struct aws_s3_default_buffer_pool_usage_stats pool = aws_s3_default_buffer_pool_get_usage(client->buffer_pool);
+        mem_pool_limit = pool.mem_limit;
+        mem_pool_used = pool.primary_used + pool.secondary_used + pool.special_blocks_used + pool.forced_used;
+    }
+
+    char snapshot[512];
     int snapshot_len = snprintf(
         snapshot,
         sizeof(snapshot),
@@ -1717,7 +1729,11 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         "bytes_pending_write %zu\n"
         "parts_pending_write %zu\n"
         "requests_in_flight %zu\n"
-        "requests_being_prepared %" PRIu32 "\n",
+        "requests_being_prepared %" PRIu32 "\n"
+        "part_size %zu\n"
+        "optimal_range_size %" PRIu64 "\n"
+        "mem_pool_limit %zu\n"
+        "mem_pool_used %zu\n",
         timestamp_ns,
         aws_atomic_load_int(&client->stats.bytes_written_to_disk),
         aws_atomic_load_int(&client->stats.bytes_pending_write),
@@ -1726,7 +1742,16 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         /* Not atomic, but only ever mutated on process_work_event_loop, which is the loop this task
          * runs on. The one off-loop caller is the baseline write during client construction, where
          * no request exists yet and the value is still zero. */
-        client->threaded_data.num_requests_being_prepared);
+        client->threaded_data.num_requests_being_prepared,
+        /* Both are constant for the client's lifetime, repeated each interval so a single sample is
+         * self-describing. Note these are the client-level values: a download whose part size was
+         * not explicitly configured derives its own from `optimal_range_size`, the object size and
+         * buffer-pool alignment, and stores it on the meta request, so the parts actually being
+         * written can be a different size than either number here. */
+        client->part_size,
+        client->optimal_range_size,
+        mem_pool_limit,
+        mem_pool_used);
 
     if (snapshot_len < 0 || (size_t)snapshot_len >= sizeof(snapshot)) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);

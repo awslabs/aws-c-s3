@@ -217,6 +217,11 @@ struct aws_s3_client {
 
     struct aws_s3_buffer_pool *buffer_pool;
 
+    /* Whether `buffer_pool` is the built-in default implementation. A custom pool supplied through
+     * `buffer_pool_factory_fn` is an opaque type with no usage-stats accessor, so this gates any
+     * call to aws_s3_default_buffer_pool_get_usage(). */
+    bool buffer_pool_is_default;
+
     struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;
