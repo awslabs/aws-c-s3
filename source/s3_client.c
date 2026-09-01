@@ -752,16 +752,6 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->stats_filepath = aws_get_env_nonempty(allocator, s_stats_file_env_var);
     if (client->stats_filepath != NULL) {
-        /* Stage the snapshot next to its destination, so the move that publishes it stays within one
-         * filesystem and is therefore a rename rather than a copy. */
-        struct aws_byte_cursor temp_suffix = aws_byte_cursor_from_c_str(".tmp");
-        struct aws_byte_buf temp_filepath_buf;
-        aws_byte_buf_init_copy_from_cursor(
-            &temp_filepath_buf, allocator, aws_byte_cursor_from_string(client->stats_filepath));
-        aws_byte_buf_append_dynamic(&temp_filepath_buf, &temp_suffix);
-        client->stats_temp_filepath = aws_string_new_from_buf(allocator, &temp_filepath_buf);
-        aws_byte_buf_clean_up(&temp_filepath_buf);
-
         aws_task_init(
             &client->synced_data.stats_file_task, s_s3_client_stats_file_task, client, "s3_client_stats_file_task");
 
@@ -905,8 +895,6 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
         aws_string_destroy(client->stats_filepath);
         client->stats_filepath = NULL;
-        aws_string_destroy(client->stats_temp_filepath);
-        client->stats_temp_filepath = NULL;
     }
 
     aws_string_destroy(client->region);
@@ -1710,12 +1698,9 @@ static void s_s3_client_schedule_buffer_pool_trim_synced(struct aws_s3_client *c
 }
 
 /* Snapshot the write counters into `client->stats_filepath` as `key value` lines, so an external
- * sampler can parse it the same way it parses a /proc file. The snapshot is staged in a temp file
- * and moved into place, so a reader sees either the previous snapshot or this one, never a file
- * that is still being written. */
+ * sampler can parse it the same way it parses a /proc file. The file is overwritten in place. */
 static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
     AWS_PRECONDITION(client->stats_filepath);
-    AWS_PRECONDITION(client->stats_temp_filepath);
 
     /* A monotonic timestamp lets a reader tell a counter that stopped moving apart from a writer
      * that stopped running, which matters because a stalled write is the main thing these counters
@@ -1741,7 +1726,7 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
     }
 
     struct aws_string *write_mode = aws_string_new_from_c_str(client->allocator, "w");
-    FILE *file = aws_fopen_safe(client->stats_temp_filepath, write_mode);
+    FILE *file = aws_fopen_safe(client->stats_filepath, write_mode);
     aws_string_destroy(write_mode);
 
     if (file == NULL) {
@@ -1756,7 +1741,7 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         return aws_raise_error(AWS_ERROR_FILE_WRITE_FAILURE);
     }
 
-    return aws_directory_or_file_move(client->stats_temp_filepath, client->stats_filepath);
+    return AWS_OP_SUCCESS;
 }
 
 static void s_s3_client_schedule_stats_file_task(struct aws_s3_client *client) {
