@@ -603,6 +603,12 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(st
 struct aws_s3_parked_stream {
     struct aws_allocator *allocator;
     struct aws_http_stream *stream;
+
+    /* Owned ref on the request whose body this stream carries. Held so that unparking can transfer
+     * slot ownership onto it: without an owner, the handed-over slot would never be released and the
+     * admitted count would stay pinned at the cap, wedging every remaining parked stream. */
+    struct aws_s3_request *request;
+
     struct aws_linked_list_node node;
 };
 

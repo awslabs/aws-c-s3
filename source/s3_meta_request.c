@@ -50,25 +50,25 @@ static const size_t s_default_event_delivery_array_size = 16;
  * its body ends regardless of how much window is left over. */
 static const size_t s_http_window_grant = SIZE_MAX;
 
-/* Reserve a read-window slot for a stream, or park the stream until one frees. Does NOT apply the
- * window: the caller must do that after activating the stream, because
- * aws_http_stream_update_window() only schedules the task that applies a grant once the stream is
- * active, and nothing flushes the pending amount at activation. A grant issued earlier is recorded
- * and then never applied, leaving the stream stuck at the connection's initial window.
+/* Take a read-window slot for a stream if one is free, otherwise park the stream until one frees.
  *
- * Only GetObject body streams are ever parked -- everything else reserves nothing and is granted
- * unconditionally, because with a client-managed initial window any response body that never
- * receives a grant would hang, and control requests like CreateMultipartUpload do have bodies.
+ * MUST be called after the stream is activated. aws_http_stream_update_window() only schedules the
+ * task that applies a grant once the stream is active, and nothing flushes a pending amount at
+ * activation, so a grant issued to an inactive stream -- whether granted here or later by an unpark
+ * -- is recorded and then never applied, hanging the stream at the connection's initial window.
  *
- * Returns true if the caller must apply a grant after activating the stream. Sets *out_holds_slot
- * when the request took a slot that it must later release. */
-static bool s_s3_meta_request_reserve_read_window(
+ * Admission and parking happen in one critical section so a slot cannot be freed in between and
+ * lose the wakeup, which would leave a stream parked with nothing left running to grant it.
+ *
+ * Only GetObject body streams are throttled. Everything else is granted unconditionally, because
+ * with a client-managed initial window any response body that never receives a grant would hang,
+ * and control requests like CreateMultipartUpload do have bodies.
+ *
+ * Returns true if the request took a slot that it must later release. */
+static bool s_s3_meta_request_apply_read_window(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
-    struct aws_http_stream *stream,
-    bool *out_holds_slot) {
-
-    *out_holds_slot = false;
+    struct aws_http_stream *stream) {
 
     struct aws_s3_client *client = meta_request->client;
     if (client->http_window_parts == 0) {
@@ -79,40 +79,50 @@ static bool s_s3_meta_request_reserve_read_window(
     bool is_get_object_body = meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
                               request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT;
     if (!is_get_object_body) {
-        /* Needs a grant so its body can be read, but is not throttled and holds no slot. */
+        aws_http_stream_update_window(stream, s_http_window_grant);
+        return false;
+    }
+
+    /* A retry re-sends the same request on a new stream. It already owns a slot from its first
+     * attempt, so reserving again would either double-count or -- once the cap is full -- park the
+     * request behind the very slot it is holding, which deadlocks it against itself. Keep the slot and
+     * just open the new stream's window. */
+    if (request->holds_http_window_slot) {
+        aws_http_stream_update_window(stream, s_http_window_grant);
         return true;
     }
 
     bool admitted = false;
-    struct aws_s3_parked_stream *parked = NULL;
 
     aws_s3_client_lock_synced_data(client);
     if (client->synced_data.http_window_admitted < client->http_window_parts) {
         ++client->synced_data.http_window_admitted;
         admitted = true;
     } else {
-        parked = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_parked_stream));
+        struct aws_s3_parked_stream *parked =
+            aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_parked_stream));
         parked->allocator = meta_request->allocator;
-        /* The grant can come from a write worker after this request is torn down, so the parked
-         * entry keeps the stream alive on its own. */
+        /* The grant can come from a write worker long after this request is torn down, so the parked
+         * entry keeps both the stream and the request alive on its own -- the request because
+         * unparking transfers slot ownership onto it. */
         parked->stream = aws_http_stream_acquire(stream);
+        parked->request = aws_s3_request_acquire(request);
         aws_linked_list_push_back(&client->synced_data.http_window_parked, &parked->node);
     }
     aws_s3_client_unlock_synced_data(client);
 
-    if (!admitted) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Part %" PRIu32 " parked with a closed read window; %" PRIu32 " slots are all in use.",
-            (void *)meta_request,
-            request->part_number,
-            client->http_window_parts);
-        /* Its grant arrives later, from whichever write completion frees a slot. */
-        return false;
+    if (admitted) {
+        aws_http_stream_update_window(stream, s_http_window_grant);
+        return true;
     }
 
-    *out_holds_slot = true;
-    return true;
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Part %" PRIu32 " parked with a closed read window; %" PRIu32 " slots are all in use.",
+        (void *)meta_request,
+        request->part_number,
+        client->http_window_parts);
+    return false;
 }
 
 
@@ -1627,9 +1637,10 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     struct aws_s3_request *request = connection->request;
     AWS_PRECONDITION(request);
 
-    /* Declared up here because `error_finish` is reachable before the stream exists, and this must be
+    /* Declared up here because `error_finish` is reachable before the stream exists, and these must be
      * initialized on every path that reaches it. */
     struct aws_http_stream *window_grant_stream = NULL;
+    struct aws_s3_request *window_grant_request = NULL;
 
     /* Now that we have a signed request and a connection, go ahead and issue the request. */
     struct aws_http_make_request_options options;
@@ -1665,14 +1676,14 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
 
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
 
-    /* Reserved before activation because it reads and writes `request`, which can be torn down as
-     * soon as the stream is activated and completes on the connection's event loop. The grant itself
-     * has to wait until after activation, so hold an owned stream ref to apply it with. */
-    bool window_holds_slot = false;
-    if (s_s3_meta_request_reserve_read_window(meta_request, request, stream, &window_holds_slot)) {
+    /* The window has to be applied after activation, but doing so reads and writes `request`, which
+     * the stream completing on the connection's event loop would otherwise be free to tear down.
+     * Hold both alive across activation; destroy is deferred until these are released, so the slot
+     * flag set below is still observed by the release check in the request's destructor. */
+    if (meta_request->client->http_window_parts > 0) {
+        window_grant_request = aws_s3_request_acquire(request);
         window_grant_stream = aws_http_stream_acquire(stream);
     }
-    request->holds_http_window_slot = window_holds_slot;
 
     if (!request->always_send) {
         /* BEGIN CRITICAL SECTION */
@@ -1713,14 +1724,13 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         }
     }
 
-    /* Applied only now: aws_http_stream_update_window() schedules the task that applies a grant only
-     * once the stream is active, and nothing flushes a pending amount at activation time, so a grant
-     * issued any earlier would be recorded and then never applied. Note `request` is deliberately
-     * untouched here -- by this point the stream may already have completed and freed it. */
+    /* Applied only now that the stream is active, which is what makes the grant actually land. */
     if (window_grant_stream != NULL) {
-        aws_http_stream_update_window(window_grant_stream, s_http_window_grant);
+        window_grant_request->holds_http_window_slot =
+            s_s3_meta_request_apply_read_window(meta_request, window_grant_request, window_grant_stream);
         aws_http_stream_release(window_grant_stream);
         window_grant_stream = NULL;
+        window_grant_request = aws_s3_request_release(window_grant_request);
     }
     return;
 
@@ -1728,6 +1738,9 @@ error_finish:
     if (window_grant_stream != NULL) {
         aws_http_stream_release(window_grant_stream);
         window_grant_stream = NULL;
+    }
+    if (window_grant_request != NULL) {
+        window_grant_request = aws_s3_request_release(window_grant_request);
     }
     if (stream) {
         aws_http_stream_release(stream);

@@ -3342,27 +3342,54 @@ void aws_s3_client_release_read_window_slot(struct aws_s3_client *client) {
     }
 
     struct aws_s3_parked_stream *parked = NULL;
+    struct aws_linked_list stale;
+    aws_linked_list_init(&stale);
 
     aws_s3_client_lock_synced_data(client);
-    if (!aws_linked_list_empty(&client->synced_data.http_window_parked)) {
-        /* Hand the slot straight to the next stream instead of decrementing. Keeping the admitted
-         * count pinned at the cap while anything is still parked is what lets the admission check
-         * be a single comparison. */
+    while (!aws_linked_list_empty(&client->synced_data.http_window_parked)) {
         struct aws_linked_list_node *node = aws_linked_list_pop_front(&client->synced_data.http_window_parked);
-        parked = AWS_CONTAINER_OF(node, struct aws_s3_parked_stream, node);
-    } else {
+        struct aws_s3_parked_stream *candidate = AWS_CONTAINER_OF(node, struct aws_s3_parked_stream, node);
+
+        if (!candidate->request->holds_http_window_slot) {
+            /* Hand the slot straight to this stream instead of decrementing. Keeping the admitted
+             * count pinned at the cap while anything is still parked is what lets the admission check
+             * be a single comparison. Ownership transfers here so the slot comes back exactly once,
+             * when this request finishes. */
+            candidate->request->holds_http_window_slot = true;
+            parked = candidate;
+            break;
+        }
+
+        /* Its request was retried and reserved a slot of its own in the meantime, so it is already
+         * running and owns a slot. Handing it another would leave one outstanding forever. Drop the
+         * entry and look further down the list. */
+        aws_linked_list_push_back(&stale, node);
+    }
+    if (parked == NULL) {
         AWS_FATAL_ASSERT(client->synced_data.http_window_admitted > 0);
         --client->synced_data.http_window_admitted;
     }
     aws_s3_client_unlock_synced_data(client);
 
+    while (!aws_linked_list_empty(&stale)) {
+        struct aws_linked_list_node *node = aws_linked_list_pop_front(&stale);
+        struct aws_s3_parked_stream *dead = AWS_CONTAINER_OF(node, struct aws_s3_parked_stream, node);
+        aws_http_stream_release(dead->stream);
+        aws_s3_request_release(dead->request);
+        aws_mem_release(dead->allocator, dead);
+    }
+
     if (parked != NULL) {
-        /* Unbounded, matching what an admitted stream gets. A grant sized to the body would leave
-         * the window at 0 exactly as the body ends, which stops HTTP/1 from reaching end-of-message
-         * and wedges the stream. Safe on a stream whose connection has already died -- the update is
+        /* Unbounded, matching what an admitted stream gets. A grant sized to the body would leave the
+         * window at 0 exactly as the body ends, which stops HTTP/1 from reaching end-of-message and
+         * wedges the stream. Safe on a stream whose connection has already died -- the update is
          * recorded and simply never applied. */
         aws_http_stream_update_window(parked->stream, SIZE_MAX);
         aws_http_stream_release(parked->stream);
+
+        /* Releasing this may run the request's destructor, which releases the slot again and wakes
+         * the next parked stream. That recursion is bounded by the length of the parked list. */
+        aws_s3_request_release(parked->request);
         aws_mem_release(parked->allocator, parked);
     }
 }
