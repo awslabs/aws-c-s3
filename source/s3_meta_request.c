@@ -468,24 +468,6 @@ int aws_s3_meta_request_init_base(
             for (size_t i = 0; i < write_worker_count; ++i) {
                 meta_request->recv_file_direct_io_fd_slots[i] = AWS_FILE_INVALID_FD;
             }
-
-            /* Bound the parallel-write queue. Default to the connections this meta request may keep
-             * active, which already tracks `disk_throughput_gbps` when `should_stream` is set, so the
-             * queue depth follows the caller's own disk estimate rather than a magic number.
-             * Clamped to at least 1: a zero cap here would park every part with no write in flight
-             * to pop it, and the meta request would never finish. */
-            meta_request->max_pending_writes = meta_request->fio_opts.max_pending_writes > 0
-                                                   ? meta_request->fio_opts.max_pending_writes
-                                                   : aws_s3_client_get_max_active_connections(client, meta_request);
-            meta_request->max_pending_writes = aws_max_u32(meta_request->max_pending_writes, 1);
-
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT enabled for download write path. base_position=%" PRIu64
-                " max_pending_writes=%" PRIu32,
-                (void *)meta_request,
-                direct_io_base_position,
-                meta_request->max_pending_writes);
         }
     }
 
@@ -2435,23 +2417,6 @@ void aws_s3_meta_request_stream_response_body_synced(
          * what bounds how much of the shared buffer pool write-pending parts can hold. */
         aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
         aws_atomic_fetch_add(&meta_request->client->stats.bytes_pending_write, delivery->body.len);
-        size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
-        if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
-            aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
-            return;
-        }
-        // /* The network is typically faster than the disk, so an unbounded dispatch here lets
-        //  * write-pending buffers consume the whole buffer pool and stall the client. Cap the writes
-        //  * in flight and park the overflow instead. `num_parts_pending_write` counts writes in flight
-        //  * plus parked deliveries, so exceeding the cap means the in-flight writes are already at it.
-        //  * The client-wide counter tracks the same quantity aggregated across meta requests, and is
-        //  * what bounds how much of the shared buffer pool write-pending parts can hold. */
-        // aws_atomic_fetch_add(&meta_request->client->stats.num_parts_pending_write, 1);
-        // size_t num_pending = aws_atomic_fetch_add(&meta_request->num_parts_pending_write, 1) + 1;
-        // if (meta_request->max_pending_writes > 0 && num_pending > meta_request->max_pending_writes) {
-        //     aws_linked_list_push_back(&meta_request->synced_data.pending_write_list, &delivery->node);
-        //     return;
-        // }
 
         s_s3_parallel_write_schedule(delivery);
         return;

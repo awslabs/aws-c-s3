@@ -547,7 +547,6 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.bytes_written_to_disk, 0);
     aws_atomic_init_int(&client->stats.bytes_pending_write, 0);
 
-
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
     /* Store our client bootstrap. */
@@ -1057,10 +1056,8 @@ static int s_s3_client_write_worker_pool_init(
     client->write_worker_pool.elgs = aws_mem_calloc(allocator, num_groups, sizeof(struct aws_event_loop_group *));
     client->write_worker_pool.group_offsets = aws_mem_calloc(allocator, (size_t)num_groups + 1, sizeof(size_t));
     client->write_worker_pool.group_cursors = aws_mem_calloc(allocator, num_groups, sizeof(struct aws_atomic_var));
-    client->write_worker_pool.group_write_counts =
-        aws_mem_calloc(allocator, num_groups, sizeof(struct aws_atomic_var));
-    client->write_worker_pool.worker_loops =
-        aws_mem_calloc(allocator, total_workers, sizeof(struct aws_event_loop *));
+    client->write_worker_pool.group_write_counts = aws_mem_calloc(allocator, num_groups, sizeof(struct aws_atomic_var));
+    client->write_worker_pool.worker_loops = aws_mem_calloc(allocator, total_workers, sizeof(struct aws_event_loop *));
 
     aws_atomic_init_int(&client->write_worker_pool.fallback_cursor, 0);
     aws_atomic_init_int(&client->write_worker_pool.fallback_write_count, 0);
@@ -2343,26 +2340,6 @@ static bool s_s3_client_should_update_meta_request(
         return false;
     }
 
-    /* If this particular endpoint doesn't have any known addresses yet, then we don't want to go full speed in
-     * ramping up requests just yet. If there is already enough in the queue for one address (even if those
-     * aren't for this particular endpoint) we skip over this meta request for now. */
-    struct aws_s3_endpoint *endpoint = meta_request->endpoint;
-    AWS_ASSERT(endpoint != NULL);
-    AWS_ASSERT(client->vtable->get_host_address_count);
-    size_t num_known_vips = client->vtable->get_host_address_count(
-        client->client_bootstrap->host_resolver, endpoint->host_name, AWS_GET_HOST_ADDRESS_COUNT_RECORD_TYPE_A);
-    if (num_known_vips == 0 && (client->threaded_data.num_requests_being_prepared +
-                                client->threaded_data.request_queue_size) >= g_min_num_connections) {
-        return false;
-    }
-
-    /* This is not 100% thread safe, but prepare a bit more for the meta request level won't actually hurt. */
-    size_t specific_request_being_prepared = aws_atomic_load_int(&meta_request->num_request_being_prepared);
-    if (specific_request_being_prepared >= aws_s3_client_get_max_active_connections(client, meta_request)) {
-        /* Don't prepare more than it's allowed for the meta request */
-        return false;
-    }
-
     /* The buffer pool is client-wide, so a per-meta-request bound does not stop N concurrent transfers
      * from filling it with parts waiting on the disk. Stop every meta request from starting new parts
      * once the client-wide queue of write-pending parts is full, so the aggregate memory those parts
@@ -2370,16 +2347,6 @@ static bool s_s3_client_should_update_meta_request(
      * is the case for a client struct built directly rather than through aws_s3_client_new. */
     if (client->max_pending_writes > 0 &&
         aws_atomic_load_int(&client->stats.num_parts_pending_write) >= client->max_pending_writes) {
-        return false;
-    }
-
-    /* Don't start new parts while this meta request already has a full queue of received parts waiting
-     * on the disk. Those parts are each holding a buffer, so without this the pile-up would keep
-     * growing until it drained the buffer pool and stalled every meta request on the client, rather
-     * than just slowing this one to the speed of its disk. Zero means the meta request is not on the
-     * bounded parallel-write path, so there is nothing to throttle. */
-    if (meta_request->max_pending_writes > 0 &&
-        aws_atomic_load_int(&meta_request->num_parts_pending_write) >= meta_request->max_pending_writes) {
         return false;
     }
 
