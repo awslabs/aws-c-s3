@@ -96,7 +96,7 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 /**
  * The environment variable name for memory limit control.
  */
-static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
+static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 static const char *s_memory_limit_bytes_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_BYTES";
 static const char *s_max_connections_env_var = "AWS_CRT_S3_MAX_ACTIVE_CONNECTIONS";
 
@@ -353,7 +353,7 @@ struct aws_s3_client *aws_s3_client_new(
 
         if (mem_limit_configured == 0) {
             /* Try to read from the environment variable for memory limit */
-            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
+            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
             if (memory_limit_from_env_var) {
                 uint64_t mem_limit_in_gib = 0;
                 if (aws_byte_cursor_utf8_parse_u64(
@@ -363,7 +363,7 @@ struct aws_s3_client *aws_s3_client_new(
                         AWS_LS_S3_CLIENT,
                         "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
                         "integers supported.",
-                        s_memory_limit_env_var);
+                        s_memory_limit_gib_env_var);
                     aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                     return NULL;
                 }
@@ -376,7 +376,7 @@ struct aws_s3_client *aws_s3_client_new(
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_CLIENT,
                         "Cannot create client from client_config; environment variable: %s, overflow detected.",
-                        s_memory_limit_env_var);
+                        s_memory_limit_gib_env_var);
                     aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                     return NULL;
                 }
