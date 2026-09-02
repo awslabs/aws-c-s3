@@ -224,6 +224,16 @@ static void s_s3_request_destroy(void *user_data) {
     aws_s3_buffer_ticket_release(request->ticket);
     aws_string_destroy(request->operation_name);
     aws_input_stream_release(request->request_body_stream);
+
+    /* Still set means no body delivery ever took ownership of it: either this request failed before
+     * delivering a body, or it went down the sequential path where the request itself carries the
+     * bytes. Either way the slot has to come back here or the cap would leak a slot per request
+     * until every stream is parked forever. */
+    if (request->holds_http_window_slot) {
+        request->holds_http_window_slot = false;
+        aws_s3_client_release_read_window_slot(request->meta_request->client);
+    }
+
     aws_s3_meta_request_release(request->meta_request);
 
     aws_mem_release(request->allocator, request);
@@ -262,6 +272,10 @@ struct aws_s3_body_delivery *aws_s3_body_delivery_new_from_request(struct aws_s3
     delivery->range_start = request->part_range_start;
     delivery->part_number = request->part_number;
 
+    /* Moved, not copied: exactly one of the two must release the slot. */
+    delivery->holds_http_window_slot = request->holds_http_window_slot;
+    request->holds_http_window_slot = false;
+
     return delivery;
 }
 
@@ -277,6 +291,15 @@ void aws_s3_body_delivery_destroy(struct aws_s3_body_delivery *delivery) {
     /* No-op when `body` is a view of pool memory; the ticket release below is what frees those. */
     aws_byte_buf_clean_up(&delivery->body);
     aws_s3_buffer_ticket_release(delivery->ticket);
+
+    /* The delivery is destroyed once its bytes have reached their sink, so this is the point where
+     * the disk has caught up and the network may pull ahead again. Released before the meta request
+     * ref so a parked stream resumes even if this is the last ref. */
+    if (delivery->holds_http_window_slot) {
+        delivery->holds_http_window_slot = false;
+        aws_s3_client_release_read_window_slot(delivery->meta_request->client);
+    }
+
     aws_s3_meta_request_release(delivery->meta_request);
 
     aws_mem_release(delivery->allocator, delivery);

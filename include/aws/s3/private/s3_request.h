@@ -294,6 +294,11 @@ struct aws_s3_request {
     /* Get request only, if there was an attached checksum to validate did it match the computed checksum */
     bool checksum_match;
 
+    /* True while this request holds one of the client's HTTP read-window slots. Moved onto the
+     * body delivery when one is created, so that whoever ends up owning the bytes is the one that
+     * gives the slot back, and the slot is not released while the data is still unwritten. */
+    bool holds_http_window_slot;
+
     /* Tag that defines what the built request will actually consist of.  This is meant to be space for an enum defined
      * by the derived type.  Request tags do not necessarily map 1:1 with actual S3 API requests. (For example, they can
      * be more contextual, like "first part" instead of just "part".) */
@@ -407,6 +412,11 @@ struct aws_s3_body_delivery {
 
     /* Part number the body came from. */
     uint32_t part_number;
+
+    /* Moved off the request. True while this delivery holds one of the client's HTTP read-window
+     * slots; released once these bytes have reached their sink, which is what lets a parked stream
+     * start receiving. */
+    bool holds_http_window_slot;
 
     /* Which write worker owns this delivery: an index into the client's flat write worker table, and
      * equally the index of the meta request's descriptor slot this write uses. Assigned when the

@@ -102,6 +102,11 @@ static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
  * scheduled, leaving only the counter updates on the write path. */
 static const char *s_stats_file_env_var = "AWS_CRT_S3_STATS_FILE";
 
+/* Number of GetObject body streams allowed to hold an open HTTP read window at once. Setting this
+ * turns on client-managed read windows; leaving it unset keeps windows unmanaged. See
+ * `aws_s3_client.http_window_parts`. */
+static const char *s_http_window_parts_env_var = "AWS_CRT_S3_HTTP_WINDOW_PARTS";
+
 /* How often the snapshot is rewritten. Deliberately half the once-per-second cadence that external
  * resource monitors sample at: at equal periods an unsynchronized sampler would sometimes read the
  * same snapshot twice and see a zero-length interval, which is not a rate it can report. */
@@ -468,6 +473,33 @@ struct aws_s3_client *aws_s3_client_new(
         client->fio_opts.max_pending_writes > 0 ? client->fio_opts.max_pending_writes : client->ideal_connection_count,
         1);
 
+    /* Client-managed HTTP read windows, off unless the env var asks for them. The cap counts body
+     * streams rather than bytes because a stream's body size is not known until its headers arrive,
+     * which is after the admission decision has to be made. */
+    {
+        struct aws_string *from_env = aws_get_env_nonempty(allocator, s_http_window_parts_env_var);
+        if (from_env != NULL) {
+            uint64_t parsed = 0;
+            if (!aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(from_env), &parsed) && parsed > 0 &&
+                parsed <= UINT32_MAX) {
+                *((uint32_t *)&client->http_window_parts) = (uint32_t)parsed;
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Using %s=%" PRIu32 " from environment; HTTP read windows are client managed.",
+                    (void *)client,
+                    s_http_window_parts_env_var,
+                    client->http_window_parts);
+            } else {
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Ignoring invalid value for env var %s; HTTP read windows stay unmanaged.",
+                    (void *)client,
+                    s_http_window_parts_env_var);
+            }
+            aws_string_destroy(from_env);
+        }
+    }
+
     struct aws_s3_buffer_pool_config buffer_pool_config = {
         .client = client,
         .part_size = part_size,
@@ -530,6 +562,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_linked_list_init(&client->synced_data.pending_meta_request_work);
     aws_linked_list_init(&client->synced_data.prepared_requests);
+    aws_linked_list_init(&client->synced_data.http_window_parked);
 
     aws_linked_list_init(&client->threaded_data.meta_requests);
     aws_linked_list_init(&client->threaded_data.request_queue);
@@ -1902,7 +1935,25 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         group_writes_len += (size_t)written;
     }
 
-    char snapshot[1024];
+    /* Admission state for client-managed HTTP read windows. Read under the client lock rather than
+     * via atomics because the count and the parked list are only consistent together. The lock is
+     * free here: this task holds nothing, and the one other caller runs during construction. A
+     * sustained nonzero parked count is the signal that the network is being held back by the disk,
+     * which is the whole point of the mechanism. */
+    uint32_t http_window_admitted = 0;
+    size_t http_window_parked = 0;
+    if (client->http_window_parts > 0) {
+        aws_s3_client_lock_synced_data(client);
+        http_window_admitted = client->synced_data.http_window_admitted;
+        for (struct aws_linked_list_node *node = aws_linked_list_begin(&client->synced_data.http_window_parked);
+             node != aws_linked_list_end(&client->synced_data.http_window_parked);
+             node = aws_linked_list_next(node)) {
+            ++http_window_parked;
+        }
+        aws_s3_client_unlock_synced_data(client);
+    }
+
+    char snapshot[1536];
     int snapshot_len = snprintf(
         snapshot,
         sizeof(snapshot),
@@ -1919,7 +1970,10 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         "write_numa_aware %d\n"
         "write_workers %zu\n"
         "writes_per_cpu_group %s\n"
-        "writes_cpu_group_unknown %zu\n",
+        "writes_cpu_group_unknown %zu\n"
+        "http_window_parts %" PRIu32 "\n"
+        "http_window_admitted %" PRIu32 "\n"
+        "http_window_parked %zu\n",
         timestamp_ns,
         aws_atomic_load_int(&client->stats.bytes_written_to_disk),
         aws_atomic_load_int(&client->stats.bytes_pending_write),
@@ -1941,7 +1995,10 @@ static int s_s3_client_write_stats_file(struct aws_s3_client *client) {
         (int)client->write_worker_pool.numa_aware,
         client->write_worker_pool.num_workers,
         group_writes,
-        aws_atomic_load_int(&client->write_worker_pool.fallback_write_count));
+        aws_atomic_load_int(&client->write_worker_pool.fallback_write_count),
+        client->http_window_parts,
+        http_window_admitted,
+        http_window_parked);
 
     if (snapshot_len < 0 || (size_t)snapshot_len >= sizeof(snapshot)) {
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
@@ -3277,8 +3334,39 @@ static void s_resume_token_ref_count_zero_callback(void *arg) {
     aws_mem_release(token->allocator, token);
 }
 
-struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator) {
-    struct aws_s3_meta_request_resume_token *token =
+void aws_s3_client_release_read_window_slot(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+
+    if (client->http_window_parts == 0) {
+        return;
+    }
+
+    struct aws_s3_parked_stream *parked = NULL;
+
+    aws_s3_client_lock_synced_data(client);
+    if (!aws_linked_list_empty(&client->synced_data.http_window_parked)) {
+        /* Hand the slot straight to the next stream instead of decrementing. Keeping the admitted
+         * count pinned at the cap while anything is still parked is what lets the admission check
+         * be a single comparison. */
+        struct aws_linked_list_node *node = aws_linked_list_pop_front(&client->synced_data.http_window_parked);
+        parked = AWS_CONTAINER_OF(node, struct aws_s3_parked_stream, node);
+    } else {
+        AWS_FATAL_ASSERT(client->synced_data.http_window_admitted > 0);
+        --client->synced_data.http_window_admitted;
+    }
+    aws_s3_client_unlock_synced_data(client);
+
+    if (parked != NULL) {
+        /* The grant recorded at park time, not an unbounded one: the stream still needs exactly its
+         * own range. Safe on a stream whose connection has already died -- the update is recorded
+         * and simply never applied. */
+        aws_http_stream_update_window(parked->stream, parked->window_grant);
+        aws_http_stream_release(parked->stream);
+        aws_mem_release(parked->allocator, parked);
+    }
+}
+
+struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator) {    struct aws_s3_meta_request_resume_token *token =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request_resume_token));
 
     token->allocator = allocator;

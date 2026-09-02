@@ -327,6 +327,17 @@ struct aws_s3_client {
      * Resolved from `fio_opts.max_pending_writes` when set, otherwise from `ideal_connection_count`. */
     const uint32_t max_pending_writes;
 
+    /* How many GetObject body streams may hold an open HTTP read window at once. Nonzero turns on
+     * client-managed read windows: connections are created with an initial stream window of 0, so
+     * every stream starts unable to receive body bytes, and this client hands each one its window
+     * explicitly. A body stream gets its window when a slot is free and gives the slot back once
+     * its bytes are on disk, which is what makes the network stop pulling ahead of the disk.
+     *
+     * Zero (the default) leaves windows unmanaged: connections keep an initial window of SIZE_MAX
+     * and nothing here runs.
+     *
+     * Resolved from the AWS_CRT_S3_HTTP_WINDOW_PARTS env var. */
+    const uint32_t http_window_parts;
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
@@ -515,6 +526,14 @@ struct aws_s3_client {
         uint32_t endpoints_cleanup_task_scheduled : 1;
 
         struct aws_s3_upload_part_timeout_stats upload_part_stats;
+
+        /* Number of GetObject body streams currently holding an open HTTP read window, and the
+         * streams that asked for one while the cap was full. A parked stream has already sent its
+         * request and had its headers read; only its body is held back, so handing it a window
+         * later resumes it without any request setup. Both are meaningless unless
+         * `http_window_parts` is nonzero. */
+        uint32_t http_window_admitted;
+        struct aws_linked_list http_window_parked;
     } synced_data;
 
     struct {
@@ -575,6 +594,30 @@ AWS_EXTERN_C_BEGIN
 
 AWS_S3_API
 struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(struct aws_allocator *allocator);
+
+/* A GetObject body stream that asked for a read window while the client's cap was full. It has
+ * already sent its request and had its headers delivered; only its body is stalled inside the
+ * connection, so granting a window later resumes it with no request setup. Owns a stream ref
+ * because the grant can come from a write worker long after the S3 request that created it is
+ * gone. */
+struct aws_s3_parked_stream {
+    struct aws_allocator *allocator;
+    struct aws_http_stream *stream;
+
+    /* Window this stream needs once a slot frees: its range length, or SIZE_MAX when the body size
+     * is not known ahead of time. Recorded at park time because the grant is applied later, from a
+     * write worker that has no access to the request. */
+    size_t window_grant;
+
+    struct aws_linked_list_node node;
+};
+
+/* Give back one HTTP read-window slot and hand it to whichever stream has been parked longest.
+ * No-op unless `http_window_parts` is nonzero. Safe from any thread, including a write worker:
+ * aws_http_stream_update_window() takes the stream's own lock and defers the work onto the
+ * connection's event loop. */
+AWS_S3_API
+void aws_s3_client_release_read_window_slot(struct aws_s3_client *client);
 
 AWS_S3_API
 void aws_s3_set_dns_ttl(size_t ttl);

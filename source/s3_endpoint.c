@@ -100,6 +100,11 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
         goto error_cleanup;
     }
 
+    /* Assigned before the connection manager is created because the manager's options depend on
+     * client configuration. It is only a pointer copy; nothing below reads it as an indicator that
+     * setup finished. */
+    endpoint->client = options->client;
+
     endpoint->http_connection_manager = s_s3_endpoint_create_http_connection_manager(
         endpoint,
         options->host_name,
@@ -118,8 +123,6 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     if (endpoint->http_connection_manager == NULL) {
         goto error_cleanup;
     }
-
-    endpoint->client = options->client;
 
     return endpoint;
 
@@ -178,6 +181,28 @@ static struct aws_http_connection_manager *s_s3_endpoint_create_http_connection_
     AWS_ZERO_STRUCT(manager_options);
     manager_options.bootstrap = client_bootstrap;
     manager_options.initial_window_size = SIZE_MAX;
+
+    if (endpoint->client != NULL && endpoint->client->http_window_parts > 0) {
+        /* Put connections in manual window management so this client decides when a stream may
+         * receive body bytes. Note this applies to every request on the connection, not just
+         * GetObject bodies, so anything with a response body that is never granted a window would
+         * hang forever -- s_s3_meta_request_grant_read_window() grants unconditionally outside the
+         * GetObject body path for that reason. */
+        manager_options.enable_read_back_pressure = true;
+
+        /* Not zero, even though a zero initial window is what would make admission control exact.
+         * HTTP/1 derives its per-connection read buffer as max(64KB, min(1MB, initial_window_size)),
+         * and that buffer is the socket read-ahead limit, so a zero initial window would cap every
+         * connection at 64KB of read-ahead. This is the smallest initial window that still leaves a
+         * 256KB read buffer.
+         *
+         * The tradeoff is that admission becomes soft: a stream that should be parked can still
+         * pull this many bytes before its window closes. Window updates are cumulative, so a later
+         * grant of the stream's range length simply lands on top of this and over-grants
+         * harmlessly. */
+        manager_options.initial_window_size = 256 * 1024;
+    }
+
     manager_options.socket_options = &socket_options;
     manager_options.host = host_name_cursor;
     manager_options.max_connections = max_connections;

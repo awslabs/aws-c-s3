@@ -36,6 +36,88 @@ static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
 
+/* How much window to hand a stream. A ranged part gets exactly its range, which is the most bytes S3
+ * can return for it, so the window closes as the body ends rather than partway through it. Anything
+ * without a known range -- a whole-object GET, a control request like CreateMultipartUpload -- gets
+ * an unbounded grant, because a grant smaller than the body would stall the stream and the slot it
+ * holds would never be released.
+ *
+ * Deliberately not `client->part_size`: on the download path the transfer unit is the meta request's
+ * resolved range size, derived from `optimal_range_size` and commonly 3x `part_size`. Granting
+ * part_size would stall every part two thirds of the way through its body.
+ *
+ * The residual assumption is that S3 honors the Range header. A response that ignored it and
+ * returned more than the requested range would stall its stream; an unbounded grant would not, at
+ * the cost of letting an unexpected response pull arbitrary bytes into the pool. */
+static size_t s_s3_request_read_window_grant(const struct aws_s3_request *request) {
+    if (request->part_number > 0 && request->part_range_end >= request->part_range_start) {
+        uint64_t range_len = request->part_range_end - request->part_range_start + 1;
+        if (range_len <= (uint64_t)SIZE_MAX) {
+            return (size_t)range_len;
+        }
+    }
+    return SIZE_MAX;
+}
+
+/* Hand a stream its read window, or park it until a slot frees. Only GetObject body streams are
+ * ever parked -- everything else is granted immediately, because with a client-managed initial
+ * window of 0 any response body that never receives a grant would hang forever, and control
+ * requests like CreateMultipartUpload and ListParts do have bodies.
+ *
+ * Returns true if the request now holds a slot it must later release. */
+static bool s_s3_meta_request_grant_read_window(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    struct aws_http_stream *stream) {
+
+    struct aws_s3_client *client = meta_request->client;
+    if (client->http_window_parts == 0) {
+        /* Windows are unmanaged; connections were created wide open. */
+        return false;
+    }
+
+    bool is_get_object_body = meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
+                              request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT;
+    const size_t grant = s_s3_request_read_window_grant(request);
+
+    if (!is_get_object_body) {
+        aws_http_stream_update_window(stream, grant);
+        return false;
+    }
+
+    bool admitted = false;
+    struct aws_s3_parked_stream *parked = NULL;
+
+    aws_s3_client_lock_synced_data(client);
+    if (client->synced_data.http_window_admitted < client->http_window_parts) {
+        ++client->synced_data.http_window_admitted;
+        admitted = true;
+    } else {
+        parked = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_parked_stream));
+        parked->allocator = meta_request->allocator;
+        /* The grant can come from a write worker after this request is torn down, so the parked
+         * entry keeps the stream alive and carries its own grant size. */
+        parked->stream = aws_http_stream_acquire(stream);
+        parked->window_grant = grant;
+        aws_linked_list_push_back(&client->synced_data.http_window_parked, &parked->node);
+    }
+    aws_s3_client_unlock_synced_data(client);
+
+    if (admitted) {
+        aws_http_stream_update_window(stream, grant);
+        return true;
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Part %" PRIu32 " parked with a closed read window; %" PRIu32 " slots are all in use.",
+        (void *)meta_request,
+        request->part_number,
+        client->http_window_parts);
+    return false;
+}
+
+
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
@@ -1580,6 +1662,11 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
     }
 
     AWS_LOGF_TRACE(AWS_LS_S3_META_REQUEST, "id=%p: Sending request %p", (void *)meta_request, (void *)request);
+
+    /* Decided before activation on purpose: aws_http_stream_update_window() accumulates a pending
+     * grant even on a stream that is not active yet, so granting here closes the window in which
+     * body bytes could arrive before the decision was made. */
+    request->holds_http_window_slot = s_s3_meta_request_grant_read_window(meta_request, request, stream);
 
     if (!request->always_send) {
         /* BEGIN CRITICAL SECTION */
