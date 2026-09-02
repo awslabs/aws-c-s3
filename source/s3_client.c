@@ -3357,10 +3357,11 @@ void aws_s3_client_release_read_window_slot(struct aws_s3_client *client) {
     aws_s3_client_unlock_synced_data(client);
 
     if (parked != NULL) {
-        /* The grant recorded at park time, not an unbounded one: the stream still needs exactly its
-         * own range. Safe on a stream whose connection has already died -- the update is recorded
-         * and simply never applied. */
-        aws_http_stream_update_window(parked->stream, parked->window_grant);
+        /* Unbounded, matching what an admitted stream gets. A grant sized to the body would leave
+         * the window at 0 exactly as the body ends, which stops HTTP/1 from reaching end-of-message
+         * and wedges the stream. Safe on a stream whose connection has already died -- the update is
+         * recorded and simply never applied. */
+        aws_http_stream_update_window(parked->stream, SIZE_MAX);
         aws_http_stream_release(parked->stream);
         aws_mem_release(parked->allocator, parked);
     }

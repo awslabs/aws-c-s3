@@ -36,28 +36,19 @@ static const size_t s_dynamic_body_initial_buf_size = KB_TO_BYTES(1);
 static const size_t s_default_body_streaming_priority_queue_size = 16;
 static const size_t s_default_event_delivery_array_size = 16;
 
-/* How much window to hand a stream. A ranged part gets exactly its range, which is the most bytes S3
- * can return for it, so the window closes as the body ends rather than partway through it. Anything
- * without a known range -- a whole-object GET, a control request like CreateMultipartUpload -- gets
- * an unbounded grant, because a grant smaller than the body would stall the stream and the slot it
- * holds would never be released.
+/* Window handed to a stream once it is admitted. Unbounded on purpose.
  *
- * Deliberately not `client->part_size`: on the download path the transfer unit is the meta request's
- * resolved range size, derived from `optimal_range_size` and commonly 3x `part_size`. Granting
- * part_size would stall every part two thirds of the way through its body.
+ * A grant equal to the body length hangs the stream: HTTP/1 clamps how much it feeds the decoder to
+ * the remaining window (h1_connection.c, "Don't process more data than the stream's window can
+ * accept"), so a window that reaches 0 exactly as the body ends leaves the connection unable to
+ * proceed to end-of-message. on_complete never fires, the part is never written, and the slot it
+ * holds is never released -- every part wedges on its own last byte. The upstream TODO at that same
+ * clamp names this edge case.
  *
- * The residual assumption is that S3 honors the Range header. A response that ignored it and
- * returned more than the requested range would stall its stream; an unbounded grant would not, at
- * the cost of letting an unexpected response pull arbitrary bytes into the pool. */
-static size_t s_s3_request_read_window_grant(const struct aws_s3_request *request) {
-    if (request->part_number > 0 && request->part_range_end >= request->part_range_start) {
-        uint64_t range_len = request->part_range_end - request->part_range_start + 1;
-        if (range_len <= (uint64_t)SIZE_MAX) {
-            return (size_t)range_len;
-        }
-    }
-    return SIZE_MAX;
-}
+ * Nothing is lost by being unbounded: the window here is an admission gate, and the number of
+ * streams allowed to receive at once is what throttles the download. A stream stops receiving when
+ * its body ends regardless of how much window is left over. */
+static const size_t s_http_window_grant = SIZE_MAX;
 
 /* Hand a stream its read window, or park it until a slot frees. Only GetObject body streams are
  * ever parked -- everything else is granted immediately, because with a client-managed initial
@@ -78,10 +69,9 @@ static bool s_s3_meta_request_grant_read_window(
 
     bool is_get_object_body = meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
                               request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT;
-    const size_t grant = s_s3_request_read_window_grant(request);
 
     if (!is_get_object_body) {
-        aws_http_stream_update_window(stream, grant);
+        aws_http_stream_update_window(stream, s_http_window_grant);
         return false;
     }
 
@@ -96,15 +86,14 @@ static bool s_s3_meta_request_grant_read_window(
         parked = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_parked_stream));
         parked->allocator = meta_request->allocator;
         /* The grant can come from a write worker after this request is torn down, so the parked
-         * entry keeps the stream alive and carries its own grant size. */
+         * entry keeps the stream alive on its own. */
         parked->stream = aws_http_stream_acquire(stream);
-        parked->window_grant = grant;
         aws_linked_list_push_back(&client->synced_data.http_window_parked, &parked->node);
     }
     aws_s3_client_unlock_synced_data(client);
 
     if (admitted) {
-        aws_http_stream_update_window(stream, grant);
+        aws_http_stream_update_window(stream, s_http_window_grant);
         return true;
     }
 

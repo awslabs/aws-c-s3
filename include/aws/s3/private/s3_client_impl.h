@@ -603,12 +603,6 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(st
 struct aws_s3_parked_stream {
     struct aws_allocator *allocator;
     struct aws_http_stream *stream;
-
-    /* Window this stream needs once a slot frees: its range length, or SIZE_MAX when the body size
-     * is not known ahead of time. Recorded at park time because the grant is applied later, from a
-     * write worker that has no access to the request. */
-    size_t window_grant;
-
     struct aws_linked_list_node node;
 };
 
