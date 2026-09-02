@@ -98,6 +98,7 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
  */
 static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 static const char *s_memory_limit_bytes_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_BYTES";
+static const char *s_max_connections_env_var = "AWS_CRT_S3_MAX_ACTIVE_CONNECTIONS";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -544,6 +545,19 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
+
+    /* Allow env var to override max active connections (for benchmarking and testing) */
+    if (client->max_active_connections_override == 0) {
+        struct aws_string *max_conn_str = aws_get_env_nonempty(allocator, s_max_connections_env_var);
+        if (max_conn_str) {
+            uint64_t max_conn_val = 0;
+            if (!aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(max_conn_str), &max_conn_val) &&
+                max_conn_val > 0 && max_conn_val <= UINT32_MAX) {
+                *((uint32_t *)&client->max_active_connections_override) = (uint32_t)max_conn_val;
+            }
+            aws_string_destroy(max_conn_str);
+        }
+    }
 
     /* Store our client bootstrap. */
     client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
