@@ -331,6 +331,7 @@ struct aws_s3_client *aws_s3_client_new(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
         /* Try _IN_BYTES first (allows sub-GiB values), then fall back to _IN_GIB */
@@ -351,6 +352,7 @@ struct aws_s3_client *aws_s3_client_new(
             mem_limit_configured = mem_limit_from_env;
         }
 
+        /* _IN_GIB is only checked if _IN_BYTES was not set */
         if (mem_limit_configured == 0) {
             /* Try to read from the environment variable for memory limit */
             struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
@@ -383,7 +385,7 @@ struct aws_s3_client *aws_s3_client_new(
 
                 mem_limit_configured = mem_limit_in_bytes;
             }
-        } /* end _IN_BYTES == 0 fallback to _IN_GIB */
+        }
     } else {
         mem_limit_configured = client_config->memory_limit_in_bytes;
     }
@@ -545,8 +547,7 @@ struct aws_s3_client *aws_s3_client_new(
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
-
-    /* Allow env var to override max active connections (for benchmarking and testing) */
+    /* max connections can be set from env var but doesn't supercede client_config */
     if (client->max_active_connections_override == 0) {
         struct aws_string *max_conn_str = aws_get_env_nonempty(allocator, s_max_connections_env_var);
         if (max_conn_str) {
