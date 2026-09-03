@@ -297,6 +297,30 @@ struct aws_s3_client {
      * Resolved from `fio_opts.max_pending_writes` when set, otherwise from `ideal_connection_count`. */
     const uint32_t max_pending_writes;
 
+    /* How many GetObject body streams may hold an open HTTP read window at once. Nonzero turns on
+     * client-managed read windows: connections are created with an initial stream window of 0, so
+     * every stream starts unable to receive body bytes, and this client hands each one its window
+     * explicitly. A body stream gets its window when a slot is free and gives the slot back once
+     * its bytes are on disk, which is what makes the network stop pulling ahead of the disk.
+     *
+     * Zero (the default) leaves windows unmanaged: connections keep an initial window of SIZE_MAX
+     * and nothing here runs.
+     *
+     * Resolved from the AWS_CRT_S3_HTTP_WINDOW_PARTS env var. */
+    const uint32_t http_window_parts;
+
+    /* How many separate regions of an object an auto-ranged-get spreads its in-flight range requests
+     * across. The object's parts are cut into this many contiguous lanes and `update` rotates between
+     * them, so at any moment the requests in flight sit in this many far-apart regions of the object
+     * rather than in one contiguous sweep. Setting this to the connection count puts every concurrent
+     * request in a region of its own.
+     *
+     * Zero (the default) hands parts out in object order, which is the only ordering the in-order
+     * body delivery path can consume, so this only takes effect for downloads writing to a file at
+     * explicit offsets (see `aws_s3_meta_request.recv_file_direct_io`).
+     *
+     * Resolved from the AWS_CRT_S3_GET_SPREAD_LANES env var. */
+    const uint32_t get_spread_lanes;
     /**
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
