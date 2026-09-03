@@ -107,6 +107,12 @@ static const char *s_stats_file_env_var = "AWS_CRT_S3_STATS_FILE";
  * `aws_s3_client.http_window_parts`. */
 static const char *s_http_window_parts_env_var = "AWS_CRT_S3_HTTP_WINDOW_PARTS";
 
+/* How many far-apart regions of an object an auto-ranged-get spreads its in-flight range requests
+ * across. A positive count sets the lanes directly; "auto" ties it to the connection count so that
+ * every concurrent request sits in a region of its own. Leaving it unset keeps parts in object
+ * order. See `aws_s3_client.get_spread_lanes`. */
+static const char *s_get_spread_lanes_env_var = "AWS_CRT_S3_GET_SPREAD_LANES";
+
 /* How often the snapshot is rewritten. Deliberately half the once-per-second cadence that external
  * resource monitors sample at: at equal periods an unsynchronized sampler would sometimes read the
  * same snapshot twice and see a zero-length interval, which is not a rate it can report. */
@@ -495,6 +501,39 @@ struct aws_s3_client *aws_s3_client_new(
                     "id=%p Ignoring invalid value for env var %s; HTTP read windows stay unmanaged.",
                     (void *)client,
                     s_http_window_parts_env_var);
+            }
+            aws_string_destroy(from_env);
+        }
+    }
+
+    /* Spread an auto-ranged-get's in-flight range requests across several regions of the object
+     * instead of sweeping it in order, off unless the env var asks for it. "auto" resolves to the
+     * connection count, which puts each concurrent request in a region of its own. */
+    {
+        struct aws_string *from_env = aws_get_env_nonempty(allocator, s_get_spread_lanes_env_var);
+        if (from_env != NULL) {
+            struct aws_byte_cursor value = aws_byte_cursor_from_string(from_env);
+            uint64_t parsed = 0;
+            if (aws_byte_cursor_eq_c_str_ignore_case(&value, "auto")) {
+                *((uint32_t *)&client->get_spread_lanes) = client->ideal_connection_count;
+            } else if (!aws_byte_cursor_utf8_parse_u64(value, &parsed) && parsed > 0 && parsed <= UINT32_MAX) {
+                *((uint32_t *)&client->get_spread_lanes) = (uint32_t)parsed;
+            }
+
+            if (client->get_spread_lanes > 0) {
+                AWS_LOGF_INFO(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Using %s=%" PRIu32 " from environment; ranged gets spread across that many regions of the "
+                    "object.",
+                    (void *)client,
+                    s_get_spread_lanes_env_var,
+                    client->get_spread_lanes);
+            } else {
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Ignoring invalid value for env var %s; ranged gets stay in object order.",
+                    (void *)client,
+                    s_get_spread_lanes_env_var);
             }
             aws_string_destroy(from_env);
         }
