@@ -143,6 +143,7 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     aws_string_destroy(auto_ranged_get->etag);
     aws_string_destroy(auto_ranged_get->s3_object_last_modified);
+    aws_mem_release(meta_request->allocator, auto_ranged_get->synced_data.lanes);
     aws_mem_release(meta_request->allocator, auto_ranged_get);
 }
 
@@ -195,6 +196,106 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
 
     /* Otherwise, do a headObject so that we can validate checksum if the file was uploaded as a single part */
     return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT;
+}
+
+/* Cut the object's parts into contiguous lanes so that `update` can rotate between them, which puts
+ * the requests in flight in that many far-apart regions of the object instead of one contiguous
+ * sweep. Leaves lanes unset (parts handed out in object order) when spreading is off, when the
+ * delivery path needs parts in order, or when there is only one part left to hand out. */
+static void s_s3_auto_ranged_get_init_lanes_synced(struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    /* Discovery of an empty object range gets retried, so any lanes from a previous attempt go now. */
+    if (auto_ranged_get->synced_data.lanes != NULL) {
+        aws_mem_release(meta_request->allocator, auto_ranged_get->synced_data.lanes);
+        auto_ranged_get->synced_data.lanes = NULL;
+    }
+    auto_ranged_get->synced_data.lane_count = 0;
+    auto_ranged_get->synced_data.lane_cursor = 0;
+
+    const uint32_t requested_lanes = meta_request->client->get_spread_lanes;
+    if (requested_lanes <= 1) {
+        return;
+    }
+
+    /* Out-of-order parts are only consumable by the offset-based write path. The in-order delivery
+     * path holds onto every part that arrives ahead of the one it next owes the caller, so handing
+     * parts out of order there would turn its queue into an unbounded reorder buffer pinning buffer
+     * pool tickets. Read backpressure has the same problem from the other direction: it releases
+     * window in object order. */
+    if (!meta_request->recv_file_direct_io || meta_request->client->enable_read_backpressure) {
+        return;
+    }
+
+    /* The discovery request has already taken part 1 unless it was a HeadObject. */
+    const uint32_t first_part = auto_ranged_get->synced_data.num_parts_requested + 1;
+    const uint32_t total_num_parts = auto_ranged_get->synced_data.total_num_parts;
+    if (first_part > total_num_parts) {
+        return;
+    }
+    const uint32_t parts_remaining = total_num_parts - first_part + 1;
+
+    const uint32_t lane_count = aws_min_u32(requested_lanes, parts_remaining);
+    if (lane_count <= 1) {
+        return;
+    }
+
+    /* Round the stride up so the lanes cover every part; the last lane is the short one. Rounding up
+     * can leave fewer non-empty lanes than asked for (7 parts over 4 lanes fills 3 lanes of 3, 3 and
+     * 1), so the count comes back from what the stride actually covers. */
+    const uint32_t parts_per_lane = (parts_remaining + lane_count - 1) / lane_count;
+    const uint32_t used_lanes = (parts_remaining + parts_per_lane - 1) / parts_per_lane;
+
+    struct aws_s3_get_part_lane *lanes =
+        aws_mem_calloc(meta_request->allocator, used_lanes, sizeof(struct aws_s3_get_part_lane));
+
+    for (uint32_t i = 0; i < used_lanes; ++i) {
+        lanes[i].next = first_part + (i * parts_per_lane);
+        lanes[i].end = aws_min_u32(lanes[i].next + parts_per_lane - 1, total_num_parts);
+    }
+
+    auto_ranged_get->synced_data.lanes = lanes;
+    auto_ranged_get->synced_data.lane_count = used_lanes;
+
+    AWS_LOGF_INFO(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Spreading parts %" PRIu32 "-%" PRIu32 " across %" PRIu32 " regions of %" PRIu32 " parts each.",
+        (void *)meta_request,
+        first_part,
+        total_num_parts,
+        used_lanes,
+        parts_per_lane);
+}
+
+/* The part number to hand out next. Callers must already know a part is owed, which their
+ * `num_parts_requested < total_num_parts` check establishes. */
+static uint32_t s_s3_auto_ranged_get_next_part_number_synced(struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    if (auto_ranged_get->synced_data.lane_count == 0) {
+        return auto_ranged_get->synced_data.num_parts_requested + 1;
+    }
+
+    const uint32_t cursor = auto_ranged_get->synced_data.lane_cursor;
+    struct aws_s3_get_part_lane *lane = &auto_ranged_get->synced_data.lanes[cursor];
+    AWS_ASSERT(lane->next <= lane->end);
+    const uint32_t part_number = lane->next++;
+
+    if (lane->next > lane->end) {
+        /* Lane is spent. Move the last one into its slot so every lane in [0, lane_count) still has a
+         * part left, which is what keeps this a constant-time step. The cursor stays where it is and
+         * so lands on the lane just moved in, unless the slot it named is the one that went away. */
+        auto_ranged_get->synced_data.lanes[cursor] =
+            auto_ranged_get->synced_data.lanes[--auto_ranged_get->synced_data.lane_count];
+        auto_ranged_get->synced_data.lane_cursor =
+            auto_ranged_get->synced_data.lane_count > 0 ? cursor % auto_ranged_get->synced_data.lane_count : 0;
+    } else {
+        auto_ranged_get->synced_data.lane_cursor = (cursor + 1) % auto_ranged_get->synced_data.lane_count;
+    }
+
+    return part_number;
 }
 
 static bool s_s3_auto_ranged_get_update(
@@ -374,11 +475,13 @@ static bool s_s3_auto_ranged_get_update(
                     auto_ranged_get->synced_data.read_window_warning_issued = 0;
                 }
 
+                const uint32_t part_number = s_s3_auto_ranged_get_next_part_number_synced(meta_request);
+
                 request = aws_s3_request_new(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
+                    part_number,
                     AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
 
                 aws_s3_calculate_auto_ranged_get_part_range(
@@ -1015,6 +1118,10 @@ update_synced_data:
                     object_range_start,
                     object_range_end);
             }
+
+            /* The part count is what sizes the lanes, so this is the first point they can be laid out,
+             * and doing it here means every part handed out afterwards comes from a lane. */
+            s_s3_auto_ranged_get_init_lanes_synced(meta_request);
 
             /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding
              * here also means every part dispatched afterwards sees the decision already made. */
