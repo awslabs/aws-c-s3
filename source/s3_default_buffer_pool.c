@@ -128,16 +128,6 @@ static void s_aws_ticket_wrapper_destroy(void *data);
 
 struct aws_byte_buf s_default_ticket_claim(struct aws_s3_buffer_ticket *ticket_wrapper) {
     struct aws_s3_default_buffer_ticket *ticket = ticket_wrapper->impl;
-
-    /* Record which cpu group this buffer belongs to, on the first claim only. The claiming thread is
-     * the one that goes on to write the response body into the buffer, so on a buffer's first use it
-     * is also the thread that faults the pages in, which is what decides where they live. Later
-     * claims of the same ticket must not overwrite that. Cheap enough to sit on the claim path:
-     * sched_getcpu() is a vDSO call, and this runs once per part rather than per write. */
-    if (ticket_wrapper->cpu_group == AWS_CPU_GROUP_UNKNOWN) {
-        ticket_wrapper->cpu_group = aws_current_thread_cpu_group();
-    }
-
     return aws_s3_default_buffer_pool_acquire_buffer(ticket->pool, ticket);
 }
 
@@ -150,8 +140,6 @@ struct aws_s3_buffer_ticket *s_wrap_default_ticket(struct aws_s3_default_buffer_
 
     ticket_wrapper->impl = ticket;
     ticket_wrapper->vtable = &s_default_ticket_vtable;
-    /* Explicit, because calloc's zero is cpu group 0, a real group. */
-    ticket_wrapper->cpu_group = AWS_CPU_GROUP_UNKNOWN;
     aws_ref_count_init(
         &ticket_wrapper->ref_count, ticket_wrapper, (aws_simple_completion_callback *)s_aws_ticket_wrapper_destroy);
 

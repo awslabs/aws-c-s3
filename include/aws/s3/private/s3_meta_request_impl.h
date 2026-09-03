@@ -418,7 +418,7 @@ struct aws_s3_meta_request {
     int recv_file_direct_io_fd;
 
     /* One O_DIRECT descriptor per write worker, or AWS_FILE_INVALID_FD for a slot not opened yet.
-     * Length is recv_file_direct_io_fd_slot_count, which is the client's flat write worker count.
+     * Length is recv_file_direct_io_fd_slot_count, which is the client's write_elg loop count.
      *
      * Giving each worker its own descriptor keeps every write single-writer: two workers never share
      * a struct file, so they never contend on its reference count, and a slot needs no lock because
