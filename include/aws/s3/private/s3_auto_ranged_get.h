@@ -14,6 +14,14 @@ enum aws_s3_auto_ranged_get_request_type {
     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1,
 };
 
+/* One contiguous run of part numbers that `update` hands out in order. Splitting the object's parts
+ * into several of these and rotating between them is what spreads the requests in flight across
+ * far-apart regions of the object. Both bounds are inclusive 1-based part numbers. */
+struct aws_s3_get_part_lane {
+    uint32_t next;
+    uint32_t end;
+};
+
 struct aws_s3_auto_ranged_get {
     struct aws_s3_meta_request base;
 
@@ -71,6 +79,15 @@ struct aws_s3_auto_ranged_get {
         uint32_t num_parts_successful;
         uint32_t num_parts_failed;
         uint32_t num_parts_checksum_validated;
+
+        /* Regions of the object that parts are handed out from, NULL when parts are handed out in
+         * object order. Only the lanes still holding parts are present: an exhausted lane is
+         * swap-removed from the end so picking the next part stays a constant-time step. Allocated
+         * once the part count is known, so `lane_count` is zero until then and again once every part
+         * has been handed out. */
+        struct aws_s3_get_part_lane *lanes;
+        uint32_t lane_count;
+        uint32_t lane_cursor;
 
         uint32_t object_range_known : 1;
 
