@@ -413,10 +413,15 @@ struct aws_s3_body_delivery {
     /* Part number the body came from. */
     uint32_t part_number;
 
-    /* Which write worker owns this delivery: an index into the client's write_elg, and equally the
-     * index of the meta request's descriptor slot this write uses. Assigned when the delivery is
-     * scheduled, so a delivery that gets parked and re-scheduled may land on a different worker --
-     * harmless, because every write carries its own absolute file offset. */
+    /* Moved off the request. True while this delivery holds one of the client's HTTP read-window
+     * slots; released once these bytes have reached their sink, which is what lets a parked stream
+     * start receiving. */
+    bool holds_http_window_slot;
+
+    /* Which write worker owns this delivery: an index into the client's flat write worker table, and
+     * equally the index of the meta request's descriptor slot this write uses. Assigned when the
+     * delivery is scheduled, so a delivery that gets parked and re-scheduled may land on a different
+     * worker -- harmless, because every write carries its own absolute file offset. */
     size_t write_loop_index;
 
     /* Scheduling state. Owned by whichever delivery path is driving this body. */

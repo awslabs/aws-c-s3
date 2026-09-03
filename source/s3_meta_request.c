@@ -125,7 +125,6 @@ static bool s_s3_meta_request_apply_read_window(
     return false;
 }
 
-
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
 static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
@@ -2464,7 +2463,6 @@ static void s_s3_parallel_write_schedule(struct aws_s3_body_delivery *delivery) 
      * not just the loop. */
     size_t loop_count = aws_event_loop_group_get_loop_count(client->write_elg);
     size_t loop_index = aws_atomic_fetch_add(&client->next_write_loop_index, 1) % loop_count;
-    delivery->write_loop_index = loop_index;
 
     struct aws_event_loop *loop = aws_event_loop_group_get_loop_at(client->write_elg, loop_index);
     aws_task_init(&delivery->task, s_s3_parallel_write_task, delivery, "s3_parallel_write");
