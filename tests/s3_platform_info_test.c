@@ -106,22 +106,19 @@ static int s_test_family_lookup_prefix_matching(struct aws_allocator *allocator,
 
     /* "c5n.large" should match family "c5n" (100 Gbps), not "c5" (25 Gbps) */
     struct aws_byte_cursor c5n_large = aws_byte_cursor_from_c_str("c5n.large");
-    const struct aws_s3_platform_info *c5n_info =
-        aws_s3_get_platform_info_for_instance_type(loader, c5n_large);
+    const struct aws_s3_platform_info *c5n_info = aws_s3_get_platform_info_for_instance_type(loader, c5n_large);
     ASSERT_NOT_NULL(c5n_info);
     ASSERT_UINT_EQUALS(100, (uintmax_t)c5n_info->max_throughput_gbps);
 
     /* "c5.xlarge" should match family "c5" (25 Gbps), not "c5n" */
     struct aws_byte_cursor c5_xlarge = aws_byte_cursor_from_c_str("c5.xlarge");
-    const struct aws_s3_platform_info *c5_info =
-        aws_s3_get_platform_info_for_instance_type(loader, c5_xlarge);
+    const struct aws_s3_platform_info *c5_info = aws_s3_get_platform_info_for_instance_type(loader, c5_xlarge);
     ASSERT_NOT_NULL(c5_info);
     ASSERT_UINT_EQUALS(25, (uintmax_t)c5_info->max_throughput_gbps);
 
     /* "t3.micro" should match family "t3" */
     struct aws_byte_cursor t3_micro = aws_byte_cursor_from_c_str("t3.micro");
-    const struct aws_s3_platform_info *t3_info =
-        aws_s3_get_platform_info_for_instance_type(loader, t3_micro);
+    const struct aws_s3_platform_info *t3_info = aws_s3_get_platform_info_for_instance_type(loader, t3_micro);
     ASSERT_NOT_NULL(t3_info);
     ASSERT_UINT_EQUALS(5, (uintmax_t)t3_info->max_throughput_gbps);
 
