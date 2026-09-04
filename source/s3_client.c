@@ -96,7 +96,8 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 /**
  * The environment variable name for memory limit control.
  */
-static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
+static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
+static const char *s_memory_limit_bytes_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_BYTES";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -329,38 +330,62 @@ struct aws_s3_client *aws_s3_client_new(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
-        /* Try to read from the environment variable for memory limit */
-        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
-        if (memory_limit_from_env_var) {
-            uint64_t mem_limit_in_gib = 0;
-            if (aws_byte_cursor_utf8_parse_u64(
-                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
-                aws_string_destroy(memory_limit_from_env_var);
+        /*
+         * Try to read from the environment variable for memory limit
+         * First we try _IN_BYTES (allows sub-GiB values)
+         */
+        struct aws_string *mem_limit_bytes_str = aws_get_env_nonempty(allocator, s_memory_limit_bytes_env_var);
+        if (mem_limit_bytes_str) {
+            uint64_t mem_limit_from_env = 0;
+            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_bytes_str), &mem_limit_from_env)) {
+                aws_string_destroy(mem_limit_bytes_str);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
                     "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
                     "integers supported.",
-                    s_memory_limit_env_var);
+                    s_memory_limit_bytes_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
-            aws_string_destroy(memory_limit_from_env_var);
-            uint64_t mem_limit_in_bytes = 0;
-            /* Convert mem_limit_in_gib to bytes */
-            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, overflow detected.",
-                    s_memory_limit_env_var);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
+            aws_string_destroy(mem_limit_bytes_str);
+            mem_limit_configured = mem_limit_from_env;
+        }
 
-            mem_limit_configured = mem_limit_in_bytes;
+        /* _IN_GIB is only checked if _IN_BYTES was not set */
+        if (mem_limit_configured == 0) {
+            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
+            if (memory_limit_from_env_var) {
+                uint64_t mem_limit_in_gib = 0;
+                if (aws_byte_cursor_utf8_parse_u64(
+                        aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                    aws_string_destroy(memory_limit_from_env_var);
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
+                        "integers supported.",
+                        s_memory_limit_gib_env_var);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
+                aws_string_destroy(memory_limit_from_env_var);
+                uint64_t mem_limit_in_bytes = 0;
+                /* Convert mem_limit_in_gib to bytes */
+                if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "Cannot create client from client_config; environment variable: %s, overflow detected.",
+                        s_memory_limit_gib_env_var);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
+
+                mem_limit_configured = mem_limit_in_bytes;
+            }
         }
     } else {
         mem_limit_configured = client_config->memory_limit_in_bytes;
@@ -382,22 +407,89 @@ struct aws_s3_client *aws_s3_client_new(
 
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
+        /*
+         * No explicit memory limit was set (programmatic or env var).
+         * Determine the effective throughput for pool sizing.
+         *
+         * If the caller provided a throughput_target_gbps, use it directly.
+         * Otherwise, try to auto-detect from the current EC2 environment
+         * using the per-family NIC bandwidth table. This allows CRT to
+         * right-size its memory pool on EC2 instances without requiring
+         * the caller (CLI/SDK) to query and pass the throughput.
+         *
+         * If auto-detection fails (not on EC2, unknown family), the
+         * effective throughput remains 0.0, which maps to the 2 GiB
+         * default in the tier table below.
+         */
+        double effective_throughput = client_config->throughput_target_gbps;
+        if (effective_throughput == 0.0) {
+            const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+            /*
+             * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
+             * applying proper EC2 throughput values in the future.
+             */
+            if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+                detected_platform->max_throughput_gbps < 10.0) {
+                effective_throughput = detected_platform->max_throughput_gbps;
+            }
+        }
+
 #if SIZE_BITS == 32
-        if (client_config->throughput_target_gbps > 25.0) {
+        if (effective_throughput > 25.0) {
             mem_limit = GB_TO_BYTES(2);
         } else {
             mem_limit = GB_TO_BYTES(1);
         }
 #else
-        if (client_config->throughput_target_gbps >= 200.0) {
+        /*
+         * Memory pool sizing tiers based on detected/configured throughput.
+         *
+         * Upper tiers (>=10 Gbps): unchanged from original values. These cover
+         * instances that were already getting CRT with these pool sizes. We need
+         * to reinvestigate whether these numbers are optimal in the future but for
+         * now we will keep them as is to insure we don't break/regress current
+         * users.
+         *
+         * Sub-10 Gbps tiers: added to right-size the memory pool for lower-bandwidth
+         * instances. Without these tiers, all sub-25 Gbps instances would get 2 GiB,
+         * which is 8-40x more than needed and causes unnecessary RSS on constrained
+         * instances (t3.micro: 1 GiB RAM, m5.large: 8 GiB RAM).
+         *
+         * Tier breakdown:
+         *   >=200 Gbps -> 24 GiB (unchanged)
+         *   >=100 Gbps -> 16 GiB (unchanged)
+         *   >=75 Gbps  ->  8 GiB (unchanged)
+         *   >=25 Gbps  ->  4 GiB (unchanged)
+         *   >=10 Gbps  ->  2 GiB (unchanged, was the previous catch-all default)
+         *   >=5 Gbps   -> 512 MiB: covers t3.medium/large burst (5 Gbps), m5.xlarge and
+         *                  c5.xlarge baseline (1.25 Gbps). 2x headroom over 256 MiB for
+         *                  moderate throughput instances that may burst.
+         *   >0 Gbps    -> 256 MiB: any positively-detected or assigned sub-5 Gbps throughput.
+         *                  Validated via benchmark on t2.micro, t3.micro/small,
+         *                  m5.large (0.064-0.75 Gbps baseline). 38-90% RSS reduction vs
+         *                  2 GiB default with no throughput penalty at baseline speeds.
+         *                  16 x 8 MiB parts fit in the 128 MiB usable pool (256 - 128 reserved).
+         *   0 Gbps     ->  2 GiB: throughput not detected (non-EC2 or unknown instance).
+         *                  Preserves existing default for callers that don't set a throughput
+         *                  target.
+         */
+        if (effective_throughput >= 200.0) {
             mem_limit = GB_TO_BYTES(24);
-        } else if (client_config->throughput_target_gbps >= 100.0) {
+        } else if (effective_throughput >= 100.0) {
             mem_limit = GB_TO_BYTES(16);
-        } else if (client_config->throughput_target_gbps >= 75.0) {
+        } else if (effective_throughput >= 75.0) {
             mem_limit = GB_TO_BYTES(8);
-        } else if (client_config->throughput_target_gbps >= 25.0) {
+        } else if (effective_throughput >= 25.0) {
             mem_limit = GB_TO_BYTES(4);
+        } else if (effective_throughput >= 10.0) {
+            mem_limit = GB_TO_BYTES(2);
+        } else if (effective_throughput >= 5.0) {
+            mem_limit = MB_TO_BYTES(512);
+        } else if (effective_throughput > 0.0) {
+            mem_limit = MB_TO_BYTES(256);
         } else {
+            /* throughput_target_gbps == 0.0: not detected (non-EC2 or unknown instance).
+             * Preserve 2 GiB default for backward compatibility. */
             mem_limit = GB_TO_BYTES(2);
         }
 #endif

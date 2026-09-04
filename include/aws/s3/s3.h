@@ -50,6 +50,7 @@ enum aws_s3_errors {
     AWS_ERROR_S3_RECV_FILE_NOT_FOUND,
     AWS_ERROR_S3_REQUEST_TIMEOUT,
     AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED,
+    AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT,
 
     /* Dont insert anything past this line.
         Everything below is non-nefarious hacks to preserve backwards compat */
