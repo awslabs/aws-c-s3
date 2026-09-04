@@ -476,6 +476,37 @@ static int s_test_s3_buffer_pool_too_small(struct aws_allocator *allocator, void
 };
 AWS_TEST_CASE(test_s3_buffer_pool_too_small, s_test_s3_buffer_pool_too_small)
 
+/* Verify that a 256 MiB pool is accepted and functional.
+ * This is the minimum pool size used by the sub-10 Gbps throughput tier
+ * for right-sizing on low-bandwidth EC2 instances. With 128 MiB reserved,
+ * the usable space is 128 MiB = 16 x 8 MiB parts. */
+static int s_test_s3_buffer_pool_256_mib(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = MB_TO_BYTES(256)});
+    ASSERT_NOT_NULL(buffer_pool);
+
+    /* Reserve an 8 MiB part and verify it works */
+    struct aws_s3_buffer_pool_reserve_meta meta = {.size = MB_TO_BYTES(8)};
+    struct aws_future_s3_buffer_ticket *future = aws_s3_default_buffer_pool_reserve(buffer_pool, meta);
+    ASSERT_NOT_NULL(future);
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+    ASSERT_INT_EQUALS(aws_future_s3_buffer_ticket_get_error(future), AWS_OP_SUCCESS);
+
+    struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+    struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
+    ASSERT_NOT_NULL(buf.buffer);
+    ASSERT_TRUE(buf.capacity >= MB_TO_BYTES(8));
+
+    aws_s3_buffer_ticket_release(ticket);
+    aws_future_s3_buffer_ticket_release(future);
+    aws_s3_default_buffer_pool_destroy(buffer_pool);
+
+    return 0;
+}
+AWS_TEST_CASE(test_s3_buffer_pool_256_mib, s_test_s3_buffer_pool_256_mib)
+
 /* Sanity check that forced-buffer allocation works at all */
 static int s_test_s3_buffer_pool_forced_buffer(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
