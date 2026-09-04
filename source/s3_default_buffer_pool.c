@@ -210,6 +210,17 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
             "if its not sufficient to transfer data within the maximum number of parts");
     }
 
+    if (chunk_size > config.memory_limit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to initialize buffer pool. "
+            "Part size (%zu bytes) exceeds memory limit (%zu bytes).",
+            chunk_size,
+            config.memory_limit);
+        aws_raise_error(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return NULL;
+    }
+
     size_t adjusted_mem_lim = config.memory_limit - s_buffer_pool_reserved_mem;
 
     if (config.max_part_size > adjusted_mem_lim) {
