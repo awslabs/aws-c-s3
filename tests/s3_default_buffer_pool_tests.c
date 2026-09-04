@@ -516,8 +516,7 @@ static int s_test_s3_buffer_pool_part_size_exceeds_memory_limit(struct aws_alloc
 
     /* 512 MiB part size with 256 MiB pool: part_size > memory_limit */
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
-        allocator,
-        (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(512), .memory_limit = MB_TO_BYTES(256)});
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(512), .memory_limit = MB_TO_BYTES(256)});
     ASSERT_NULL(buffer_pool);
     ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, aws_last_error());
 
