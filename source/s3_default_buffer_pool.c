@@ -192,11 +192,11 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
 
     size_t chunk_size = config.part_size;
 
-    if (config.memory_limit < GB_TO_BYTES(1)) {
+    if (config.memory_limit < MB_TO_BYTES(256)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to initialize buffer pool. "
-            "Minimum supported value for Memory Limit is 1GB.");
+            "Minimum supported value for Memory Limit is 256MB.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         return NULL;
     }
@@ -208,6 +208,17 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
             "Consider specifying size in multiples of 4KiB. Ideal part size for most transfers is "
             "1MiB multiple between 8MiB and 16MiB. Note: the client will automatically scale part size "
             "if its not sufficient to transfer data within the maximum number of parts");
+    }
+
+    if (chunk_size > config.memory_limit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to initialize buffer pool. "
+            "Part size (%zu bytes) exceeds memory limit (%zu bytes).",
+            chunk_size,
+            config.memory_limit);
+        aws_raise_error(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return NULL;
     }
 
     size_t adjusted_mem_lim = config.memory_limit - s_buffer_pool_reserved_mem;
