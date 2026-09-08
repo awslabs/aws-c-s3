@@ -97,7 +97,7 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
  * The environment variable name for memory limit control.
  */
 static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
-static const char *s_memory_limit_bytes_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_BYTES";
+static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -334,27 +334,39 @@ struct aws_s3_client *aws_s3_client_new(
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
         /*
-         * Try to read from the environment variable for memory limit
-         * First we try _IN_BYTES (allows sub-GiB values)
+         * Try to read from the environment variable for memory limit.
+         * First we try _IN_MB (allows sub-GiB values, e.g. 256 for 256 MiB).
          */
-        struct aws_string *mem_limit_bytes_str = aws_get_env_nonempty(allocator, s_memory_limit_bytes_env_var);
-        if (mem_limit_bytes_str) {
-            uint64_t mem_limit_from_env = 0;
-            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_bytes_str), &mem_limit_from_env)) {
-                aws_string_destroy(mem_limit_bytes_str);
+        struct aws_string *mem_limit_mb_str = aws_get_env_nonempty(allocator, s_memory_limit_mb_env_var);
+        if (mem_limit_mb_str) {
+            uint64_t mem_limit_in_mb = 0;
+            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_mb_str), &mem_limit_in_mb)) {
+                aws_string_destroy(mem_limit_mb_str);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
                     "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
                     "integers supported.",
-                    s_memory_limit_bytes_env_var);
+                    s_memory_limit_mb_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
-            aws_string_destroy(mem_limit_bytes_str);
+            aws_string_destroy(mem_limit_mb_str);
+            /* Convert MiB to bytes */
+            uint64_t mem_limit_from_env = 0;
+            if (aws_mul_u64_checked(mem_limit_in_mb, 1024, &mem_limit_from_env) ||
+                aws_mul_u64_checked(mem_limit_from_env, 1024, &mem_limit_from_env)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot create client from client_config; environment variable: %s, overflows when converted "
+                    "to bytes.",
+                    s_memory_limit_mb_env_var);
+                aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
+                return NULL;
+            }
             mem_limit_configured = mem_limit_from_env;
         }
 
-        /* _IN_GIB is only checked if _IN_BYTES was not set */
+        /* _IN_GIB is only checked if _IN_MB was not set */
         if (mem_limit_configured == 0) {
             struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
             if (memory_limit_from_env_var) {

@@ -484,7 +484,12 @@ static int s_test_s3_buffer_pool_256_mib(struct aws_allocator *allocator, void *
     (void)ctx;
 
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
-        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = MB_TO_BYTES(256)});
+        allocator,
+        (struct aws_s3_buffer_pool_config){
+            .part_size = MB_TO_BYTES(8),
+            .memory_limit = MB_TO_BYTES(256),
+            .max_part_size = MB_TO_BYTES(128),
+        });
     ASSERT_NOT_NULL(buffer_pool);
 
     /* Reserve an 8 MiB part and verify it works */
@@ -507,16 +512,23 @@ static int s_test_s3_buffer_pool_256_mib(struct aws_allocator *allocator, void *
 }
 AWS_TEST_CASE(test_s3_buffer_pool_256_mib, s_test_s3_buffer_pool_256_mib)
 
-/* Verify that creating a pool where part_size exceeds memory_limit
+/* Verify that creating a pool where part_size exceeds max_part_size
  * returns NULL with AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT.
- * This replaces the previous FATAL_ASSERT crash with a clean error. */
+ * With a 256 MiB pool, max_part_size = 128 MiB (half of pool).
+ * A 512 MiB part_size exceeds this and should be rejected cleanly
+ * instead of hitting a FATAL_ASSERT at runtime. */
 static int s_test_s3_buffer_pool_part_size_exceeds_memory_limit(struct aws_allocator *allocator, void *ctx) {
     (void)allocator;
     (void)ctx;
 
-    /* 512 MiB part size with 256 MiB pool: part_size > memory_limit */
+    /* 512 MiB part size with 256 MiB pool, max_part_size = 128 MiB */
     struct aws_s3_buffer_pool *buffer_pool = aws_s3_default_buffer_pool_new(
-        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(512), .memory_limit = MB_TO_BYTES(256)});
+        allocator,
+        (struct aws_s3_buffer_pool_config){
+            .part_size = MB_TO_BYTES(512),
+            .memory_limit = MB_TO_BYTES(256),
+            .max_part_size = MB_TO_BYTES(128),
+        });
     ASSERT_NULL(buffer_pool);
     ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, aws_last_error());
 
