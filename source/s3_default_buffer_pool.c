@@ -201,6 +201,15 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         return NULL;
     }
 
+    if (config.memory_limit % MB_TO_BYTES(1) != 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "Memory limit (%zu bytes) is not aligned to a MiB boundary. "
+            "The extra %zu bytes will be unused. Consider using a round MiB value.",
+            config.memory_limit,
+            config.memory_limit % MB_TO_BYTES(1));
+    }
+
     if (chunk_size < (1024) || chunk_size % (4 * 1024) != 0) {
         AWS_LOGF_WARN(
             AWS_LS_S3_CLIENT,
@@ -210,13 +219,13 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
             "if its not sufficient to transfer data within the maximum number of parts");
     }
 
-    if (chunk_size > config.memory_limit) {
+    if (config.max_part_size > 0 && chunk_size > config.max_part_size) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to initialize buffer pool. "
-            "Part size (%zu bytes) exceeds memory limit (%zu bytes).",
+            "Part size (%zu bytes) exceeds max part size (%zu bytes).",
             chunk_size,
-            config.memory_limit);
+            config.max_part_size);
         aws_raise_error(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
         return NULL;
     }
