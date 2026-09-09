@@ -798,13 +798,24 @@ struct aws_s3_client *aws_s3_client_new(
         aws_retry_strategy_acquire(client_config->retry_strategy);
         client->retry_strategy = client_config->retry_strategy;
     } else {
+        /* max_retries requires explicit S3 default because passing 0 to aws-c-io's
+         * standard retry strategy would use its own default of 3, not the S3 default of 5.
+         * The other fields use 0 = "use aws-c-io defaults" which match the S3 defaults. */
+        uint32_t max_retries = client_config->retry_config.max_retries > 0
+            ? (uint32_t)client_config->retry_config.max_retries
+            : s_default_max_retries;
+
         struct aws_exponential_backoff_retry_options backoff_retry_options = {
             .el_group = client_config->client_bootstrap->event_loop_group,
-            .max_retries = s_default_max_retries,
+            .max_retries = max_retries,
+            .backoff_scale_factor_ms = client_config->retry_config.backoff_scale_factor_ms,
+            .max_backoff_secs = client_config->retry_config.max_backoff_secs,
+            .jitter_mode = client_config->retry_config.jitter_mode,
         };
 
         struct aws_standard_retry_options retry_options = {
             .backoff_retry_options = backoff_retry_options,
+            .initial_bucket_capacity = client_config->retry_config.initial_bucket_capacity,
         };
 
         client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
