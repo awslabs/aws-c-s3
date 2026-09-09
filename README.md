@@ -20,7 +20,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 #### Environment Variables
 
-1. **Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB`**
+1. **Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB` and `AWS_CRT_S3_MEMORY_LIMIT_IN_MB`** 
 
    The S3 client uses a buffer pool to manage memory for concurrent transfers. 
 
@@ -28,15 +28,18 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
    ```bash
    export AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=4  # 4 GiB limit
+   # or
+   export AWS_CRT_S3_MEMORY_LIMIT_IN_MB=256 # 256 MiB limit
    ```
 
    **Default Behavior**:
    When nothing is set, the client sets a default memory limit based on the target throughput.
 
    **Notes**:
+   * If both are set `AWS_CRT_S3_MEMORY_LIMIT_IN_MB` is used and `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB` is ignored.
    * The limit applies per client. If multiple clients created, limit will apply to each separately.
-   * The environment variable value must be a valid positive integer representing gigabytes (GiB).
-   * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
+   * The environment variable value must be a valid positive integer representing gigabytes (GiB) or megabytes (MiB).
+   * The value is converted from GiB or MiB to bytes internally.
    * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
 
 > [!TIP]
