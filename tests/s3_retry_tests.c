@@ -416,6 +416,103 @@ static int s_test_s3_meta_request_send_request_finish_fail(struct aws_allocator 
     return 0;
 }
 
+/*
+ * Parameterized send_request_finish helper: injects the HTTP status code stored in tester.user_data
+ * on the first attempt, allowing the retry path to recover on the second attempt.
+ * Reuses counter1 from s_s3_meta_request_prepare_request_fail_first (which redirects the
+ * first request to a non-existent path) and counter2 to gate the status-code injection.
+ */
+static void s_s3_meta_request_send_request_finish_inject_status(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+
+    struct aws_s3_client *client = connection->request->meta_request->client;
+    AWS_ASSERT(client != NULL);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    if (aws_s3_tester_inc_counter2(tester) == 1) {
+        AWS_ASSERT(connection->request->send_data.response_status == 404);
+
+        int injected_status = (int)(uintptr_t)tester->user_data;
+        connection->request->send_data.response_status = injected_status;
+    }
+
+    struct aws_s3_meta_request_vtable *original_meta_request_vtable =
+        aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable;
+
+    original_meta_request_vtable->send_request_finish(connection, stream, error_code);
+}
+
+static struct aws_s3_meta_request *s_meta_request_factory_patch_send_request_finish_inject_status(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->prepare_request = s_s3_meta_request_prepare_request_fail_first;
+    patched_meta_request_vtable->send_request_finish = s_s3_meta_request_send_request_finish_inject_status;
+
+    return meta_request;
+}
+
+/*
+ * Helper: verify that a request returning the given HTTP status code is retried and
+ * the overall meta request succeeds.
+ */
+static int s_test_s3_request_retried_on_status(struct aws_allocator *allocator, int injected_status) {
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Pass the status code to inject through user_data */
+    tester.user_data = (void *)(uintptr_t)injected_status;
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_send_request_finish_inject_status;
+
+    /* The meta request should succeed: the first attempt gets the injected status code and retries,
+     * the second attempt hits the real S3 endpoint and succeeds. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test recovery when the response status is 502 Bad Gateway (e.g. from a load balancer or proxy). */
+AWS_TEST_CASE(test_s3_meta_request_send_request_finish_fail_502, s_test_s3_meta_request_send_request_finish_fail_502)
+static int s_test_s3_meta_request_send_request_finish_fail_502(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_request_retried_on_status(allocator, AWS_HTTP_STATUS_CODE_502_BAD_GATEWAY);
+}
+
+/* Test recovery when the response status is 504 Gateway Timeout (e.g. from a load balancer or proxy). */
+AWS_TEST_CASE(test_s3_meta_request_send_request_finish_fail_504, s_test_s3_meta_request_send_request_finish_fail_504)
+static int s_test_s3_meta_request_send_request_finish_fail_504(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    return s_test_s3_request_retried_on_status(allocator, AWS_HTTP_STATUS_CODE_504_GATEWAY_TIMEOUT);
+}
+
 static void s_finished_request_remove_upload_id(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
