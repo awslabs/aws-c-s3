@@ -819,6 +819,12 @@ struct aws_s3_client *aws_s3_client_new(
         };
 
         client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+
+        if (client->retry_strategy == NULL) {
+            /* if something failed in creation of retry_strategy, we should error instead of having a null
+             * retry_strategy attached to the client */
+            goto on_error;
+        }
     }
 
     aws_hash_table_init(
