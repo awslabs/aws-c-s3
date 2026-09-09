@@ -802,8 +802,8 @@ struct aws_s3_client *aws_s3_client_new(
          * standard retry strategy would use its own default of 3, not the S3 default of 5.
          * The other fields use 0 = "use aws-c-io defaults" which match the S3 defaults. */
         uint32_t max_retries = client_config->retry_config.max_retries > 0
-            ? (uint32_t)client_config->retry_config.max_retries
-            : s_default_max_retries;
+                                   ? (uint32_t)client_config->retry_config.max_retries
+                                   : s_default_max_retries;
 
         struct aws_exponential_backoff_retry_options backoff_retry_options = {
             .el_group = client_config->client_bootstrap->event_loop_group,
