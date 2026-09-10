@@ -7838,7 +7838,7 @@ static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *a
     {
         struct aws_http_message *message = aws_http_message_new_request(allocator);
 
-        uint32_t metrics = AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_ON_EC2 | AWS_S3_METRIC_FILE_UPLOAD;
+        uint32_t metrics = AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_ON_EC2 | AWS_S3_METRIC_FILE_PATH;
         aws_s3_add_user_agent_header(allocator, message, metrics);
 
         struct aws_byte_cursor user_agent_value;
@@ -7904,6 +7904,123 @@ static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *a
     return 0;
 }
 
+/* Helper: create a client from a partially filled config and return its business_metrics with the
+ * environment-dependent ON_EC2 bit masked off (it depends on the host running the test).
+ * Owns a tester per call because aws_s3_tester_bind_client() may only be invoked once per tester. */
+static int s_get_client_business_metrics(
+    struct aws_allocator *allocator,
+    struct aws_s3_client_config *client_config,
+    uint32_t *out_metrics) {
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, client_config);
+    ASSERT_NOT_NULL(client);
+
+    *out_metrics = client->business_metrics & ~(uint32_t)AWS_S3_METRIC_ON_EC2;
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that aws_s3_client_new derives the client-level business metrics flags correctly.
+ * The CUSTOM_* flags must fire only when the caller set a value AND that value differs from
+ * the default the client would have chosen on its own. */
+AWS_TEST_CASE(test_s3_client_business_metrics_flags, s_test_s3_client_business_metrics_flags)
+static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t metrics = 0;
+
+    /* Nothing configured: only CRT_CLIENT is set. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CRT_CLIENT, metrics);
+    }
+
+    /* Explicitly passing the defaults is not "custom": no CUSTOM_* flags. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.part_size = (size_t)g_default_part_size_fallback;
+        config.throughput_target_gbps = g_default_throughput_target_gbps;
+        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CRT_CLIENT, metrics);
+    }
+
+    /* Non-default part size. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.part_size = MB_TO_BYTES(16);
+        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_CUSTOM_PART_SIZE, metrics);
+    }
+
+    /* Non-default throughput target. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_CUSTOM_THROUGHPUT, metrics);
+    }
+
+    /* Explicit memory limit that differs from the tier-table default for the given throughput.
+     * 100 Gbps maps to 16 GiB (64-bit) / 2 GiB (32-bit); 512 MiB differs from both. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        config.memory_limit_in_bytes = MB_TO_BYTES(512);
+        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(
+            AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_CUSTOM_THROUGHPUT | AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, metrics);
+    }
+
+#if SIZE_BITS == 64
+    /* Explicit memory limit equal to the tier-table default is not "custom". */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        config.memory_limit_in_bytes = GB_TO_BYTES(16);
+        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_CUSTOM_THROUGHPUT, metrics);
+    }
+#endif
+
+    /* Memory limit supplied via environment variable counts as configured too. */
+    {
+        const struct aws_string *env_name = aws_string_new_from_c_str(allocator, "AWS_CRT_S3_MEMORY_LIMIT_IN_MB");
+        const struct aws_string *env_value = aws_string_new_from_c_str(allocator, "512");
+        ASSERT_SUCCESS(aws_set_environment_value(env_name, env_value));
+
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        int result = s_get_client_business_metrics(allocator, &config, &metrics);
+
+        ASSERT_SUCCESS(aws_unset_environment_value(env_name));
+        aws_string_destroy((struct aws_string *)env_name);
+        aws_string_destroy((struct aws_string *)env_value);
+
+        ASSERT_SUCCESS(result);
+        ASSERT_UINT_EQUALS(
+            AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_CUSTOM_THROUGHPUT | AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, metrics);
+    }
+
+    return 0;
+}
+
 static void s_s3_test_user_agent_meta_request_finished_request(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -7928,7 +8045,25 @@ static void s_s3_test_user_agent_meta_request_finished_request(
     AWS_ZERO_STRUCT(user_agent_value);
 
     AWS_FATAL_ASSERT(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value) == AWS_OP_SUCCESS);
-    AWS_FATAL_ASSERT(aws_byte_cursor_eq(&user_agent_value, &expected_user_agent_value));
+
+    /* The product/platform portion must come first, exactly as before business metrics were added. */
+    AWS_FATAL_ASSERT(aws_byte_cursor_starts_with(&user_agent_value, &expected_user_agent_value));
+
+    /* The business metrics section must follow immediately. AX (CRT client) is always set and is
+     * the first flag in enum order, so every real request must carry at least " m/AX". */
+    struct aws_byte_cursor metrics_section = user_agent_value;
+    aws_byte_cursor_advance(&metrics_section, expected_user_agent_value.len);
+    const struct aws_byte_cursor metrics_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/AX");
+    AWS_FATAL_ASSERT(aws_byte_cursor_starts_with(&metrics_section, &metrics_prefix));
+
+    /* Ac (file path) must be present if and only if the meta request was given send_filepath
+     * (the only way request_body_parallel_stream gets set) or recv_filepath. */
+    const struct aws_byte_cursor file_path_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(",Ac");
+    bool has_file_path_metric = aws_byte_cursor_find_exact(&metrics_section, &file_path_id, NULL) == AWS_OP_SUCCESS;
+    bool expect_file_path_metric =
+        meta_request->request_body_parallel_stream != NULL || meta_request->recv_filepath != NULL;
+    AWS_FATAL_ASSERT(has_file_path_metric == expect_file_path_metric);
+
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
@@ -8002,6 +8137,40 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
     return 0;
 }
 
+/* Same as the get test above, but downloads via recv_filepath so the request must carry the
+ * Ac (file path) business metric. The shared finished_request callback asserts on it. */
+AWS_TEST_CASE(test_s3_auto_ranged_get_file_sending_user_agent, s_test_s3_auto_ranged_get_file_sending_user_agent)
+static int s_test_s3_auto_ranged_get_file_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .get_options =
+                {
+                    .object_path = g_pre_existing_object_1MB,
+                    .file_on_disk = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_auto_ranged_put_sending_user_agent, s_test_s3_auto_ranged_put_sending_user_agent)
 static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -8021,6 +8190,40 @@ static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *al
             .put_options =
                 {
                     .ensure_multipart = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Same as the put test above, but uploads via send_filepath so the request must carry the
+ * Ac (file path) business metric. The shared finished_request callback asserts on it. */
+AWS_TEST_CASE(test_s3_auto_ranged_put_file_sending_user_agent, s_test_s3_auto_ranged_put_file_sending_user_agent)
+static int s_test_s3_auto_ranged_put_file_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .put_options =
+                {
+                    .ensure_multipart = true,
+                    .file_on_disk = true,
                 },
         };
 

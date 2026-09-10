@@ -1106,14 +1106,16 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
 
     /* Merge client-level and per-request business metrics for User-Agent m/ section.
      *
-     * File upload detection: request_body_parallel_stream is only set when the caller
-     * provided send_filepath in the meta request options (see s3_meta_request.c init).
-     * It is NOT set for streaming uploads (send_async_stream, send_using_async_writes,
-     * or body_stream on the initial request message). This makes it a reliable indicator
-     * that the upload is file-based rather than stream-based. */
+     * File path detection (covers both directions):
+     *   - Upload: request_body_parallel_stream is only set when the caller provided
+     *     send_filepath (see init). It is NOT set for streaming uploads (send_async_stream,
+     *     send_using_async_writes, or body_stream on the initial request message).
+     *   - Download: recv_filepath is only set when the caller provided recv_filepath (see init).
+     *     It is NOT set when the body is delivered via the body callback.
+     * Either one is a reliable indicator that the transfer is file-based rather than stream-based. */
     uint32_t request_metrics = meta_request->client->business_metrics;
-    if (meta_request->request_body_parallel_stream != NULL) {
-        request_metrics |= AWS_S3_METRIC_FILE_UPLOAD;
+    if (meta_request->request_body_parallel_stream != NULL || meta_request->recv_filepath != NULL) {
+        request_metrics |= AWS_S3_METRIC_FILE_PATH;
     }
     aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message, request_metrics);
 

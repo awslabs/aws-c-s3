@@ -189,7 +189,7 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
      * Upper tiers (>=10 Gbps): unchanged from original values. These cover
      * instances that were already getting CRT with these pool sizes. We need
      * to reinvestigate whether these numbers are optimal in the future but for
-     * now we will keep them as is to insure we don't break/regress current
+     * now we will keep them as is to ensure we don't break/regress current
      * users.
      *
      * Sub-10 Gbps tiers: added to right-size the memory pool for lower-bandwidth
@@ -485,35 +485,39 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->allocator = allocator;
 
+    /*
+     * Determine the effective throughput used for default memory pool sizing.
+     *
+     * If the caller provided a throughput_target_gbps, use it directly.
+     * Otherwise, try to auto-detect from the current EC2 environment
+     * using the per-family NIC bandwidth table. This allows CRT to
+     * right-size its memory pool on EC2 instances without requiring
+     * the caller (CLI/SDK) to query and pass the throughput.
+     *
+     * If auto-detection fails (not on EC2, unknown family), the
+     * effective throughput remains 0.0, which maps to the 2 GiB
+     * default in the tier table.
+     *
+     * This is resolved even when an explicit memory limit was configured so
+     * that the business metrics below can compare the configured limit against
+     * the value the tier table would have chosen for this environment.
+     */
+    double effective_throughput = client_config->throughput_target_gbps;
+    if (effective_throughput == 0.0) {
+        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+        /*
+         * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
+         * applying proper EC2 throughput values in the future.
+         */
+        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+            detected_platform->max_throughput_gbps < 10.0) {
+            effective_throughput = detected_platform->max_throughput_gbps;
+        }
+    }
+
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
-        /*
-         * No explicit memory limit was set (programmatic or env var).
-         * Determine the effective throughput for pool sizing.
-         *
-         * If the caller provided a throughput_target_gbps, use it directly.
-         * Otherwise, try to auto-detect from the current EC2 environment
-         * using the per-family NIC bandwidth table. This allows CRT to
-         * right-size its memory pool on EC2 instances without requiring
-         * the caller (CLI/SDK) to query and pass the throughput.
-         *
-         * If auto-detection fails (not on EC2, unknown family), the
-         * effective throughput remains 0.0, which maps to the 2 GiB
-         * default in the tier table below.
-         */
-        double effective_throughput = client_config->throughput_target_gbps;
-        if (effective_throughput == 0.0) {
-            const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
-            /*
-             * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
-             * applying proper EC2 throughput values in the future.
-             */
-            if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
-                detected_platform->max_throughput_gbps < 10.0) {
-                effective_throughput = detected_platform->max_throughput_gbps;
-            }
-        }
-
+        /* No explicit memory limit was set (programmatic or env var); size from the tier table. */
         mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
     } else {
         // cap memory limit to SIZE_MAX
@@ -579,17 +583,25 @@ struct aws_s3_client *aws_s3_client_new(
         client->business_metrics |= AWS_S3_METRIC_CUSTOM_THROUGHPUT;
     }
 
-    if (client_config->memory_limit_in_bytes != 0) {
-        /* Caller explicitly set memory_limit. Check if it differs from what the
-         * throughput tier table would have computed for the current throughput. */
-        size_t default_mem_limit = s_get_default_mem_limit_from_throughput(client->throughput_target_gbps);
+    if (mem_limit_configured != 0) {
+        /* A memory limit was explicitly configured, either programmatically via
+         * client_config->memory_limit_in_bytes or via the AWS_CRT_S3_MEMORY_LIMIT_IN_MB /
+         * AWS_CRT_S3_MEMORY_LIMIT_IN_GIB environment variables. Flag it only if it differs
+         * from what the throughput tier table would have chosen for this environment
+         * (using the same effective_throughput the default path would have used). */
+        size_t default_mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
         if (mem_limit != default_mem_limit) {
             client->business_metrics |= AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT;
         }
     }
 
     {
-        struct aws_byte_cursor ec2_instance = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
+        /* Not cached_only: the instance type cache is only populated as a side effect of the
+         * throughput auto-detection above, which is skipped when the caller supplies a
+         * throughput target. Force detection here so ON_EC2 is reported regardless of config.
+         * Detection reads DMI sysfs (cheap) and only falls back to IMDS when DMI confirms a
+         * Nitro host but lacks the product name. The result is cached for the process lifetime. */
+        struct aws_byte_cursor ec2_instance = aws_s3_get_current_platform_ec2_intance_type(false /* cached_only */);
         if (ec2_instance.len > 0) {
             client->business_metrics |= AWS_S3_METRIC_ON_EC2;
         }
