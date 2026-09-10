@@ -7772,7 +7772,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
         struct aws_http_message *message = aws_http_message_new_request(allocator);
 
-        aws_s3_add_user_agent_header(allocator, message);
+        aws_s3_add_user_agent_header(allocator, message, 0);
 
         struct aws_http_headers *headers = aws_http_message_get_headers(message);
 
@@ -7802,7 +7802,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
         ASSERT_SUCCESS(aws_http_headers_add(headers, g_user_agent_header_name, dummy_agent_header_value));
 
-        aws_s3_add_user_agent_header(allocator, message);
+        aws_s3_add_user_agent_header(allocator, message, 0);
 
         {
             struct aws_byte_cursor user_agent_value;
@@ -7820,6 +7820,85 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
     }
 
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that business metrics flags produce the correct m/ section in the User-Agent header. */
+AWS_TEST_CASE(test_add_user_agent_header_business_metrics, s_test_add_user_agent_header_business_metrics)
+static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Test with multiple flags set */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        uint32_t metrics = AWS_S3_METRIC_CRT_CLIENT | AWS_S3_METRIC_ON_EC2 | AWS_S3_METRIC_FILE_UPLOAD;
+        aws_s3_add_user_agent_header(allocator, message, metrics);
+
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+        /* The header should end with " m/AX,Ab,Ac" */
+        struct aws_byte_cursor expected_metrics = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/AX,Ab,Ac");
+        ASSERT_TRUE(user_agent_value.len >= expected_metrics.len);
+        struct aws_byte_cursor tail = {
+            .ptr = user_agent_value.ptr + user_agent_value.len - expected_metrics.len,
+            .len = expected_metrics.len,
+        };
+        ASSERT_TRUE(aws_byte_cursor_eq(&tail, &expected_metrics));
+
+        aws_http_message_release(message);
+    }
+
+    /* Test with no flags: no m/ section should appear */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        aws_s3_add_user_agent_header(allocator, message, 0);
+
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+        /* Should NOT contain " m/" */
+        struct aws_byte_cursor m_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
+        ASSERT_FALSE(aws_byte_cursor_find_exact(&user_agent_value, &m_prefix, NULL) == AWS_OP_SUCCESS);
+
+        aws_http_message_release(message);
+    }
+
+    /* Test with single flag: CRT_CLIENT only */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        aws_s3_add_user_agent_header(allocator, message, AWS_S3_METRIC_CRT_CLIENT);
+
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+        /* Should end with " m/AX" (no comma, single metric) */
+        struct aws_byte_cursor expected_metrics = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/AX");
+        ASSERT_TRUE(user_agent_value.len >= expected_metrics.len);
+        struct aws_byte_cursor tail = {
+            .ptr = user_agent_value.ptr + user_agent_value.len - expected_metrics.len,
+            .len = expected_metrics.len,
+        };
+        ASSERT_TRUE(aws_byte_cursor_eq(&tail, &expected_metrics));
+
+        aws_http_message_release(message);
+    }
+
     aws_s3_tester_clean_up(&tester);
 
     return 0;

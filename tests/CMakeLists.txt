@@ -286,6 +286,7 @@ add_test_case(test_s3_calculate_client_optimal_range_size)
 add_test_case(test_s3_calculate_request_optimal_range_size)
 add_test_case(test_s3_extract_parts_from_etag)
 add_test_case(test_add_user_agent_header)
+add_test_case(test_add_user_agent_header_business_metrics)
 add_test_case(test_s3_checksum_header)
 
 add_test_case(test_get_existing_platform_info)

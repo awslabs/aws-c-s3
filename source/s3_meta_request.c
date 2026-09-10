@@ -1104,7 +1104,13 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
         return;
     }
 
-    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message);
+    /* Merge client-level and per-request business metrics for User-Agent m/ section */
+    uint32_t request_metrics = meta_request->client->business_metrics;
+    if (meta_request->request_body_parallel_stream != NULL) {
+        /* parallel_stream is set when send_filepath was provided */
+        request_metrics |= AWS_S3_METRIC_FILE_UPLOAD;
+    }
+    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message, request_metrics);
 
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);

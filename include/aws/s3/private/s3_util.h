@@ -246,7 +246,24 @@ AWS_S3_API
 int aws_last_error_or_unknown(void);
 
 AWS_S3_API
-void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message);
+void aws_s3_add_user_agent_header(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    uint32_t business_metrics);
+
+/**
+ * Business metrics flags for the User-Agent `m/` section (UA 2.1 SEP).
+ * These are boolean flags tracked via bitmask on the client and meta request.
+ * Feature IDs are registered in AwsDrSeps/FEATURES.md.
+ */
+enum aws_s3_business_metrics_flag {
+    AWS_S3_METRIC_CRT_CLIENT = (1 << 0),          /* AX - CRT S3 client was used (always set) */
+    AWS_S3_METRIC_CUSTOM_PART_SIZE = (1 << 1),    /* AY - non-default part size configured */
+    AWS_S3_METRIC_CUSTOM_THROUGHPUT = (1 << 2),   /* AZ - non-default throughput target configured */
+    AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT = (1 << 3), /* Aa - non-default memory pool size configured */
+    AWS_S3_METRIC_ON_EC2 = (1 << 4),              /* Ab - running on EC2 instance */
+    AWS_S3_METRIC_FILE_UPLOAD = (1 << 5),         /* Ac - upload used send_filepath */
+};
 
 /* Given the response headers list, finds the Content-Range header and parses the range-start, range-end and
  * object-size. All output arguments are optional.*/
