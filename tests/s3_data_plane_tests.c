@@ -7916,6 +7916,10 @@ static int s_get_client_feature_ids(
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
+    /* This test never sends a request, so TLS is irrelevant. AWS_MR_TLS_ENABLED is the zero value, and
+     * under BYO_CRYPTO aws_s3_client_new rejects TLS-enabled configs without tls_connection_options. */
+    client_config->tls_mode = AWS_MR_TLS_DISABLED;
+
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
 
