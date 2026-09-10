@@ -625,6 +625,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
+    aws_atomic_init_int(&client->next_write_loop_index, 0);
+    aws_atomic_init_int(&client->num_pending_writes, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -827,6 +829,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+    *((enum aws_tribool *)&client->out_of_order_delivery) = client_config->out_of_order_delivery;
 
     return client;
 
@@ -958,6 +961,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     aws_mem_release(client->allocator, client->tcp_keep_alive_options);
 
     aws_mutex_clean_up(&client->synced_data.lock);
+
+    /* A meta request cannot finish while any of its writes are outstanding, and the last one to
+     * finish is what releases us, so every write has completed by now. */
+    AWS_ASSERT(aws_atomic_load_int(&client->num_pending_writes) == 0);
 
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));

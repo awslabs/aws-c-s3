@@ -1768,7 +1768,7 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
     /* 20 MiB multipart download with 5 MiB parts: all parts page-aligned.
      * fallback_count is 0 if O_DIRECT is supported, otherwise 1 from the init-time platform fallback. */
     size_t expected_fallback_count = aws_file_direct_io_is_supported() ? 0 : 1;
-    ASSERT_UINT_EQUALS(expected_fallback_count, meta_request->recv_file_direct_io_fallback_count);
+    ASSERT_UINT_EQUALS(expected_fallback_count, aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count));
 
     aws_s3_meta_request_release(meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -1872,7 +1872,7 @@ static int s_test_s3_get_object_file_path_direct_io_dev_null(struct aws_allocato
     ASSERT_TRUE(meta_request_test_results.did_validate);
     ASSERT_INT_EQUALS(AWS_SCA_CRC32, meta_request_test_results.validation_algorithm);
     /* /dev/null doesn't support O_DIRECT — verify fallback triggered (1 from init-time open failure) */
-    ASSERT_UINT_EQUALS(1, meta_request->recv_file_direct_io_fallback_count);
+    ASSERT_UINT_EQUALS(1, aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count));
 
     aws_s3_meta_request_release(meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -2238,7 +2238,7 @@ static int s_test_s3_get_object_file_path_direct_io_unaligned_last_part(struct a
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, get_results.finished_error_code);
     /* On Linux: 2 aligned parts go through O_DIRECT, 1 unaligned last part falls back. count == 1.
      * On non-Linux: first write triggers UNSUPPORTED_OPERATION fallback, count == 1. */
-    ASSERT_UINT_EQUALS(1, get_request->recv_file_direct_io_fallback_count);
+    ASSERT_UINT_EQUALS(1, aws_atomic_load_int(&get_request->recv_file_direct_io_fallback_count));
     aws_s3_meta_request_release(get_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
@@ -5979,6 +5979,40 @@ static int s_check_metrics_helper(
     return AWS_OP_SUCCESS;
 }
 
+/* Same range checks as s_check_metrics_helper, but locates the GET_OBJECT metric by part number rather
+ * than by position in the list. succeed_metrics is appended as requests complete, and parallel writes
+ * let parts complete out of order, so a part's index is not its part number. */
+static int s_check_get_part_metrics_helper(
+    struct aws_s3_meta_request_test_results *test_results,
+    size_t expected_part_number,
+    size_t expected_range_start,
+    size_t expected_range_end) {
+
+    size_t num_metrics = aws_array_list_length(&test_results->synced_data.succeed_metrics);
+    for (size_t i = 0; i < num_metrics; ++i) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        ASSERT_SUCCESS(aws_array_list_get_at(&test_results->synced_data.succeed_metrics, (void **)&metrics, i));
+
+        enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+        aws_s3_request_metrics_get_request_type(metrics, &request_type);
+        uint32_t part_number = 0;
+        aws_s3_request_metrics_get_part_number(metrics, &part_number);
+        if (request_type != AWS_S3_REQUEST_TYPE_GET_OBJECT || part_number != expected_part_number) {
+            continue;
+        }
+
+        uint64_t range_start = 0;
+        uint64_t range_end = 0;
+        aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
+        aws_s3_request_metrics_get_part_range_end(metrics, &range_end);
+        ASSERT_UINT_EQUALS(expected_range_start, range_start);
+        ASSERT_UINT_EQUALS(expected_range_end, range_end);
+        return AWS_OP_SUCCESS;
+    }
+
+    FAIL("No succeeded GET_OBJECT metric for part %zu", expected_part_number);
+}
+
 AWS_TEST_CASE(
     test_s3_round_trip_dynamic_range_size_download_multipart,
     s_test_s3_round_trip_dynamic_range_size_download_multipart)
@@ -6066,12 +6100,10 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
-        /* Second request made should be get with range and range from 0 to stored part size -1. */
-        ASSERT_SUCCESS(
-            s_check_metrics_helper(&test_results, 1, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, aligned_part_size - 1));
+        /* Part 1 covers 0 to the stored part size - 1. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, aligned_part_size - 1));
         /* The last part will be ending with the total size of the object */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 2, AWS_S3_REQUEST_TYPE_GET_OBJECT, 2, aligned_part_size, object_size - 1));
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 2, aligned_part_size, object_size - 1));
 
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
@@ -6096,14 +6128,12 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
         ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
-        /* First request made was Get object and the range should be 0 to default range - 1 */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
-        /* Second request made should be get with range and range from 0 to optimal part size. */
-        ASSERT_SUCCESS(s_check_metrics_helper(
+        /* Part 1 is the discovery range: 0 to the default range - 1. */
+        ASSERT_SUCCESS(
+            s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
+        /* Part 2 picks up at the default range and runs one optimal part size further. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(
             &test_results,
-            1,
-            AWS_S3_REQUEST_TYPE_GET_OBJECT,
             2,
             (size_t)g_default_part_size_fallback,
             (size_t)g_default_part_size_fallback + aligned_part_size - 1));
@@ -6350,9 +6380,9 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
-        /* Second request made should be get with range and range from 0 to optimal part size. */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 1, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, MB_TO_BYTES(stored_part_size_mb) - 1));
+        /* Part 1 covers 0 to the optimal part size - 1. */
+        ASSERT_SUCCESS(
+            s_check_get_part_metrics_helper(&test_results, 1, 0, MB_TO_BYTES(stored_part_size_mb) - 1));
 
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
@@ -6377,17 +6407,12 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
         ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
-        /* First request made was Get object and the range should be 0 to default range - 1 */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
-        /* Second request made should be get with range and range from 0 to optimal part size. */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results,
-            1,
-            AWS_S3_REQUEST_TYPE_GET_OBJECT,
-            2,
-            (size_t)g_default_part_size_fallback,
-            MB_TO_BYTES(stored_part_size_mb) - 1));
+        /* Part 1 is the discovery range: 0 to the default range - 1. */
+        ASSERT_SUCCESS(
+            s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
+        /* Part 2 picks up at the default range and runs to the optimal part size. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(
+            &test_results, 2, (size_t)g_default_part_size_fallback, MB_TO_BYTES(stored_part_size_mb) - 1));
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
         /*** GET FILE WITHOUT FORCING -- old behavior should be changed ***/

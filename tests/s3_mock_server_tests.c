@@ -25,6 +25,21 @@
         .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(VALUE),                                                         \
     }
 
+/* Matches the object size the mock server reports for /get_object_parallel_write: three 64 KiB parts
+ * plus a 3392 byte unaligned tail. */
+#define S_PARALLEL_WRITE_OBJECT_SIZE 200000
+
+/* Part size of the 256 KiB / 4 part pause fixtures. */
+#define S_PAUSE_PART_SIZE (64 * 1024)
+
+/* Part size and part count of /get_object_parallel_write_delay_part: a 256 KiB object in four aligned
+ * 64 KiB parts, whose second part the mock server delays. */
+#define S_DELAYED_PART_SIZE (64 * 1024)
+#define S_DELAYED_PART_COUNT 4
+
+/* The part the mock server delays. 1-based, matching aws_s3_request_metrics_get_part_number. */
+#define S_DELAYED_PART_NUMBER 2
+
 static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool is_last_attempt) {
     uint64_t start = 0, end = 0, duration = 0;
     int error_code = aws_s3_request_metrics_get_error_code(metrics);
@@ -1619,6 +1634,208 @@ TEST_CASE(download_checksum_single_part_with_part_header_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* Download to a file with parts written out of object order, and check every byte landed where it
+ * belongs.
+ *
+ * Mock object: 200000 bytes served in 64 KiB parts -- three full parts plus a 3392 byte tail, so the
+ * last write is unaligned and takes the buffered path even when the others use O_DIRECT.
+ *
+ * The mock's body bytes encode their own object offset (byte at offset o is 32 + o % 90). That is what
+ * makes this a positional test: with filler bytes a part written to the wrong offset would still
+ * compare equal, and only a wrong total size would be caught. The modulus is not a divisor of the part
+ * size, so consecutive parts start at different phases. */
+TEST_CASE(parallel_write_to_file_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* Without this the rest of the test would still pass on the ordered path, proving nothing about
+     * out-of-order writes. */
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    ASSERT_UINT_EQUALS(S_PARALLEL_WRITE_OBJECT_SIZE, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(S_PARALLEL_WRITE_OBJECT_SIZE, out_results.received_file_content.len);
+
+    /* Four ranged GETs, so the tail really was a short fourth part rather than the object having been
+     * fetched in one piece -- which would make the unaligned-tail coverage claim untrue. */
+    ASSERT_UINT_EQUALS(4, aws_array_list_length(&out_results.synced_data.succeed_metrics));
+
+    /* Report the first wrong offset rather than just that the file differs, since which offset is
+     * wrong is what identifies the misplaced part. */
+    for (size_t i = 0; i < out_results.received_file_content.len; ++i) {
+        uint8_t expected = (uint8_t)(32 + (i % 90));
+        if (out_results.received_file_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at object offset %zu: expected %u, got %u",
+                i,
+                (unsigned)expected,
+                (unsigned)out_results.received_file_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results.received_file_content.buffer[i]);
+        }
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that parts are written to the file as they arrive rather than in object order, by making the
+ * mock server hold back part 2 while parts 3 and 4 are served immediately.
+ *
+ * Mock object: 256 KiB served in four aligned 64 KiB parts, with the part at offset 65536 delayed by
+ * 2 seconds. Body bytes encode their own object offset (byte at offset o is 32 + o % 90), so a part
+ * written to the wrong offset is caught rather than only a wrong total size.
+ *
+ * The ordering claim rests on the per-part write window the metrics already record:
+ * deliver_start/deliver_end bracket the pwrite into the recv file. Parts 3 and 4 finish writing
+ * before part 2's write even begins, which the ordered path cannot produce -- there parts 3 and 4
+ * queue behind part 2 and cannot reach the file until it has been written. So this is the assertion
+ * that distinguishes the two paths, and asserting only the file's final contents would not: the
+ * bytes end up identical either way. */
+TEST_CASE(parallel_write_delayed_part_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* The ordering assertion below only means anything on the parallel path. */
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    size_t expected_size = (size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_content.len);
+
+    /* The delay must not have collapsed the transfer into fewer, larger parts, or there would be no
+     * out-of-order write to observe. */
+    ASSERT_UINT_EQUALS(S_DELAYED_PART_COUNT, aws_array_list_length(&out_results.synced_data.succeed_metrics));
+
+    /* Report the first wrong offset rather than just that the file differs, since which offset is
+     * wrong is what identifies the misplaced part. */
+    for (size_t i = 0; i < out_results.received_file_content.len; ++i) {
+        uint8_t expected = (uint8_t)(32 + (i % 90));
+        if (out_results.received_file_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at object offset %zu: expected %u, got %u",
+                i,
+                (unsigned)expected,
+                (unsigned)out_results.received_file_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results.received_file_content.buffer[i]);
+        }
+    }
+
+    /* Collect each part's write window, indexed by part number so the delayed part can be picked out
+     * regardless of the order the metrics were appended in. */
+    uint64_t write_start_ns[S_DELAYED_PART_COUNT + 1] = {0};
+    uint64_t write_end_ns[S_DELAYED_PART_COUNT + 1] = {0};
+    bool seen[S_DELAYED_PART_COUNT + 1] = {false};
+
+    for (size_t i = 0; i < aws_array_list_length(&out_results.synced_data.succeed_metrics); ++i) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        ASSERT_SUCCESS(aws_array_list_get_at(&out_results.synced_data.succeed_metrics, (void **)&metrics, i));
+
+        uint32_t part_number = 0;
+        aws_s3_request_metrics_get_part_number(metrics, &part_number);
+        ASSERT_TRUE(part_number >= 1 && part_number <= S_DELAYED_PART_COUNT);
+        ASSERT_FALSE(seen[part_number]);
+        seen[part_number] = true;
+
+        /* A part that never reached the write path would leave these unset, and comparing unset
+         * timestamps would make the ordering assertion vacuous. */
+        ASSERT_SUCCESS(aws_s3_request_metrics_get_delivery_start_timestamp_ns(metrics, &write_start_ns[part_number]));
+        ASSERT_SUCCESS(aws_s3_request_metrics_get_delivery_end_timestamp_ns(metrics, &write_end_ns[part_number]));
+
+        /* Confirms part numbers map to offsets the way the assertion assumes, so the delayed part
+         * really is the one the mock server held back. */
+        uint64_t range_start = 0;
+        aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
+        ASSERT_UINT_EQUALS((uint64_t)(part_number - 1) * S_DELAYED_PART_SIZE, range_start);
+    }
+
+    /* Every other part was written to the file, start to finish, before the delayed part's write
+     * began: it is the last portion written, and the writes did not overlap at all. */
+    for (uint32_t part_number = 1; part_number <= S_DELAYED_PART_COUNT; ++part_number) {
+        if (part_number == S_DELAYED_PART_NUMBER) {
+            continue;
+        }
+        if (write_end_ns[part_number] >= write_start_ns[S_DELAYED_PART_NUMBER]) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "Part %" PRIu32 " finished writing at %" PRIu64 " ns, which is not before part %d began writing at %" PRIu64
+                " ns. The delayed part was not the last portion written.",
+                part_number,
+                write_end_ns[part_number],
+                S_DELAYED_PART_NUMBER,
+                write_start_ns[S_DELAYED_PART_NUMBER]);
+            ASSERT_TRUE(write_end_ns[part_number] < write_start_ns[S_DELAYED_PART_NUMBER]);
+        }
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.
  * We trigger this by having the mock server delay 60 seconds before sending the response. */
 TEST_CASE(get_object_throughput_failure_mock_server) {
@@ -2115,6 +2332,175 @@ TEST_CASE(get_pause_token_mock_server) {
 
     struct aws_byte_cursor etag = aws_s3_meta_request_resume_token_etag(token);
     ASSERT_TRUE(aws_byte_cursor_eq_c_str(&etag, "pausetokenmocketag"));
+
+    aws_s3_meta_request_resume_token_release(test_data->resume_token);
+    aws_mutex_clean_up(&test_data->mutex);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* GET pause while writing to a file out of object order: the token's two byte counters must diverge.
+ *
+ * Same 256 KiB / 4 part object with part 2 delayed, but delivered to a `recv_filepath`, so parts reach
+ * disk as they arrive instead of queueing behind the part 2 gap. Parts 1, 3 and 4 are therefore all
+ * written before the pause takes effect, which is exactly the case the ordered path cannot produce:
+ *
+ *   continuous_downloaded_bytes = 64 KiB  -- the gap-free prefix stops at the missing part 2
+ *   total_downloaded_bytes      = 192 KiB -- parts 1, 3 and 4 all landed
+ *
+ * A caller must resume from the former; resuming from the latter would skip the hole. The on-disk bytes
+ * are checked against that claim, since a token saying "64 KiB contiguous" is only meaningful if the
+ * first 64 KiB really are intact and the next 64 KiB really are absent. */
+
+struct get_pause_parallel_mock_test_data {
+    struct aws_s3_tester *tester;
+    struct aws_atomic_var parts_completed;
+    struct aws_atomic_var pause_initiated;
+    struct aws_mutex mutex;
+    struct aws_s3_meta_request_resume_token *resume_token;
+    int pause_error_code;
+    bool pause_callback_invoked;
+};
+
+static struct get_pause_parallel_mock_test_data s_get_pause_parallel_test_data;
+
+static void s_get_pause_parallel_mock_pause_complete(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token *resume_token,
+    int error_code,
+    void *user_data) {
+    (void)meta_request;
+    struct get_pause_parallel_mock_test_data *test_data = user_data;
+
+    aws_mutex_lock(&test_data->mutex);
+    test_data->pause_callback_invoked = true;
+    test_data->pause_error_code = error_code;
+    if (resume_token != NULL) {
+        test_data->resume_token =
+            aws_s3_meta_request_resume_token_acquire((struct aws_s3_meta_request_resume_token *)resume_token);
+    }
+    aws_mutex_unlock(&test_data->mutex);
+}
+
+static void s_get_pause_parallel_mock_finished_request(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_request *request,
+    int error_code) {
+    struct get_pause_parallel_mock_test_data *test_data = &s_get_pause_parallel_test_data;
+
+    /* Let the real handler run first, so this part has been dispatched for writing before we pause. */
+    struct aws_s3_meta_request_vtable *original =
+        aws_s3_tester_get_meta_request_vtable_patch(test_data->tester, 0)->original_vtable;
+    original->finished_request(meta_request, request, error_code);
+
+    if ((error_code == AWS_ERROR_SUCCESS) &&
+        (request->request_tag == AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE)) {
+        size_t completed = (size_t)aws_atomic_fetch_add(&test_data->parts_completed, 1) + 1;
+        if (completed >= 3) {
+            size_t expected = false;
+            if (aws_atomic_compare_exchange_int(&test_data->pause_initiated, &expected, true)) {
+                aws_s3_meta_request_pause_async(meta_request, s_get_pause_parallel_mock_pause_complete, test_data);
+            }
+        }
+    }
+}
+
+static struct aws_s3_meta_request *s_get_pause_parallel_mock_meta_request_factory(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+    struct aws_s3_meta_request_vtable *patched = aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched->finished_request = s_get_pause_parallel_mock_finished_request;
+    return meta_request;
+}
+
+TEST_CASE(get_pause_token_parallel_write_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    AWS_ZERO_STRUCT(s_get_pause_parallel_test_data);
+    struct get_pause_parallel_mock_test_data *test_data = &s_get_pause_parallel_test_data;
+    test_data->tester = &tester;
+    aws_atomic_init_int(&test_data->parts_completed, 0);
+    aws_atomic_init_int(&test_data->pause_initiated, false);
+    aws_mutex_init(&test_data->mutex);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_get_pause_parallel_mock_meta_request_factory;
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_pause_delay_part_positional"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_PAUSED, out_results.finished_error_code);
+
+    /* Without this the counters below could match for the boring reason that delivery was ordered. */
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    ASSERT_TRUE(test_data->pause_callback_invoked);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, test_data->pause_error_code);
+    ASSERT_NOT_NULL(test_data->resume_token);
+
+    struct aws_s3_meta_request_resume_token *token = test_data->resume_token;
+    ASSERT_INT_EQUALS(AWS_S3_META_REQUEST_TYPE_GET_OBJECT, aws_s3_meta_request_resume_token_type(token));
+    ASSERT_UINT_EQUALS(4, aws_s3_meta_request_resume_token_total_num_parts(token));
+
+    /* The divergence this test exists for. */
+    ASSERT_UINT_EQUALS(S_PAUSE_PART_SIZE, aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token));
+    ASSERT_UINT_EQUALS(3 * S_PAUSE_PART_SIZE, aws_s3_meta_request_resume_token_total_downloaded_bytes(token));
+
+    /* Part 4 extends the file to its full length even though part 2 never arrived, so the file is
+     * longer than the bytes actually written -- the hole is inside it. */
+    ASSERT_UINT_EQUALS(4 * S_PAUSE_PART_SIZE, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(4 * S_PAUSE_PART_SIZE, out_results.received_file_content.len);
+
+    const uint8_t *bytes = out_results.received_file_content.buffer;
+
+    /* The prefix the token calls contiguous must actually be intact, byte for byte. */
+    for (size_t i = 0; i < S_PAUSE_PART_SIZE; ++i) {
+        ASSERT_UINT_EQUALS((uint8_t)(32 + (i % 90)), bytes[i]);
+    }
+
+    /* Part 2's range must be a hole. Reading as zeros is what makes resuming from
+     * total_downloaded_bytes wrong: those bytes were never written. */
+    for (size_t i = S_PAUSE_PART_SIZE; i < 2 * S_PAUSE_PART_SIZE; ++i) {
+        ASSERT_UINT_EQUALS(0, bytes[i]);
+    }
+
+    /* Parts 3 and 4 landed at their own offsets rather than being packed in behind the gap, which is
+     * what the total counter is claiming. */
+    for (size_t i = 2 * S_PAUSE_PART_SIZE; i < 4 * S_PAUSE_PART_SIZE; ++i) {
+        ASSERT_UINT_EQUALS((uint8_t)(32 + (i % 90)), bytes[i]);
+    }
 
     aws_s3_meta_request_resume_token_release(test_data->resume_token);
     aws_mutex_clean_up(&test_data->mutex);

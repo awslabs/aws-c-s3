@@ -229,6 +229,54 @@ static void s_s3_request_destroy(void *user_data) {
     aws_mem_release(request->allocator, request);
 }
 
+struct aws_s3_body_write *aws_s3_body_write_new_from_request(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(request->meta_request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_body_write *body_write =
+        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_body_write));
+
+    body_write->allocator = meta_request->allocator;
+
+    /* The request holds its own ref, which goes away when the caller releases it, so take one. */
+    body_write->meta_request = aws_s3_meta_request_acquire(meta_request);
+
+    /* Move rather than copy: the request must not clean up or release anything the write now owns.
+     * `body` may be a non-owning view of `ticket`'s memory, so the two have to travel together for
+     * the bytes to stay valid. */
+    body_write->ticket = request->ticket;
+    request->ticket = NULL;
+
+    body_write->body = request->send_data.response_body;
+    AWS_ZERO_STRUCT(request->send_data.response_body);
+
+    body_write->metrics = request->send_data.metrics;
+    request->send_data.metrics = NULL;
+
+    body_write->range_start = request->part_range_start;
+    body_write->part_number = request->part_number;
+
+    return body_write;
+}
+
+void aws_s3_body_write_destroy(struct aws_s3_body_write *body_write) {
+    if (body_write == NULL) {
+        return;
+    }
+
+    /* Mirrors the invariant aws_s3_request_clean_up_send_data() enforces: metrics are finished where
+     * the work completes, not silently dropped during teardown. */
+    AWS_FATAL_ASSERT(body_write->metrics == NULL);
+
+    /* No-op when `body` is a view of pool memory; the ticket release below is what frees those. */
+    aws_byte_buf_clean_up(&body_write->body);
+    aws_s3_buffer_ticket_release(body_write->ticket);
+    aws_s3_meta_request_release(body_write->meta_request);
+
+    aws_mem_release(body_write->allocator, body_write);
+}
+
 static void s_s3_request_metrics_destroy(void *arg) {
     struct aws_s3_request_metrics *metrics = arg;
     if (metrics == NULL) {

@@ -8,6 +8,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/tribool.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_buffer_pool.h>
@@ -697,6 +698,25 @@ struct aws_s3_client_config {
 
     /* User data that's passed into pool factory. */
     void *buffer_pool_user_data;
+
+    /**
+     * WARNING: experimental/unstable:
+     * Whether a download to a file may write received parts as they arrive rather than in object order.
+     * Writing out of order lets several parts reach the disk at once, which is what allows a download to
+     * exceed the throughput of a single writer. Only affects downloads given a `recv_filepath`.
+     *
+     * The trade is what a partial file contains. Ordered delivery leaves a valid prefix, so an
+     * interrupted download yields a file that is short but complete as far as it goes. Out-of-order
+     * delivery can leave gaps, so a partial file is only meaningful together with the download resume
+     * token, which reports how many bytes from the start are contiguous.
+     *
+     * Ignored when a response carries a whole-object checksum that can only be verified by hashing the
+     * body in order; such a request delivers in order and logs a warning.
+     *
+     * Leave AWS_TRIBOOL_UNSET to let the client decide, which currently means writing out of order
+     * wherever the destination allows it.
+     */
+    enum aws_tribool out_of_order_delivery;
 };
 
 struct aws_s3_checksum_config {

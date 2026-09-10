@@ -230,6 +230,15 @@ struct aws_s3_client {
     /* Event loop group for streaming request bodies back to the user. */
     struct aws_event_loop_group *body_streaming_elg;
 
+    /* Round-robin cursor handing out body_streaming_elg loop indices to parallel file writes. Only
+     * ever incremented; callers take the value modulo the loop count. */
+    struct aws_atomic_var next_write_loop_index;
+
+    /* Parts written to their file but not yet completed, across every meta request. Observability
+     * only: nothing throttles on it. Incremented when a body is dispatched to a write worker and
+     * decremented when that write finishes. */
+    struct aws_atomic_var num_pending_writes;
+
     /* Region of the S3 bucket. */
     struct aws_string *region;
 
@@ -333,10 +342,13 @@ struct aws_s3_client {
 
     /* Whether read backpressure (aka flow-control window) is being applied. */
     const bool enable_read_backpressure;
-
     /* The starting size of each meta request's flow-control window, in bytes.
      * Ignored unless `enable_read_backpressure` is true. */
     const size_t initial_read_window;
+
+    /* Whether a download to a file may write received parts out of object order. AWS_TRIBOOL_UNSET
+     * means the caller expressed no preference and the client decides. */
+    const enum aws_tribool out_of_order_delivery;
 
     /**
      * Timeout in ms for upload request for request after sending to the response first byte received.

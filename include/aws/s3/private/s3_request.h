@@ -9,6 +9,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/task_scheduler.h>
 #include <aws/common/thread.h>
 #include <aws/s3/s3.h>
 
@@ -367,6 +368,50 @@ struct aws_s3_request {
     uint32_t was_previously_uploaded : 1;
 };
 
+/* One part's response body on its way to the file sink, detached from the aws_s3_request that
+ * received it.
+ *
+ * The write outlives the request that produced the bytes: the request is done the moment its own
+ * completion accounting is finished, but the body still has to reach the file. Rather than hold the
+ * whole request alive for that, this takes ownership of just the pieces the write needs, letting the
+ * request be released immediately.
+ *
+ * It has a single owner at any time -- either a scheduled `task` or the queue it is parked on via
+ * `node` -- so it is not ref-counted. */
+struct aws_s3_body_write {
+    struct aws_allocator *allocator;
+
+    /* Owning ref. A pending write may be the last thing keeping the meta request alive. */
+    struct aws_s3_meta_request *meta_request;
+
+    /* Keeps `body`'s bytes alive when they came from the buffer pool, since
+     * aws_s3_buffer_ticket_claim() hands back a non-owning view of ticket-held memory.
+     * NULL when `body` was grown dynamically and owns its own allocation. */
+    struct aws_s3_buffer_ticket *ticket;
+
+    /* The bytes to write. */
+    struct aws_byte_buf body;
+
+    /* Moved off the request, because aws_s3_request_clean_up_send_data() asserts that a request
+     * being torn down no longer holds started metrics. Whoever completes the write is responsible
+     * for finishing these before destroying it. */
+    struct aws_s3_request_metrics *metrics;
+
+    /* Offset of `body` within the object. The file offset adds the meta request's base position. */
+    uint64_t range_start;
+
+    /* Part number the body came from. */
+    uint32_t part_number;
+
+    /* Which write worker owns this: an index into the client's body_streaming_elg, and equally the
+     * index of the meta request's descriptor slot this write uses. Assigned when the write is
+     * scheduled. */
+    size_t write_loop_index;
+
+    /* Scheduling state. */
+    struct aws_task task;
+};
+
 AWS_EXTERN_C_BEGIN
 
 /* Create a new s3 request structure with the given options. */
@@ -397,6 +442,19 @@ struct aws_s3_request *aws_s3_request_acquire(struct aws_s3_request *request);
 
 AWS_S3_API
 struct aws_s3_request *aws_s3_request_release(struct aws_s3_request *request);
+
+/* Detach `request`'s response body into a write that can outlive the request.
+ *
+ * Moves the body buffer, its buffer-pool ticket, and the request metrics out of `request`, leaving
+ * those members cleared. The caller may release `request` as soon as this returns; it no longer owns
+ * anything the write needs. */
+AWS_S3_API
+struct aws_s3_body_write *aws_s3_body_write_new_from_request(struct aws_s3_request *request);
+
+/* Destroy a pending write. Its metrics must already have been handed off or released, otherwise this
+ * part's telemetry callback would be dropped. */
+AWS_S3_API
+void aws_s3_body_write_destroy(struct aws_s3_body_write *body_write);
 
 AWS_S3_API
 struct aws_s3_request_metrics *aws_s3_request_metrics_new(struct aws_allocator *allocator);
