@@ -7825,9 +7825,9 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
     return 0;
 }
 
-/* Test that business metrics flags produce the correct m/ section in the User-Agent header. */
-AWS_TEST_CASE(test_add_user_agent_header_business_metrics, s_test_add_user_agent_header_business_metrics)
-static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *allocator, void *ctx) {
+/* Test that feature IDs flags produce the correct m/ section in the User-Agent header. */
+AWS_TEST_CASE(test_add_user_agent_header_feature_ids, s_test_add_user_agent_header_feature_ids)
+static int s_test_add_user_agent_header_feature_ids(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -7838,7 +7838,7 @@ static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *a
     {
         struct aws_http_message *message = aws_http_message_new_request(allocator);
 
-        uint32_t metrics = AWS_S3_METRIC_CUSTOM_PART_SIZE | AWS_S3_METRIC_ON_EC2 | AWS_S3_METRIC_FILE_PATH;
+        uint32_t metrics = AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE | AWS_S3_FEATURE_ID_ON_EC2 | AWS_S3_FEATURE_ID_FILE_PATH;
         aws_s3_add_user_agent_header(allocator, message, metrics);
 
         struct aws_byte_cursor user_agent_value;
@@ -7880,7 +7880,7 @@ static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *a
     {
         struct aws_http_message *message = aws_http_message_new_request(allocator);
 
-        aws_s3_add_user_agent_header(allocator, message, AWS_S3_METRIC_CUSTOM_PART_SIZE);
+        aws_s3_add_user_agent_header(allocator, message, AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE);
 
         struct aws_byte_cursor user_agent_value;
         AWS_ZERO_STRUCT(user_agent_value);
@@ -7904,10 +7904,10 @@ static int s_test_add_user_agent_header_business_metrics(struct aws_allocator *a
     return 0;
 }
 
-/* Helper: create a client from a partially filled config and return its business_metrics with the
+/* Helper: create a client from a partially filled config and return its feature_ids with the
  * environment-dependent ON_EC2 bit masked off (it depends on the host running the test).
  * Owns a tester per call because aws_s3_tester_bind_client() may only be invoked once per tester. */
-static int s_get_client_business_metrics(
+static int s_get_client_feature_ids(
     struct aws_allocator *allocator,
     struct aws_s3_client_config *client_config,
     uint32_t *out_metrics) {
@@ -7922,18 +7922,18 @@ static int s_get_client_business_metrics(
     struct aws_s3_client *client = aws_s3_client_new(allocator, client_config);
     ASSERT_NOT_NULL(client);
 
-    *out_metrics = client->business_metrics & ~(uint32_t)AWS_S3_METRIC_ON_EC2;
+    *out_metrics = client->feature_ids & ~(uint32_t)AWS_S3_FEATURE_ID_ON_EC2;
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
 }
 
-/* Test that aws_s3_client_new derives the client-level business metrics flags correctly.
+/* Test that aws_s3_client_new derives the client-level feature IDs flags correctly.
  * The CUSTOM_* flags must fire only when the caller set a value AND that value differs from
  * the default the client would have chosen on its own. */
-AWS_TEST_CASE(test_s3_client_business_metrics_flags, s_test_s3_client_business_metrics_flags)
-static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_client_feature_ids, s_test_s3_client_feature_ids)
+static int s_test_s3_client_feature_ids(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     uint32_t metrics = 0;
@@ -7942,7 +7942,7 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
     {
         struct aws_s3_client_config config;
         AWS_ZERO_STRUCT(config);
-        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
         ASSERT_UINT_EQUALS(0, metrics);
     }
 
@@ -7952,7 +7952,7 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
         AWS_ZERO_STRUCT(config);
         config.part_size = (size_t)g_default_part_size_fallback;
         config.throughput_target_gbps = g_default_throughput_target_gbps;
-        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
         ASSERT_UINT_EQUALS(0, metrics);
     }
 
@@ -7961,8 +7961,8 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
         struct aws_s3_client_config config;
         AWS_ZERO_STRUCT(config);
         config.part_size = MB_TO_BYTES(16);
-        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
-        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CUSTOM_PART_SIZE, metrics);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, metrics);
     }
 
     /* Non-default throughput target. */
@@ -7970,8 +7970,8 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
         struct aws_s3_client_config config;
         AWS_ZERO_STRUCT(config);
         config.throughput_target_gbps = 100.0;
-        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
-        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CUSTOM_THROUGHPUT, metrics);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, metrics);
     }
 
     /* Explicit memory limit that differs from the tier-table default for the given throughput.
@@ -7981,8 +7981,8 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
         AWS_ZERO_STRUCT(config);
         config.throughput_target_gbps = 100.0;
         config.memory_limit_in_bytes = MB_TO_BYTES(512);
-        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
-        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CUSTOM_THROUGHPUT | AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, metrics);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT | AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, metrics);
     }
 
 #if SIZE_BITS == 64
@@ -7992,8 +7992,8 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
         AWS_ZERO_STRUCT(config);
         config.throughput_target_gbps = 100.0;
         config.memory_limit_in_bytes = GB_TO_BYTES(16);
-        ASSERT_SUCCESS(s_get_client_business_metrics(allocator, &config, &metrics));
-        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CUSTOM_THROUGHPUT, metrics);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, metrics);
     }
 #endif
 
@@ -8006,15 +8006,83 @@ static int s_test_s3_client_business_metrics_flags(struct aws_allocator *allocat
         struct aws_s3_client_config config;
         AWS_ZERO_STRUCT(config);
         config.throughput_target_gbps = 100.0;
-        int result = s_get_client_business_metrics(allocator, &config, &metrics);
+        int result = s_get_client_feature_ids(allocator, &config, &metrics);
 
         ASSERT_SUCCESS(aws_unset_environment_value(env_name));
         aws_string_destroy((struct aws_string *)env_name);
         aws_string_destroy((struct aws_string *)env_value);
 
         ASSERT_SUCCESS(result);
-        ASSERT_UINT_EQUALS(AWS_S3_METRIC_CUSTOM_THROUGHPUT | AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, metrics);
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT | AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, metrics);
     }
+
+    return 0;
+}
+
+/* Test that aws_s3_meta_request_init_base derives per-request feature IDs from the meta request
+ * options: a per-request part_size override and a file-based transfer (recv_filepath). send_filepath
+ * needs a client to build the parallel stream, so the upload direction is covered by the network test
+ * test_s3_auto_ranged_put_file_sending_user_agent instead. */
+AWS_TEST_CASE(test_s3_meta_request_feature_ids, s_test_s3_meta_request_feature_ids)
+static int s_test_s3_meta_request_feature_ids(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* No per-request options: nothing set (no client attached, so no client-level flags either). */
+    {
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(0, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+    }
+
+    /* Per-request part_size equal to the default is not "custom". */
+    {
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .part_size = g_default_part_size_fallback,
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(0, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+    }
+
+    /* Per-request part_size override that differs from the default. */
+    {
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .part_size = MB_TO_BYTES(16),
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+    }
+
+    /* Download to a file path. */
+    {
+        struct aws_string *filepath =
+            aws_s3_tester_create_file(allocator, aws_byte_cursor_from_c_str("feature_ids_recv"), NULL);
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .recv_filepath = aws_byte_cursor_from_string(filepath),
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_FILE_PATH, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+        aws_file_delete(filepath);
+        aws_string_destroy(filepath);
+    }
+
+    aws_s3_tester_clean_up(&tester);
 
     return 0;
 }
@@ -8044,10 +8112,10 @@ static void s_s3_test_user_agent_meta_request_finished_request(
 
     AWS_FATAL_ASSERT(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value) == AWS_OP_SUCCESS);
 
-    /* The product/platform portion must come first, exactly as before business metrics were added. */
+    /* The product/platform portion must come first, exactly as before feature IDs were added. */
     AWS_FATAL_ASSERT(aws_byte_cursor_starts_with(&user_agent_value, &expected_user_agent_value));
 
-    /* Whatever follows is the optional business metrics section: either nothing (no flags set on
+    /* Whatever follows is the optional feature IDs section: either nothing (no flags set on
      * this host/config) or " m/<id>,<id>,...". Which flags appear depends on the host (Aa is set
      * only on EC2), so parse the section as tokens rather than matching a fixed string. */
     struct aws_byte_cursor metrics_section = user_agent_value;
@@ -8071,11 +8139,14 @@ static void s_s3_test_user_agent_meta_request_finished_request(
         }
     }
 
-    /* Ab (file path) must be present if and only if the meta request was given send_filepath
-     * (the only way request_body_parallel_stream gets set) or recv_filepath. */
-    bool expect_file_path_metric =
-        meta_request->request_body_parallel_stream != NULL || meta_request->recv_filepath != NULL;
+    /* Ab (file path) must be present if and only if the meta request was given send_filepath or
+     * recv_filepath. Cross-check against the resolved field (recv side) and the FILE_PATH flag the
+     * meta request derived from its options at init (both sides). */
+    bool expect_file_path_metric = (meta_request->feature_ids & AWS_S3_FEATURE_ID_FILE_PATH) != 0;
     AWS_FATAL_ASSERT(has_file_path_metric == expect_file_path_metric);
+    if (meta_request->recv_filepath != NULL || meta_request->request_body_parallel_stream != NULL) {
+        AWS_FATAL_ASSERT(expect_file_path_metric);
+    }
 
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
 
@@ -8151,7 +8222,7 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
 }
 
 /* Same as the get test above, but downloads via recv_filepath so the request must carry the
- * Ab (file path) business metric. The shared finished_request callback asserts on it. */
+ * Ab (file path) feature ID. The shared finished_request callback asserts on it. */
 AWS_TEST_CASE(test_s3_auto_ranged_get_file_sending_user_agent, s_test_s3_auto_ranged_get_file_sending_user_agent)
 static int s_test_s3_auto_ranged_get_file_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -8216,7 +8287,7 @@ static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *al
 }
 
 /* Same as the put test above, but uploads via send_filepath so the request must carry the
- * Ab (file path) business metric. The shared finished_request callback asserts on it. */
+ * Ab (file path) feature ID. The shared finished_request callback asserts on it. */
 AWS_TEST_CASE(test_s3_auto_ranged_put_file_sending_user_agent, s_test_s3_auto_ranged_put_file_sending_user_agent)
 static int s_test_s3_auto_ranged_put_file_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

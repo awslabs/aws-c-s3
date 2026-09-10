@@ -290,8 +290,9 @@ struct aws_s3_client {
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
 
-    /* Bitmask of aws_s3_business_metrics_flag. Set at client construction, augmented per-request. */
-    uint32_t business_metrics;
+    /* Bitmask of enum aws_s3_feature_id derived from client_config at construction. Each meta request
+     * copies this and ORs in its own per-request flags (see aws_s3_meta_request_init_base). */
+    uint32_t feature_ids;
 
     /**
      * Optional.

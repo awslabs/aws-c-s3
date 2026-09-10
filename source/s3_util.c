@@ -353,23 +353,23 @@ int aws_last_error_or_unknown(void) {
     return error;
 }
 
-/* Map of business metric flag -> User-Agent metric ID string. Order matches the enum definition
+/* Map of feature ID flag -> User-Agent metric ID string. Order matches the enum definition
  * and determines the emission order in the m/ section. */
 static const struct {
     uint32_t flag;
     const char *id;
-} s_metric_ids[] = {
-    {AWS_S3_METRIC_CUSTOM_PART_SIZE, "AX"},
-    {AWS_S3_METRIC_CUSTOM_THROUGHPUT, "AY"},
-    {AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, "AZ"},
-    {AWS_S3_METRIC_ON_EC2, "Aa"},
-    {AWS_S3_METRIC_FILE_PATH, "Ab"},
+} s_feature_id_strings[] = {
+    {AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, "AX"},
+    {AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, "AY"},
+    {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, "AZ"},
+    {AWS_S3_FEATURE_ID_ON_EC2, "Aa"},
+    {AWS_S3_FEATURE_ID_FILE_PATH, "Ab"},
 };
 
 void aws_s3_add_user_agent_header(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
-    uint32_t business_metrics) {
+    uint32_t feature_ids) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
@@ -414,21 +414,21 @@ void aws_s3_add_user_agent_header(
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
 
-    /* Append business metrics m/ section per UA 2.1 SEP.
+    /* Append feature IDs m/ section per UA 2.1 SEP.
      * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas.
      * The section is omitted entirely when no flags are set. */
-    if (business_metrics != 0) {
+    if (feature_ids != 0) {
         aws_byte_buf_append_dynamic(
             &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/"));
 
         bool first = true;
-        for (size_t i = 0; i < AWS_ARRAY_SIZE(s_metric_ids); ++i) {
-            if (business_metrics & s_metric_ids[i].flag) {
+        for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
+            if (feature_ids & s_feature_id_strings[i].flag) {
                 if (!first) {
                     aws_byte_buf_append_dynamic(
                         &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(","));
                 }
-                struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_metric_ids[i].id);
+                struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
                 aws_byte_buf_append_dynamic(&user_agent_buffer, &id_cursor);
                 first = false;
             }

@@ -173,7 +173,7 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
  * Returns the default memory pool size for a given throughput target.
  * This is the single source of truth for the throughput-to-memory-pool tier table.
  * Used both for pool sizing when no explicit memory_limit is set, and for
- * business metrics to determine whether a caller's explicit limit differs from the default.
+ * feature IDs to determine whether a caller's explicit limit differs from the default.
  */
 static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #if SIZE_BITS == 32
@@ -499,7 +499,7 @@ struct aws_s3_client *aws_s3_client_new(
      * default in the tier table.
      *
      * This is resolved even when an explicit memory limit was configured so
-     * that the business metrics below can compare the configured limit against
+     * that the feature IDs below can compare the configured limit against
      * the value the tier table would have chosen for this environment.
      */
     double effective_throughput = client_config->throughput_target_gbps;
@@ -565,22 +565,23 @@ struct aws_s3_client *aws_s3_client_new(
         client->fio_options_set = true;
     }
 
-    /* Initialize client-level business metrics flags for User-Agent m/ section.
+    /* Initialize client-level feature IDs for the User-Agent m/ section.
      * These are set AFTER all defaults are resolved so we can compare the effective
-     * values against what the system would have chosen automatically. The metric
+     * values against what the system would have chosen automatically. A feature ID
      * tracks "is the customer using non-default behavior?" not "did the customer
-     * touch the API?" */
-    client->business_metrics = 0;
+     * touch the API?" Per-request flags (and per-request overrides such as
+     * aws_s3_meta_request_options.part_size) are added in aws_s3_meta_request_init_base. */
+    client->feature_ids = 0;
 
     if (client_config->part_size != 0 && part_size != (size_t)g_default_part_size_fallback) {
         /* Caller set part_size AND it differs from the 8 MiB default */
-        client->business_metrics |= AWS_S3_METRIC_CUSTOM_PART_SIZE;
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE;
     }
 
     if (client_config->throughput_target_gbps != 0.0 &&
         client->throughput_target_gbps != g_default_throughput_target_gbps) {
         /* Caller set throughput AND the effective value differs from the 10.0 Gbps default */
-        client->business_metrics |= AWS_S3_METRIC_CUSTOM_THROUGHPUT;
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT;
     }
 
     if (mem_limit_configured != 0) {
@@ -591,7 +592,7 @@ struct aws_s3_client *aws_s3_client_new(
          * (using the same effective_throughput the default path would have used). */
         size_t default_mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
         if (mem_limit != default_mem_limit) {
-            client->business_metrics |= AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT;
+            client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT;
         }
     }
 
@@ -603,7 +604,7 @@ struct aws_s3_client *aws_s3_client_new(
          * Nitro host but lacks the product name. The result is cached for the process lifetime. */
         struct aws_byte_cursor ec2_instance = aws_s3_get_current_platform_ec2_intance_type(false /* cached_only */);
         if (ec2_instance.len > 0) {
-            client->business_metrics |= AWS_S3_METRIC_ON_EC2;
+            client->feature_ids |= AWS_S3_FEATURE_ID_ON_EC2;
         }
     }
 
