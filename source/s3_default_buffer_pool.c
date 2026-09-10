@@ -192,13 +192,22 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
 
     size_t chunk_size = config.part_size;
 
-    if (config.memory_limit < GB_TO_BYTES(1)) {
+    if (config.memory_limit < MB_TO_BYTES(256)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to initialize buffer pool. "
-            "Minimum supported value for Memory Limit is 1GB.");
+            "Minimum supported value for Memory Limit is 256MB.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         return NULL;
+    }
+
+    if (config.memory_limit % MB_TO_BYTES(1) != 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "Memory limit (%zu bytes) is not aligned to a MiB boundary. "
+            "The extra %zu bytes will be unused. Consider using a round MiB value.",
+            config.memory_limit,
+            config.memory_limit % MB_TO_BYTES(1));
     }
 
     if (chunk_size < (1024) || chunk_size % (4 * 1024) != 0) {
@@ -208,6 +217,17 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
             "Consider specifying size in multiples of 4KiB. Ideal part size for most transfers is "
             "1MiB multiple between 8MiB and 16MiB. Note: the client will automatically scale part size "
             "if its not sufficient to transfer data within the maximum number of parts");
+    }
+
+    if (config.max_part_size > 0 && chunk_size > config.max_part_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to initialize buffer pool. "
+            "Part size (%zu bytes) exceeds max part size (%zu bytes).",
+            chunk_size,
+            config.max_part_size);
+        aws_raise_error(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return NULL;
     }
 
     size_t adjusted_mem_lim = config.memory_limit - s_buffer_pool_reserved_mem;
@@ -576,11 +596,11 @@ static bool s_should_trim_for_reserve_synced(
     }
 
     size_t primary_overallocation = aws_sub_size_saturating(buffer_pool->primary_allocated, buffer_pool->primary_used);
-    /* Reserved can be more tha allocated */
+    /* Reserved can be more than allocated */
     primary_overallocation = aws_sub_size_saturating(primary_overallocation, buffer_pool->primary_reserved);
     size_t special_overallocation =
         aws_sub_size_saturating(buffer_pool->special_blocks_allocated, buffer_pool->special_blocks_used);
-    /* Reserved can be more tha allocated */
+    /* Reserved can be more than allocated */
     special_overallocation = aws_sub_size_saturating(special_overallocation, buffer_pool->special_blocks_reserved);
 
     size_t total_overallocation = aws_add_size_saturating(special_overallocation, primary_overallocation);

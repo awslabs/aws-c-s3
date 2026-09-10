@@ -1,7 +1,33 @@
-# This script pulls latest 'partitions.json' and 's3-endpoint-rule-set.json' from Git.
-# You will need a secret in secrets manager which has the 'ruleset-url' and 'ruleset-token'.
-# It uses the latest files to generate 'source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c' and
-# 'source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c'
+# Regenerates the compiled-in S3 endpoint-resolver data for aws-c-s3.
+#
+# The S3 client resolves endpoints from an endpoint rule set plus a partitions
+# table. Instead of downloading these at runtime, aws-c-s3 embeds them as C
+# source so the rules are compiled into the library. This script produces that
+# source from the latest upstream definitions.
+#
+# What it does:
+#   1. Obtains the endpoint rule set and the partitions definition.
+#      - Rule set: extracted from the public S3 service model, at
+#        shapes -> com.amazonaws.s3#AmazonS3 -> traits -> smithy.rules#endpointRuleSet.
+#      - Partitions: the aws-sdk-cpp partitions.json.
+#   2. Serializes each JSON as a compact C byte array exposed via an
+#      aws_byte_cursor.
+#   3. Overwrites the generated sources (do NOT edit these by hand):
+#        source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c
+#        source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c
+#
+# Usage:
+#   python scripts/update_s3_endpoint_resolver_artifacts.py
+#       Pull both inputs from their upstream defaults and regenerate.
+#   python scripts/update_s3_endpoint_resolver_artifacts.py \
+#       --ruleset path/to/ruleset.json --partitions path/to/partitions.json
+#       Regenerate from local JSON files instead (handy for testing a specific
+#       rule set / partitions snapshot).
+#
+# This runs on a daily schedule: each run regenerates the files from the latest
+# upstream definitions, and if the result differs from what is already committed,
+# the updated .c files are picked up so the change ships with the next build.
+# Fetching the upstream defaults requires network access.
 
 import argparse
 import json

@@ -16,7 +16,7 @@ put or get, breaks it into smaller part-sized requests and executes those in
 parallel. CRT S3 client used to allocate part sized buffer for each of those
 requests and release it right after the request was done. That approach,
 resulted in a lot of very short lived allocations and allocator thrashing,
-overall leading to memory use spikes considerably higher than whats needed. To
+overall leading to memory use spikes considerably higher than what's needed. To
 address that, the client is switching to a pooled buffer approach, discussed
 below.
 

@@ -2693,7 +2693,7 @@ TEST_CASE(endpoint_override_mock_server) {
     put_options.message = message;
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
-    /* 2. Create request with host info missmatch endpoint override */
+    /* 2. Create request with host info mismatch endpoint override */
     struct aws_http_header host_header = {
         .name = g_host_header_name,
         .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bad_host"),
