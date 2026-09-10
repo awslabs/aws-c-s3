@@ -1619,6 +1619,116 @@ TEST_CASE(download_checksum_single_part_with_part_header_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* A checksum header only describes the bytes of the response that carried it. Two downloads below
+ * receive a checksum on their size-discovery response that covers fewer bytes (or more) than the
+ * meta request goes on to deliver, so that value must not be used as the whole-download checksum. The
+ * bodies are intact in both cases, so a checksum mismatch here would be the client's own doing.
+ *
+ * Both currently fail with AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH: the meta request level checksum is
+ * taken from whichever response discovered the object size, without checking that the response covered
+ * the same bytes the download will. */
+
+/* A ranged download whose discovery request is a ranged GET (a Range header with a start range skips the
+ * HEAD). The response covers only the first 64 KiB part and carries that part's CRC32, while the download
+ * delivers 128 KiB. Real S3 answers a range that lines up with an uploaded part exactly this way, and the
+ * part-level value is indistinguishable from a whole-object one by value alone: no "-N" suffix to make it
+ * the wrong length, and no x-amz-mp-parts-count, which only comes back for partNumber requests. */
+TEST_CASE(download_ranged_part_level_checksum_not_whole_object_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_per_part_header"),
+                /* Two 64 KiB parts of the 256 KiB object. The start range keeps discovery on the ranged
+                 * GET path instead of a HEAD. */
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-131071"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(131072, out_results.received_body_size);
+    /* Each part still validates against its own header, which is all these headers can support. */
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* A suffix range ("bytes=-1024") has no start range, so discovery is a HEAD. The HEAD copies the original
+ * request's headers, including the Range, so it comes back 206 with the whole 64 KiB object's CRC32 while
+ * the download delivers only the last 1 KiB. Nothing is left to validate against, so the download should
+ * simply finish unvalidated. */
+TEST_CASE(download_suffix_range_whole_object_checksum_out_of_scope_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_suffix_range"),
+                .object_range = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=-1024"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(1024, out_results.received_body_size);
+    /* The part responses carry no checksum of their own, and the object's checksum covers bytes this
+     * download never asked for. */
+    ASSERT_FALSE(out_results.did_validate);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.
  * We trigger this by having the mock server delay 60 seconds before sending the response. */
 TEST_CASE(get_object_throughput_failure_mock_server) {
