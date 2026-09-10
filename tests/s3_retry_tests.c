@@ -119,6 +119,117 @@ static int s_test_s3_client_acquire_connection_fail(struct aws_allocator *alloca
     return 0;
 }
 
+/* Test that retry_config.max_retries is respected when set.
+ * Uses the fail_first helper (one connection failure, then success).
+ * With max_retries = 1, the single failure should be retried and the request should succeed.
+ * This is the lower-bound proof: max_retries=1 allows at least 1 retry. */
+AWS_TEST_CASE(test_s3_client_retry_config_max_retries, s_test_s3_client_retry_config_max_retries)
+static int s_test_s3_client_retry_config_max_retries(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .max_retries = 1,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_first;
+
+    /* One failure + one retry = success. max_retries=1 allows exactly this. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Fail the first two connection attempts, succeed on the third. */
+static void s_s3_client_acquire_http_connection_fail_twice(
+    struct aws_http_connection_manager *conn_manager,
+    aws_http_connection_manager_on_connection_setup_fn *callback,
+    void *user_data) {
+    AWS_ASSERT(callback);
+
+    struct aws_s3_connection *connection = user_data;
+
+    struct aws_s3_client *client = connection->request->meta_request->endpoint->client;
+    AWS_ASSERT(client);
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    AWS_ASSERT(tester != NULL);
+
+    if (aws_s3_tester_inc_counter1(tester) <= 2) {
+        aws_raise_error(AWS_ERROR_UNKNOWN);
+        callback(NULL, AWS_ERROR_UNKNOWN, connection);
+        return;
+    }
+
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+
+    original_client_vtable->acquire_http_connection(conn_manager, callback, user_data);
+}
+
+/* Test that retry_config.max_retries=1 does NOT allow a second retry.
+ * Fails twice: the first failure triggers a retry (allowed), but the second failure
+ * needs another retry (not allowed because max_retries=1).
+ * This is the upper-bound proof: max_retries=1 allows at most 1 retry.
+ * Together with test_s3_client_retry_config_max_retries, this proves the value is exactly 1. */
+AWS_TEST_CASE(test_s3_client_retry_config_max_retries_exceeded, s_test_s3_client_retry_config_max_retries_exceeded)
+static int s_test_s3_client_retry_config_max_retries_exceeded(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .max_retries = 1,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_twice;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    /* Two failures need 2 retries, but max_retries=1 only allows 1. Should fail. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, 0, &meta_request_test_results));
+
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 struct s3_fail_prepare_test_data {
     uint32_t num_requests_being_prepared_is_correct : 1;
 };
