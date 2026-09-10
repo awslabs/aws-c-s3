@@ -359,12 +359,11 @@ static const struct {
     uint32_t flag;
     const char *id;
 } s_metric_ids[] = {
-    {AWS_S3_METRIC_CRT_CLIENT, "AX"},
-    {AWS_S3_METRIC_CUSTOM_PART_SIZE, "AY"},
-    {AWS_S3_METRIC_CUSTOM_THROUGHPUT, "AZ"},
-    {AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, "Aa"},
-    {AWS_S3_METRIC_ON_EC2, "Ab"},
-    {AWS_S3_METRIC_FILE_PATH, "Ac"},
+    {AWS_S3_METRIC_CUSTOM_PART_SIZE, "AX"},
+    {AWS_S3_METRIC_CUSTOM_THROUGHPUT, "AY"},
+    {AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT, "AZ"},
+    {AWS_S3_METRIC_ON_EC2, "Aa"},
+    {AWS_S3_METRIC_FILE_PATH, "Ab"},
 };
 
 void aws_s3_add_user_agent_header(
@@ -416,7 +415,8 @@ void aws_s3_add_user_agent_header(
     }
 
     /* Append business metrics m/ section per UA 2.1 SEP.
-     * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas. */
+     * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas.
+     * The section is omitted entirely when no flags are set. */
     if (business_metrics != 0) {
         aws_byte_buf_append_dynamic(
             &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/"));

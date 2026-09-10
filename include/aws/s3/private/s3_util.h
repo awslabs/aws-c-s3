@@ -258,12 +258,11 @@ void aws_s3_add_user_agent_header(
  * AWS SDK feature-ID registry; do not invent new IDs here without registering them.
  */
 enum aws_s3_business_metrics_flag {
-    AWS_S3_METRIC_CRT_CLIENT = (1 << 0),          /* AX - CRT S3 client was used (always set) */
-    AWS_S3_METRIC_CUSTOM_PART_SIZE = (1 << 1),    /* AY - non-default part size configured */
-    AWS_S3_METRIC_CUSTOM_THROUGHPUT = (1 << 2),   /* AZ - non-default throughput target configured */
-    AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT = (1 << 3), /* Aa - non-default memory pool size configured */
-    AWS_S3_METRIC_ON_EC2 = (1 << 4),              /* Ab - running on EC2 instance */
-    AWS_S3_METRIC_FILE_PATH = (1 << 5),           /* Ac - request used send_filepath or recv_filepath */
+    AWS_S3_METRIC_CUSTOM_PART_SIZE = (1 << 0),    /* AX - non-default part size configured */
+    AWS_S3_METRIC_CUSTOM_THROUGHPUT = (1 << 1),   /* AY - non-default throughput target configured */
+    AWS_S3_METRIC_CUSTOM_MEMORY_LIMIT = (1 << 2), /* AZ - non-default memory pool size configured */
+    AWS_S3_METRIC_ON_EC2 = (1 << 3),              /* Aa - running on EC2 instance */
+    AWS_S3_METRIC_FILE_PATH = (1 << 4),           /* Ab - request used send_filepath or recv_filepath */
 };
 
 /* Given the response headers list, finds the Content-Range header and parses the range-start, range-end and

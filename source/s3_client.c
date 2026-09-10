@@ -570,7 +570,7 @@ struct aws_s3_client *aws_s3_client_new(
      * values against what the system would have chosen automatically. The metric
      * tracks "is the customer using non-default behavior?" not "did the customer
      * touch the API?" */
-    client->business_metrics = AWS_S3_METRIC_CRT_CLIENT; /* always set */
+    client->business_metrics = 0;
 
     if (client_config->part_size != 0 && part_size != (size_t)g_default_part_size_fallback) {
         /* Caller set part_size AND it differs from the 8 MiB default */
