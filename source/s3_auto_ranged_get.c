@@ -786,6 +786,28 @@ static bool s_discovery_checksum_covers_download(
     }
 }
 
+/* Are the bytes this one response returned the entire download, so that no other request carries data? A response
+ * whose body is the whole download and which already validated itself needs no meta-request-level checksum: the
+ * running sum would hash the same bytes a second time to reach a verdict the request level already has. */
+static bool s_request_body_is_entire_download(
+    const struct aws_s3_request *request,
+    uint64_t object_range_start,
+    uint64_t object_range_end,
+    uint64_t first_part_size) {
+
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+            /* Part 1 starts at the beginning of the object, so its body is [0, first_part_size - 1]. An empty
+             * response reports first_part_size == 0 and so never covers anything. */
+            return object_range_start == 0 && first_part_size > object_range_end;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+            return request->part_range_start <= object_range_start && request->part_range_end >= object_range_end;
+        default:
+            /* HeadObject returns no body. */
+            return false;
+    }
+}
+
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -952,6 +974,17 @@ static void s_s3_auto_ranged_get_request_finished(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: Discovery response's checksum does not cover the bytes being downloaded. The download "
                     "will not be validated against a whole-object checksum.",
+                    (void *)meta_request);
+            } else if (
+                request->did_validate &&
+                s_request_body_is_entire_download(request, object_range_start, object_range_end, first_part_size)) {
+                /* This response's body was already compared against a checksum header of its own, and that body is
+                 * every byte the meta request delivers, so there is nothing left for a meta-request-level sum to
+                 * check. update() reports the outcome through the all-parts-validated promotion instead. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Discovery response covered the whole download and was already validated against its own "
+                    "checksum.",
                     (void *)meta_request);
             } else if (
                 aws_s3_check_headers_for_checksum(
