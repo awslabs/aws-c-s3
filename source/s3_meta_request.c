@@ -305,6 +305,20 @@ int aws_s3_meta_request_init_base(
         meta_request->client = aws_s3_client_acquire(client);
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
+        meta_request->feature_ids = client->feature_ids;
+    }
+
+    /* Per-request feature IDs for the User-Agent m/ section. Derived from what the caller asked for
+     * in the options, not from how it was implemented, so they don't depend on internal plumbing. */
+    if (options->send_filepath.len > 0 || options->recv_filepath.len > 0) {
+        /* Transfer is file-based (either direction) rather than stream/callback-based. */
+        meta_request->feature_ids |= AWS_S3_FEATURE_ID_FILE_PATH;
+    }
+    if (options->part_size != 0 && options->part_size != g_default_part_size_fallback) {
+        /* Caller overrode part size for this meta request AND it differs from the 8 MiB default.
+         * Uses options->part_size (the caller's value) rather than the resolved part_size argument,
+         * which may have been auto-adjusted for large objects; that adjustment is not caller config. */
+        meta_request->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE;
     }
 
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
@@ -1104,7 +1118,8 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
         return;
     }
 
-    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message);
+    /* feature_ids already merges client-level and per-request flags (see aws_s3_meta_request_init_base). */
+    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message, meta_request->feature_ids);
 
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);
@@ -1570,6 +1585,8 @@ static int s_s3_meta_request_error_code_from_response_status(int response_status
             error_code = AWS_ERROR_SUCCESS;
             break;
         case AWS_HTTP_STATUS_CODE_500_INTERNAL_SERVER_ERROR:
+        case AWS_HTTP_STATUS_CODE_502_BAD_GATEWAY:
+        case AWS_HTTP_STATUS_CODE_504_GATEWAY_TIMEOUT:
             error_code = AWS_ERROR_S3_INTERNAL_ERROR;
             break;
         case AWS_HTTP_STATUS_CODE_503_SERVICE_UNAVAILABLE:
