@@ -169,6 +169,74 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
     return (uint32_t)ideal_connection_count_double;
 }
 
+/**
+ * Returns the default memory pool size for a given throughput target.
+ * This is the single source of truth for the throughput-to-memory-pool tier table.
+ * Used both for pool sizing when no explicit memory_limit is set, and for
+ * feature IDs to determine whether a caller's explicit limit differs from the default.
+ */
+static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
+#if SIZE_BITS == 32
+    if (throughput_gbps > 25.0) {
+        return GB_TO_BYTES(2);
+    } else {
+        return GB_TO_BYTES(1);
+    }
+#else
+    /*
+     * Memory pool sizing tiers based on detected/configured throughput.
+     *
+     * Upper tiers (>=10 Gbps): unchanged from original values. These cover
+     * instances that were already getting CRT with these pool sizes. We need
+     * to reinvestigate whether these numbers are optimal in the future but for
+     * now we will keep them as is to ensure we don't break/regress current
+     * users.
+     *
+     * Sub-10 Gbps tiers: added to right-size the memory pool for lower-bandwidth
+     * instances. Without these tiers, all sub-25 Gbps instances would get 2 GiB,
+     * which is 8-40x more than needed and causes unnecessary RSS on constrained
+     * instances (t3.micro: 1 GiB RAM, m5.large: 8 GiB RAM).
+     *
+     * Tier breakdown:
+     *   >=200 Gbps -> 24 GiB (unchanged)
+     *   >=100 Gbps -> 16 GiB (unchanged)
+     *   >=75 Gbps  ->  8 GiB (unchanged)
+     *   >=25 Gbps  ->  4 GiB (unchanged)
+     *   >=10 Gbps  ->  2 GiB (unchanged, was the previous catch-all default)
+     *   >=5 Gbps   -> 512 MiB: covers t3.medium/large burst (5 Gbps), m5.xlarge and
+     *                  c5.xlarge baseline (1.25 Gbps). 2x headroom over 256 MiB for
+     *                  moderate throughput instances that may burst.
+     *   >0 Gbps    -> 256 MiB: any positively-detected or assigned sub-5 Gbps throughput.
+     *                  Validated via benchmark on t2.micro, t3.micro/small,
+     *                  m5.large (0.064-0.75 Gbps baseline). 38-90% RSS reduction vs
+     *                  2 GiB default with no throughput penalty at baseline speeds.
+     *                  16 x 8 MiB parts fit in the 128 MiB usable pool (256 - 128 reserved).
+     *   0 Gbps     ->  2 GiB: throughput not detected (non-EC2 or unknown instance).
+     *                  Preserves existing default for callers that don't set a throughput
+     *                  target.
+     */
+    if (throughput_gbps >= 200.0) {
+        return GB_TO_BYTES(24);
+    } else if (throughput_gbps >= 100.0) {
+        return GB_TO_BYTES(16);
+    } else if (throughput_gbps >= 75.0) {
+        return GB_TO_BYTES(8);
+    } else if (throughput_gbps >= 25.0) {
+        return GB_TO_BYTES(4);
+    } else if (throughput_gbps >= 10.0) {
+        return GB_TO_BYTES(2);
+    } else if (throughput_gbps >= 5.0) {
+        return MB_TO_BYTES(512);
+    } else if (throughput_gbps > 0.0) {
+        return MB_TO_BYTES(256);
+    } else {
+        /* throughput_target_gbps == 0.0: not detected (non-EC2 or unknown instance).
+         * Preserve 2 GiB default for backward compatibility. */
+        return GB_TO_BYTES(2);
+    }
+#endif
+}
+
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections based on the client
@@ -417,94 +485,40 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->allocator = allocator;
 
+    /*
+     * Determine the effective throughput used for default memory pool sizing.
+     *
+     * If the caller provided a throughput_target_gbps, use it directly.
+     * Otherwise, try to auto-detect from the current EC2 environment
+     * using the per-family NIC bandwidth table. This allows CRT to
+     * right-size its memory pool on EC2 instances without requiring
+     * the caller (CLI/SDK) to query and pass the throughput.
+     *
+     * If auto-detection fails (not on EC2, unknown family), the
+     * effective throughput remains 0.0, which maps to the 2 GiB
+     * default in the tier table.
+     *
+     * This is resolved even when an explicit memory limit was configured so
+     * that the feature IDs below can compare the configured limit against
+     * the value the tier table would have chosen for this environment.
+     */
+    double effective_throughput = client_config->throughput_target_gbps;
+    if (effective_throughput == 0.0) {
+        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+        /*
+         * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
+         * applying proper EC2 throughput values in the future.
+         */
+        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+            detected_platform->max_throughput_gbps < 10.0) {
+            effective_throughput = detected_platform->max_throughput_gbps;
+        }
+    }
+
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
-        /*
-         * No explicit memory limit was set (programmatic or env var).
-         * Determine the effective throughput for pool sizing.
-         *
-         * If the caller provided a throughput_target_gbps, use it directly.
-         * Otherwise, try to auto-detect from the current EC2 environment
-         * using the per-family NIC bandwidth table. This allows CRT to
-         * right-size its memory pool on EC2 instances without requiring
-         * the caller (CLI/SDK) to query and pass the throughput.
-         *
-         * If auto-detection fails (not on EC2, unknown family), the
-         * effective throughput remains 0.0, which maps to the 2 GiB
-         * default in the tier table below.
-         */
-        double effective_throughput = client_config->throughput_target_gbps;
-        if (effective_throughput == 0.0) {
-            const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
-            /*
-             * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
-             * applying proper EC2 throughput values in the future.
-             */
-            if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
-                detected_platform->max_throughput_gbps < 10.0) {
-                effective_throughput = detected_platform->max_throughput_gbps;
-            }
-        }
-
-#if SIZE_BITS == 32
-        if (effective_throughput > 25.0) {
-            mem_limit = GB_TO_BYTES(2);
-        } else {
-            mem_limit = GB_TO_BYTES(1);
-        }
-#else
-        /*
-         * Memory pool sizing tiers based on detected/configured throughput.
-         *
-         * Upper tiers (>=10 Gbps): unchanged from original values. These cover
-         * instances that were already getting CRT with these pool sizes. We need
-         * to reinvestigate whether these numbers are optimal in the future but for
-         * now we will keep them as is to insure we don't break/regress current
-         * users.
-         *
-         * Sub-10 Gbps tiers: added to right-size the memory pool for lower-bandwidth
-         * instances. Without these tiers, all sub-25 Gbps instances would get 2 GiB,
-         * which is 8-40x more than needed and causes unnecessary RSS on constrained
-         * instances (t3.micro: 1 GiB RAM, m5.large: 8 GiB RAM).
-         *
-         * Tier breakdown:
-         *   >=200 Gbps -> 24 GiB (unchanged)
-         *   >=100 Gbps -> 16 GiB (unchanged)
-         *   >=75 Gbps  ->  8 GiB (unchanged)
-         *   >=25 Gbps  ->  4 GiB (unchanged)
-         *   >=10 Gbps  ->  2 GiB (unchanged, was the previous catch-all default)
-         *   >=5 Gbps   -> 512 MiB: covers t3.medium/large burst (5 Gbps), m5.xlarge and
-         *                  c5.xlarge baseline (1.25 Gbps). 2x headroom over 256 MiB for
-         *                  moderate throughput instances that may burst.
-         *   >0 Gbps    -> 256 MiB: any positively-detected or assigned sub-5 Gbps throughput.
-         *                  Validated via benchmark on t2.micro, t3.micro/small,
-         *                  m5.large (0.064-0.75 Gbps baseline). 38-90% RSS reduction vs
-         *                  2 GiB default with no throughput penalty at baseline speeds.
-         *                  16 x 8 MiB parts fit in the 128 MiB usable pool (256 - 128 reserved).
-         *   0 Gbps     ->  2 GiB: throughput not detected (non-EC2 or unknown instance).
-         *                  Preserves existing default for callers that don't set a throughput
-         *                  target.
-         */
-        if (effective_throughput >= 200.0) {
-            mem_limit = GB_TO_BYTES(24);
-        } else if (effective_throughput >= 100.0) {
-            mem_limit = GB_TO_BYTES(16);
-        } else if (effective_throughput >= 75.0) {
-            mem_limit = GB_TO_BYTES(8);
-        } else if (effective_throughput >= 25.0) {
-            mem_limit = GB_TO_BYTES(4);
-        } else if (effective_throughput >= 10.0) {
-            mem_limit = GB_TO_BYTES(2);
-        } else if (effective_throughput >= 5.0) {
-            mem_limit = MB_TO_BYTES(512);
-        } else if (effective_throughput > 0.0) {
-            mem_limit = MB_TO_BYTES(256);
-        } else {
-            /* throughput_target_gbps == 0.0: not detected (non-EC2 or unknown instance).
-             * Preserve 2 GiB default for backward compatibility. */
-            mem_limit = GB_TO_BYTES(2);
-        }
-#endif
+        /* No explicit memory limit was set (programmatic or env var); size from the tier table. */
+        mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
     } else {
         // cap memory limit to SIZE_MAX
         if (mem_limit_configured > SIZE_MAX) {
@@ -549,6 +563,49 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->fio_opts) {
         client->fio_opts = *client_config->fio_opts;
         client->fio_options_set = true;
+    }
+
+    /* Initialize client-level feature IDs for the User-Agent m/ section.
+     * These are set AFTER all defaults are resolved so we can compare the effective
+     * values against what the system would have chosen automatically. A feature ID
+     * tracks "is the customer using non-default behavior?" not "did the customer
+     * touch the API?" Per-request flags (and per-request overrides such as
+     * aws_s3_meta_request_options.part_size) are added in aws_s3_meta_request_init_base. */
+    client->feature_ids = 0;
+
+    if (client_config->part_size != 0 && part_size != (size_t)g_default_part_size_fallback) {
+        /* Caller set part_size AND it differs from the 8 MiB default */
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE;
+    }
+
+    if (client_config->throughput_target_gbps != 0.0 &&
+        client->throughput_target_gbps != g_default_throughput_target_gbps) {
+        /* Caller set throughput AND the effective value differs from the 10.0 Gbps default */
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT;
+    }
+
+    if (mem_limit_configured != 0) {
+        /* A memory limit was explicitly configured, either programmatically via
+         * client_config->memory_limit_in_bytes or via the AWS_CRT_S3_MEMORY_LIMIT_IN_MB /
+         * AWS_CRT_S3_MEMORY_LIMIT_IN_GIB environment variables. Flag it only if it differs
+         * from what the throughput tier table would have chosen for this environment
+         * (using the same effective_throughput the default path would have used). */
+        size_t default_mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
+        if (mem_limit != default_mem_limit) {
+            client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT;
+        }
+    }
+
+    {
+        /* Not cached_only: the instance type cache is only populated as a side effect of the
+         * throughput auto-detection above, which is skipped when the caller supplies a
+         * throughput target. Force detection here so ON_EC2 is reported regardless of config.
+         * Detection reads DMI sysfs (cheap) and only falls back to IMDS when DMI confirms a
+         * Nitro host but lacks the product name. The result is cached for the process lifetime. */
+        struct aws_byte_cursor ec2_instance = aws_s3_get_current_platform_ec2_intance_type(false /* cached_only */);
+        if (ec2_instance.len > 0) {
+            client->feature_ids |= AWS_S3_FEATURE_ID_ON_EC2;
+        }
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {

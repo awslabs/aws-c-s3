@@ -1048,18 +1048,20 @@ struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *te
 }
 
 /* Mock request defaults to GET request */
-struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
+struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new_with_options(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(tester);
+    AWS_PRECONDITION(options);
 
     struct aws_s3_empty_meta_request *empty_meta_request =
         aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_empty_meta_request));
 
-    struct aws_http_message *dummy_http_message = aws_s3_tester_dummy_http_request_new(tester);
-
-    struct aws_s3_meta_request_options options = {
-        .message = dummy_http_message,
-        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-    };
+    struct aws_http_message *dummy_http_message = NULL;
+    if (options->message == NULL) {
+        dummy_http_message = aws_s3_tester_dummy_http_request_new(tester);
+        options->message = dummy_http_message;
+    }
 
     aws_s3_meta_request_init_base(
         tester->allocator,
@@ -1067,14 +1069,24 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         0,
         false,
         false,
-        &options,
+        options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
         &empty_meta_request->base);
 
-    aws_http_message_release(dummy_http_message);
+    if (dummy_http_message != NULL) {
+        aws_http_message_release(dummy_http_message);
+        options->message = NULL;
+    }
 
     return &empty_meta_request->base;
+}
+
+struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
+    struct aws_s3_meta_request_options options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+    };
+    return aws_s3_tester_mock_meta_request_new_with_options(tester, &options);
 }
 
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf) {

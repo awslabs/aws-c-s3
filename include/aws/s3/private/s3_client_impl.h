@@ -19,9 +19,6 @@
 #include <aws/http/connection_manager.h>
 #include <aws/http/proxy.h>
 
-/* TODO automate this value in the future to prevent it from becoming out-of-sync. */
-#define AWS_S3_CLIENT_VERSION "0.1.x"
-
 struct aws_http_connection;
 struct aws_http_connection_manager;
 struct aws_host_resolver;
@@ -289,6 +286,10 @@ struct aws_s3_client {
 
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
+
+    /* Bitmask of enum aws_s3_feature_id derived from client_config at construction. Each meta request
+     * copies this and ORs in its own per-request flags (see aws_s3_meta_request_init_base). */
+    uint32_t feature_ids;
 
     /**
      * Optional.

@@ -78,6 +78,11 @@ aws_set_common_properties(${PROJECT_NAME})
 aws_prepare_symbol_visibility_args(${PROJECT_NAME} "AWS_S3")
 aws_check_headers(${PROJECT_NAME} ${AWS_S3_ROOT_HEADERS})
 
+# Derive AWS_S3_CLIENT_VERSION from the VERSION file so the user agent cannot
+# drift from the released version. PRIVATE because only s3_util.c consumes the
+# macro; everything else reads g_s3_client_version.
+target_compile_definitions(${PROJECT_NAME} PRIVATE "AWS_S3_CLIENT_VERSION=\"${AWS_C_S3_VERSION}\"")
+
 aws_add_sanitizers(${PROJECT_NAME})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${AWS_C_S3_VERSION})
