@@ -467,6 +467,14 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_size = data_length
         return response_config
 
+    if parsed_path.path == "/get_object_checksum_mp_parts_count":
+        # 64 KiB object stored as a multipart upload with a full object checksum: a plain GET returns the
+        # whole object, its CRC32, and x-amz-mp-parts-count. The checksum covers exactly the bytes returned,
+        # even though the parts count says the object was assembled from several parts.
+        response_config = ResponseConfig("/get_object_checksum_mp_parts_count", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     if parsed_path.path == "/get_object_checksum_suffix_range":
         # 64 KiB object whose whole-object CRC32 is advertised on the HEAD response (see above).
         # The part responses carry no checksum header, since they only cover the requested suffix.

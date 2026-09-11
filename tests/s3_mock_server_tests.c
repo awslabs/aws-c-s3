@@ -1622,11 +1622,7 @@ TEST_CASE(download_checksum_single_part_with_part_header_mock_server) {
 /* A checksum header only describes the bytes of the response that carried it. Two downloads below
  * receive a checksum on their size-discovery response that covers fewer bytes (or more) than the
  * meta request goes on to deliver, so that value must not be used as the whole-download checksum. The
- * bodies are intact in both cases, so a checksum mismatch here would be the client's own doing.
- *
- * Both currently fail with AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH: the meta request level checksum is
- * taken from whichever response discovered the object size, without checking that the response covered
- * the same bytes the download will. */
+ * bodies are intact in both cases, so a checksum mismatch here would be the client's own doing. */
 
 /* A ranged download whose discovery request is a ranged GET (a Range header with a start range skips the
  * HEAD). The response covers only the first 64 KiB part and carries that part's CRC32, while the download
@@ -1723,6 +1719,112 @@ TEST_CASE(download_suffix_range_whole_object_checksum_out_of_scope_mock_server) 
     ASSERT_FALSE(out_results.did_validate);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* A default meta request is a single HTTP request, so whatever checksum its response carries describes exactly
+ * the bytes that request returned, which is everything the meta request delivers. That holds for an object
+ * stored as a multipart upload too: this response carries the object's full object CRC32 next to
+ * x-amz-mp-parts-count, and the whole object is what comes back. */
+TEST_CASE(default_get_checksum_with_mp_parts_count_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_mp_parts_count"),
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(64 * 1024, out_results.received_body_size);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* HeadObject through a default meta request, with validation asked for. The response carries the object's
+ * checksum but no body, so there is nothing for that checksum to describe. The request must finish
+ * successfully and unvalidated, not as a mismatch against the empty body. */
+TEST_CASE(default_head_object_with_checksum_header_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/get_object_checksum_single_part");
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+    ASSERT_SUCCESS(aws_http_message_set_request_method(message, g_head_method));
+
+    struct aws_s3_tester_meta_request_options head_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .client = client,
+        .message = message,
+        .validate_get_response_checksum = true,
+        .default_type_options =
+            {
+                .operation_name = aws_byte_cursor_from_c_str("HeadObject"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &head_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(0, out_results.received_body_size);
+    ASSERT_FALSE(out_results.did_validate);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_http_message_destroy(message);
+    aws_uri_clean_up(&mock_server);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
