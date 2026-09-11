@@ -19,9 +19,6 @@
 #include <aws/http/connection_manager.h>
 #include <aws/http/proxy.h>
 
-/* TODO automate this value in the future to prevent it from becoming out-of-sync. */
-#define AWS_S3_CLIENT_VERSION "0.1.x"
-
 struct aws_http_connection;
 struct aws_http_connection_manager;
 struct aws_host_resolver;

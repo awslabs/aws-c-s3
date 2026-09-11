@@ -22,6 +22,13 @@
 #    pragma warning(disable : 4996)
 #endif
 
+/* Defined by the build system from the VERSION file (see CMakeLists.txt) so the version reported in the
+ * user agent cannot drift from the released version. The fallback only applies to builds that do not go
+ * through our CMakeLists. */
+#ifndef AWS_S3_CLIENT_VERSION
+#    define AWS_S3_CLIENT_VERSION "unknown"
+#endif
+
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
 const struct aws_byte_cursor g_s3express_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3express");
