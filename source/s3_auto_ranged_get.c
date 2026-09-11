@@ -991,8 +991,7 @@ static void s_s3_auto_ranged_get_request_finished(
                     meta_request,
                     request->send_data.response_headers,
                     &meta_request->meta_request_level_running_response_sum,
-                    &meta_request->meta_request_level_response_header_checksum,
-                    true) != AWS_OP_SUCCESS) {
+                    &meta_request->meta_request_level_response_header_checksum) != AWS_OP_SUCCESS) {
                 error_code = aws_last_error_or_unknown();
                 goto update_synced_data;
             }

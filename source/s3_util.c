@@ -50,8 +50,6 @@ const struct aws_byte_cursor g_sdk_checksum_algorithm_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
-const struct aws_byte_cursor g_mp_parts_count_header_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-parts-count");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
 const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");
@@ -773,20 +771,12 @@ int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     struct aws_s3_checksum **out_checksum,
-    struct aws_byte_buf *out_checksum_buffer,
-    bool meta_request_level) {
+    struct aws_byte_buf *out_checksum_buffer) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_checksum);
     AWS_PRECONDITION(out_checksum_buffer);
 
     if (!headers || aws_http_headers_count(headers) == 0) {
-        *out_checksum = NULL;
-        return AWS_OP_SUCCESS;
-    }
-    if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
-        /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
-         * multipart upload. So, the checksum should not be applied to the meta request level.
-         * But we we want to check it for the request level. */
         *out_checksum = NULL;
         return AWS_OP_SUCCESS;
     }
