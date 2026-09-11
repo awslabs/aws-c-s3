@@ -1598,8 +1598,9 @@ static bool s_header_value_from_list(
     return false;
 }
 
-/* Return if we found the checksum from headers or not. */
-static bool s_get_part_response_headers_checksum_helper(
+/* Capture the checksum this part's response carries, if it carries one we can use, so that the part's body can be
+ * validated against it as it arrives. */
+static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
@@ -1622,10 +1623,9 @@ static bool s_get_part_response_headers_checksum_helper(
                 connection->request->request_level_running_response_sum =
                     aws_checksum_new(meta_request->allocator, algorithm);
             }
-            return true;
+            return;
         }
     }
-    return false;
 }
 
 /* Check to see if we need to create a request_level_combine_sum for combine the checksum for the full object */
