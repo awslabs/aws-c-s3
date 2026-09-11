@@ -1819,7 +1819,8 @@ TEST_CASE(parallel_write_delayed_part_mock_server) {
         if (write_end_ns[part_number] >= write_start_ns[S_DELAYED_PART_NUMBER]) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_GENERAL,
-                "Part %" PRIu32 " finished writing at %" PRIu64 " ns, which is not before part %d began writing at %" PRIu64
+                "Part %" PRIu32 " finished writing at %" PRIu64
+                " ns, which is not before part %d began writing at %" PRIu64
                 " ns. The delayed part was not the last portion written.",
                 part_number,
                 write_end_ns[part_number],
