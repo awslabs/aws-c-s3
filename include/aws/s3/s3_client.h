@@ -8,6 +8,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/tribool.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_buffer_pool.h>
@@ -735,6 +736,42 @@ struct aws_s3_client_config {
 
     /* User data that's passed into pool factory. */
     void *buffer_pool_user_data;
+
+    /**
+     * WARNING: experimental/unstable:
+     * Whether a download to a file may write received parts as they arrive rather than in object order.
+     * Writing out of order lets several parts reach the disk at once, which is what allows a download to
+     * exceed the throughput of a single writer. Only affects downloads given a `recv_filepath`.
+     *
+     * The trade is what a partial file contains. Ordered delivery leaves a valid prefix, so an
+     * interrupted download yields a file that is short but complete as far as it goes. Out-of-order
+     * delivery can leave gaps, so a partial file is only meaningful together with the download resume
+     * token, which reports how many bytes from the start are contiguous.
+     *
+     * Ignored when a response carries a whole-object checksum that can only be verified by hashing the
+     * body in order; such a request delivers in order and logs a warning.
+     *
+     * Leave AWS_TRIBOOL_UNSET to let the client decide, which currently means writing out of order
+     * wherever the destination allows it.
+     */
+    enum aws_tribool out_of_order_delivery;
+
+    /**
+     * WARNING: experimental/unstable:
+     * Optional.
+     * Number of threads the client dedicates to file I/O.
+     *
+     * These threads do nothing but read from and write to files, which keeps a blocking disk
+     * operation from delaying the response processing and user callbacks that share the client's
+     * other threads. The count is also the number of parts a download can have in flight to the
+     * disk at once, so it bounds how much of the disk's throughput a single client can use.
+     *
+     * Raising it past the point where the disk saturates buys nothing and costs threads. Lowering
+     * it below the disk's concurrency leaves throughput on the table.
+     *
+     * Defaults to the number of event loops in the client bootstrap's event loop group.
+     */
+    uint16_t num_file_io_threads;
 };
 
 struct aws_s3_checksum_config {

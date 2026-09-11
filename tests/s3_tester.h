@@ -213,6 +213,9 @@ struct aws_s3_tester_meta_request_options {
         /* If larger than 0, create a pre-exist file with the length */
         uint64_t pre_exist_file_length;
         bool force_dynamic_part_size;
+        /* Read the downloaded file back into out_results->received_file_content. Opt-in, so tests
+         * that only care about size do not slurp the whole object into memory. */
+        bool capture_file_content;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -285,6 +288,15 @@ struct aws_s3_meta_request_test_results {
     /* Captured from meta_request->recv_file_direct_io_fallback_count via a finish callback.
      * Tests can check this to verify the expected number of O_DIRECT fallbacks occurred. */
     size_t recv_file_direct_io_fallback_count;
+
+    /* Captured from meta_request->synced_data.out_of_order_delivery via a finish callback. Lets a
+     * test confirm parts really were written out of order, rather than the run having quietly taken
+     * the ordered path and passed for the wrong reason. */
+    bool out_of_order_delivery;
+
+    /* The downloaded file's bytes, when get_options.capture_file_content was set. Read after the
+     * meta request finished and before the tester deletes the file. */
+    struct aws_byte_buf received_file_content;
 
     /* Record data from progress_callback() */
     struct {

@@ -1002,6 +1002,10 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
             auto_ranged_get->synced_data.object_size = object_size;
+            /* A part's delivery offset is its absolute object offset, so the file sink needs the
+             * range's origin to map the range's first byte to the file's base position. Set before any
+             * body is delivered, since the range is resolved from the first response's headers. */
+            meta_request->recv_file_object_offset_origin = object_range_start;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so
@@ -1154,11 +1158,11 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
             aws_string_new_from_string(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
-    /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
-     * prefix and the total. A parallel-write delivery path will need to track the two
-     * separately, diverging total (may have gaps) from continues (gap-free prefix). */
+    /* These diverge once parts are written out of order: the prefix stops at the first gap, while the
+     * total counts every part that landed. A caller resuming must re-fetch from the prefix, since
+     * anything past the gap is not contiguous with what is already on disk. */
     token->continuous_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
-    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered_total;
 
     return token;
 }

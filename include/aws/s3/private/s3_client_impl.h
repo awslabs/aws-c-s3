@@ -227,6 +227,35 @@ struct aws_s3_client {
     /* Event loop group for streaming request bodies back to the user. */
     struct aws_event_loop_group *body_streaming_elg;
 
+    /* Event loop group dedicated to file I/O. Separate from body_streaming_elg because a write to a
+     * slow disk blocks its loop for the duration, and a loop that is busy blocking cannot deliver
+     * bodies, run user callbacks, or prepare requests. Keeping the two apart means disk latency
+     * costs only disk throughput.
+     *
+     * Currently used by the download path only.
+     * TODO: route the upload path's parallel file reads here as well, so
+     * `parallel_input_stream_new_from_file` stops borrowing body_streaming_elg.
+     *
+     * Note: the ordered download path still writes on the meta request's io_event_loop, which comes
+     * from body_streaming_elg. That path is serialized by definition, so it has no use for a pool;
+     * moving it would mean moving all of that meta request's event delivery with it. */
+    struct aws_event_loop_group *file_io_elg;
+
+    /* Round-robin cursor handing out file_io_elg loop indices to parallel file writes. Only
+     * ever incremented; callers take the value modulo the loop count.
+     *
+     * Wrapping is fine. The counter is a size_t, so overflow is modular rather than undefined, and
+     * every value it can hold yields a valid slot index once taken modulo the loop count. Nothing
+     * reads the counter itself, and no caller requires the indices to be monotone or consecutively
+     * distinct, so the only effect of a wrap is that the rotation skips one position when the loop
+     * count does not divide 2^bits evenly. */
+    struct aws_atomic_var next_write_loop_index;
+
+    /* Parts written to their file but not yet completed, across every meta request. Observability
+     * only: nothing throttles on it. Incremented when a body is dispatched to a write worker and
+     * decremented when that write finishes. */
+    struct aws_atomic_var num_pending_writes;
+
     /* Region of the S3 bucket. */
     struct aws_string *region;
 
@@ -334,10 +363,13 @@ struct aws_s3_client {
 
     /* Whether read backpressure (aka flow-control window) is being applied. */
     const bool enable_read_backpressure;
-
     /* The starting size of each meta request's flow-control window, in bytes.
      * Ignored unless `enable_read_backpressure` is true. */
     const size_t initial_read_window;
+
+    /* Whether a download to a file may write received parts out of object order. AWS_TRIBOOL_UNSET
+     * means the caller expressed no preference and the client decides. */
+    const enum aws_tribool out_of_order_delivery;
 
     /**
      * Timeout in ms for upload request for request after sending to the response first byte received.
@@ -419,6 +451,10 @@ struct aws_s3_client {
         /* Whether or not the body streaming ELG is allocated. If the body streaming ELG is NULL, but this is true, the
          * shutdown callback has not yet been called.*/
         uint32_t body_streaming_elg_allocated : 1;
+
+        /* Whether or not the file I/O ELG is allocated. Same contract as body_streaming_elg_allocated:
+         * NULL pointer with this still true means the shutdown callback has not fired yet. */
+        uint32_t file_io_elg_allocated : 1;
 
         /* Whether or not a S3 Express provider is active with the client.*/
         uint32_t s3express_provider_active : 1;

@@ -194,7 +194,12 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_error_code = result->error_code;
     meta_request_test_results->did_validate = result->did_validate;
     meta_request_test_results->validation_algorithm = result->validation_algorithm;
-    meta_request_test_results->recv_file_direct_io_fallback_count = meta_request->recv_file_direct_io_fallback_count;
+    meta_request_test_results->recv_file_direct_io_fallback_count =
+        aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count);
+    /* Read without the lock: the value is latched once, before the first body is dispatched, and
+     * never revisited, so by the time the meta request is finishing it cannot still be changing. */
+    meta_request_test_results->out_of_order_delivery =
+        meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE;
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -575,6 +580,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
     aws_byte_buf_clean_up(&test_meta_request->error_response_body);
     aws_string_destroy(test_meta_request->error_response_operation_name);
     aws_http_headers_release(test_meta_request->response_headers);
+    aws_byte_buf_clean_up(&test_meta_request->received_file_content);
     while (aws_array_list_length(&test_meta_request->synced_data.metrics) > 0) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_back(&test_meta_request->synced_data.metrics, (void **)&metrics);
@@ -1891,6 +1897,24 @@ int aws_s3_tester_send_meta_request_with_options(
         ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
     }
 
+    /* Read the downloaded file before the switch, so a test that expects the request to fail -- a
+     * pause, say -- can still inspect what reached disk. The meta request has finished, so its write
+     * descriptors are closed and the file is complete. */
+    if (options->get_options.file_on_disk && filepath_str != NULL && aws_path_exists(filepath_str)) {
+        FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
+        ASSERT_NOT_NULL(file);
+        ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
+        if (options->get_options.capture_file_content && out_results->received_file_size > 0) {
+            /* Hand the bytes to the test before the file is deleted at the end, so a test can check
+             * where each part landed and not just how many bytes arrived. */
+            size_t to_read = (size_t)out_results->received_file_size;
+            aws_byte_buf_init(&out_results->received_file_content, allocator, to_read);
+            out_results->received_file_content.len = fread(out_results->received_file_content.buffer, 1, to_read, file);
+            ASSERT_UINT_EQUALS(to_read, out_results->received_file_content.len);
+        }
+        fclose(file);
+    }
+
     switch (options->validate_type) {
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS:
             ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, out_results->finished_error_code);
@@ -1917,15 +1941,11 @@ int aws_s3_tester_send_meta_request_with_options(
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming_response));
             ASSERT_SUCCESS(s_tester_check_client_thread_data(client));
             if (options->get_options.file_on_disk) {
-                /* Validate the size match. */
+                /* Validate the size match. The bytes were read above, before the switch. */
                 ASSERT_NOT_NULL(filepath_str);
-                FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
-                ASSERT_NOT_NULL(file);
-                ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
                 if (options->get_options.recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE) {
                     ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
-                fclose(file);
             }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:

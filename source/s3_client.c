@@ -107,6 +107,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 
 /* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
+static void s_s3_client_file_io_elg_shutdown(void *user_data);
 
 static void s_s3_client_create_connection_for_request(struct aws_s3_client *client, struct aws_s3_request *request);
 
@@ -682,6 +683,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
+    aws_atomic_init_int(&client->next_write_loop_index, 0);
+    aws_atomic_init_int(&client->num_pending_writes, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -837,6 +840,41 @@ struct aws_s3_client *aws_s3_client_new(
         }
         client->synced_data.body_streaming_elg_allocated = true;
     }
+
+    /* Set up file I/O ELG */
+    {
+        uint16_t num_file_io_threads = client_config->num_file_io_threads;
+
+        if (num_file_io_threads == 0) {
+            /* Default to one thread per bootstrap event loop, matching the body streaming ELG. */
+            num_file_io_threads =
+                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+        }
+        if (num_file_io_threads < 1) {
+            num_file_io_threads = 1;
+        }
+
+        struct aws_shutdown_callback_options file_io_elg_shutdown_options = {
+            .shutdown_callback_fn = s_s3_client_file_io_elg_shutdown,
+            .shutdown_callback_user_data = client,
+        };
+
+        client->file_io_elg =
+            aws_event_loop_group_new_default(client->allocator, num_file_io_threads, &file_io_elg_shutdown_options);
+
+        if (!client->file_io_elg) {
+            /* Fail to create elg, we should fail the call.
+             * Note: this leaks the body streaming ELG created just above. on_error frees the client,
+             * and an ELG release runs its shutdown callback asynchronously against that same client,
+             * so releasing it here would be a use-after-free. Reaching this point means the process
+             * cannot start threads at all. */
+            goto on_error;
+        }
+        client->synced_data.file_io_elg_allocated = true;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p File I/O ELG created with %u threads.", (void *)client, num_file_io_threads);
+    }
     /* Setup cannot fail after this point. */
 
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
@@ -901,6 +939,7 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+    *((enum aws_tribool *)&client->out_of_order_delivery) = client_config->out_of_order_delivery;
 
     return client;
 
@@ -986,6 +1025,8 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
+    aws_event_loop_group_release(client->file_io_elg);
+    client->file_io_elg = NULL;
     aws_s3express_credentials_provider_release(client->s3express_provider);
 
     /* BEGIN CRITICAL SECTION */
@@ -1033,6 +1074,10 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
+    /* A meta request cannot finish while any of its writes are outstanding, and the last one to
+     * finish is what releases us, so every write has completed by now. */
+    AWS_ASSERT(aws_atomic_load_int(&client->num_pending_writes) == 0);
+
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
     aws_hash_table_clean_up(&client->synced_data.endpoints);
@@ -1079,6 +1124,22 @@ static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.body_streaming_elg_allocated = false;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+}
+
+static void s_s3_client_file_io_elg_shutdown(void *user_data) {
+    struct aws_s3_client *client = user_data;
+    AWS_PRECONDITION(client);
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client file I/O ELG shutdown.", (void *)client);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.file_io_elg_allocated = false;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
@@ -2073,6 +2134,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         bool finish_destroy =
             client->synced_data.active == false && client->synced_data.start_destroy_executing == false &&
             client->synced_data.body_streaming_elg_allocated == false &&
+            client->synced_data.file_io_elg_allocated == false &&
             client->synced_data.process_work_task_scheduled == false &&
             client->synced_data.process_work_task_in_progress == false &&
             client->synced_data.s3express_provider_active == false && client->synced_data.num_endpoints_allocated == 0;
@@ -2083,11 +2145,13 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
                 "id=%p Client shutdown progress: starting_destroy_executing=%d  body_streaming_elg_allocated=%d  "
+                "file_io_elg_allocated=%d  "
                 "process_work_task_scheduled=%d  process_work_task_in_progress=%d  num_endpoints_allocated=%d "
                 "s3express_provider_active=%d finish_destroy=%d",
                 (void *)client,
                 (int)client->synced_data.start_destroy_executing,
                 (int)client->synced_data.body_streaming_elg_allocated,
+                (int)client->synced_data.file_io_elg_allocated,
                 (int)client->synced_data.process_work_task_scheduled,
                 (int)client->synced_data.process_work_task_in_progress,
                 (int)client->synced_data.num_endpoints_allocated,
