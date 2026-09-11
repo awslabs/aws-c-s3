@@ -87,7 +87,8 @@ struct aws_s3_recv_file_fds {
 };
 
 /* One parallel file write that finished ahead of an earlier part, parked in
- * `synced_data.completed_write_parts` until the gap before it closes. */
+ * `synced_data.completed_write_parts_tracker` until the gap before it closes.
+ * Used for tracking the continuoes downloaded length. */
 struct aws_s3_completed_write {
     uint32_t part_number;
     uint64_t bytes;
@@ -272,7 +273,7 @@ struct aws_s3_meta_request {
         /* Bytes delivered contiguously from the start of the range, with no gaps. This is what the
          * download resume token reports as `continuous_downloaded_bytes`, so it may only count a part
          * once every earlier part has also landed. `next_contiguous_write_part` and
-         * `completed_write_parts` track that for out-of-order delivery. */
+         * `completed_write_parts_tracker` track that for out-of-order delivery. */
         uint64_t num_bytes_delivered;
 
         /* Every byte delivered, including parts that landed past a gap. Reported as the token's
@@ -292,7 +293,7 @@ struct aws_s3_meta_request {
 
         /* Min-heap by part number of parallel writes that completed ahead of an earlier part, holding
          * `struct aws_s3_completed_write`. Drained into `num_bytes_delivered` as the gap closes. */
-        struct aws_priority_queue completed_write_parts;
+        struct aws_priority_queue completed_write_parts_tracker;
 
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
@@ -439,7 +440,7 @@ struct aws_s3_meta_request {
     /* When true, attempt O_DIRECT for writes. Only read when a writer opens its descriptor. */
     bool recv_file_direct_io;
 
-    /* One descriptor pair per write worker, indexed by the worker's body_streaming_elg loop index.
+    /* One descriptor pair per write worker, indexed by the worker's file_io_elg loop index.
      * Length is recv_file_write_fd_slot_count.
      *
      * Giving each worker its own pair keeps every write single-writer: two workers never share a

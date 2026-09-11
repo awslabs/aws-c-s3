@@ -755,6 +755,23 @@ struct aws_s3_client_config {
      * wherever the destination allows it.
      */
     enum aws_tribool out_of_order_delivery;
+
+    /**
+     * WARNING: experimental/unstable:
+     * Optional.
+     * Number of threads the client dedicates to file I/O.
+     *
+     * These threads do nothing but read from and write to files, which keeps a blocking disk
+     * operation from delaying the response processing and user callbacks that share the client's
+     * other threads. The count is also the number of parts a download can have in flight to the
+     * disk at once, so it bounds how much of the disk's throughput a single client can use.
+     *
+     * Raising it past the point where the disk saturates buys nothing and costs threads. Lowering
+     * it below the disk's concurrency leaves throughput on the table.
+     *
+     * Defaults to the number of event loops in the client bootstrap's event loop group.
+     */
+    uint16_t num_file_io_threads;
 };
 
 struct aws_s3_checksum_config {

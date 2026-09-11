@@ -403,7 +403,7 @@ struct aws_s3_body_write {
     /* Part number the body came from. */
     uint32_t part_number;
 
-    /* Which write worker owns this: an index into the client's body_streaming_elg, and equally the
+    /* Which write worker owns this: an index into the client's file_io_elg, and equally the
      * index of the meta request's descriptor slot this write uses. Assigned when the write is
      * scheduled. */
     size_t write_loop_index;

@@ -278,7 +278,7 @@ int aws_s3_meta_request_init_base(
     }
 
     if (aws_priority_queue_init_dynamic(
-            &meta_request->synced_data.completed_write_parts,
+            &meta_request->synced_data.completed_write_parts_tracker,
             meta_request->allocator,
             s_default_body_streaming_priority_queue_size,
             sizeof(struct aws_s3_completed_write),
@@ -512,13 +512,13 @@ int aws_s3_meta_request_init_base(
         meta_request->recv_file_base_position = base_position;
         aws_atomic_init_int(&meta_request->recv_file_direct_io_fallback_count, direct_io_fallback_count);
 
-        /* One descriptor slot per body-streaming loop, so a write worker never shares a descriptor.
+        /* One descriptor slot per file I/O loop, so a write worker never shares a descriptor.
          * Only a client gives us that loop group; without one no body is delivered at all (body
          * delivery asserts on the client), so the ordered path's own descriptor covers that case.
          * Skipped when the client has ruled out out-of-order delivery, since nothing would use them. */
         bool out_of_order_allowed = client != NULL && client->out_of_order_delivery != AWS_TRIBOOL_FALSE;
         if (out_of_order_allowed) {
-            size_t loop_count = aws_event_loop_group_get_loop_count(client->body_streaming_elg);
+            size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
             AWS_FATAL_ASSERT(loop_count > 0);
             meta_request->recv_file_write_fd_slots =
                 aws_mem_calloc(allocator, loop_count, sizeof(*meta_request->recv_file_write_fd_slots));
@@ -551,7 +551,13 @@ int aws_s3_meta_request_init_base(
             upload_direct_io = false;
         }
 
-        /* Create parallel read stream from file */
+        /* Create parallel read stream from file.
+         * TODO: pass client->file_io_elg here instead of body_streaming_elg. Reading the upload
+         * source file is file I/O and belongs on the same dedicated pool as the download writes, so
+         * a slow disk read cannot stall body delivery or user callbacks. Left as-is for now because
+         * this stream's reads and the request preparation that drives them currently share
+         * body_streaming_elg (see s_s3_meta_request_schedule_prepare_request_default), and splitting
+         * only the reads off needs that relationship re-examined first. */
         meta_request->request_body_parallel_stream = client->vtable->parallel_input_stream_new_from_file(
             allocator, options->send_filepath, client->body_streaming_elg, upload_direct_io);
         if (meta_request->request_body_parallel_stream == NULL) {
@@ -828,7 +834,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
 
-    aws_priority_queue_clean_up(&meta_request->synced_data.completed_write_parts);
+    aws_priority_queue_clean_up(&meta_request->synced_data.completed_write_parts_tracker);
 
     /* Slots own nothing, so a cancelled or failed meta request can just drop them. */
     aws_mem_release(meta_request->allocator, meta_request->combine_slots);
@@ -2398,7 +2404,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
 static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
-/* Schedule `body_write` on one of the body-streaming event loops. */
+/* Schedule `body_write` on one of the file I/O event loops. */
 static void s_s3_body_write_schedule(struct aws_s3_body_write *body_write) {
     struct aws_s3_meta_request *meta_request = body_write->meta_request;
     struct aws_s3_client *client = meta_request->client;
@@ -2406,11 +2412,11 @@ static void s_s3_body_write_schedule(struct aws_s3_body_write *body_write) {
     /* Pick a worker by round robin and remember which one, so the task can use that worker's
      * descriptor slot. get_loop_at() rather than get_next_loop() because the index has to be known,
      * not just the loop. */
-    size_t loop_count = aws_event_loop_group_get_loop_count(client->body_streaming_elg);
+    size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
     size_t loop_index = aws_atomic_fetch_add(&client->next_write_loop_index, 1) % loop_count;
     body_write->write_loop_index = loop_index;
 
-    struct aws_event_loop *loop = aws_event_loop_group_get_loop_at(client->body_streaming_elg, loop_index);
+    struct aws_event_loop *loop = aws_event_loop_group_get_loop_at(client->file_io_elg, loop_index);
     aws_task_init(&body_write->task, s_s3_body_write_task, body_write, "s3_body_write");
     aws_event_loop_schedule_task_now(loop, &body_write->task);
 }
@@ -2774,7 +2780,7 @@ static void s_s3_meta_request_record_written_part_synced(
 
     if (part_number != meta_request->synced_data.next_contiguous_write_part) {
         struct aws_s3_completed_write entry = {.part_number = part_number, .bytes = bytes};
-        aws_priority_queue_push(&meta_request->synced_data.completed_write_parts, &entry);
+        aws_priority_queue_push(&meta_request->synced_data.completed_write_parts_tracker, &entry);
         return;
     }
 
@@ -2782,11 +2788,12 @@ static void s_s3_meta_request_record_written_part_synced(
     ++meta_request->synced_data.next_contiguous_write_part;
 
     struct aws_s3_completed_write *top = NULL;
-    while (aws_priority_queue_top(&meta_request->synced_data.completed_write_parts, (void **)&top) == AWS_OP_SUCCESS &&
+    while (aws_priority_queue_top(&meta_request->synced_data.completed_write_parts_tracker, (void **)&top) ==
+               AWS_OP_SUCCESS &&
            top->part_number == meta_request->synced_data.next_contiguous_write_part) {
 
         struct aws_s3_completed_write entry;
-        aws_priority_queue_pop(&meta_request->synced_data.completed_write_parts, &entry);
+        aws_priority_queue_pop(&meta_request->synced_data.completed_write_parts_tracker, &entry);
         meta_request->synced_data.num_bytes_delivered += entry.bytes;
         ++meta_request->synced_data.next_contiguous_write_part;
     }
