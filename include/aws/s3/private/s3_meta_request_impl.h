@@ -216,6 +216,8 @@ struct aws_s3_meta_request {
     struct aws_string *s3express_session_host;
     /* Is the meta request made to s3express bucket or not. */
     bool is_express;
+    /* Is the meta request made over TLS (https) or plaintext (http). */
+    bool is_https;
     /* If the buffer pool optimized for the specific size or not. */
     bool buffer_pool_optimized;
 
