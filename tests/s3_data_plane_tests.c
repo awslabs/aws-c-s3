@@ -7765,6 +7765,15 @@ static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
     const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
 
+    /* The platform token is the detected EC2 instance type, or "unknown" when it could not be determined.
+     * Creating a client warms the loader's instance-type cache (aws_s3_client_new consults the platform info
+     * to size its memory pool), so on EC2 the header carries a real instance type. Resolve it the same way
+     * aws_s3_add_user_agent_header does so this expectation holds both on and off EC2. */
+    struct aws_byte_cursor platform_cursor = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
+    if (platform_cursor.len == 0) {
+        platform_cursor = g_user_agent_header_unknown;
+    }
+
     ASSERT_SUCCESS(aws_byte_buf_init(dest, allocator, 32));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_product_name));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
@@ -7772,7 +7781,7 @@ static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &single_space));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_platform));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
-    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_unknown));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &platform_cursor));
     return AWS_OP_SUCCESS;
 }
 

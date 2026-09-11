@@ -580,6 +580,44 @@ struct aws_s3_client_config {
     struct aws_retry_strategy *retry_strategy;
 
     /**
+     * Optional.
+     * Configuration for the S3 client's built-in retry strategy.
+     * All fields default to 0 (from zero-initialization), which means "use S3 client defaults."
+     *
+     * Ignored if retry_strategy is non-NULL. The provided strategy takes full precedence.
+     * We use a separate retry_config because the retry_strategy is unchangeable once it is provided
+     * fully constructed. We do not construct it using provided settings at the binding layer because we
+     * would have to do it per binding and would then need to explicitly know aws-c-s3 defaults
+     * at each binding instead of only having it set once here.
+     *
+     * S3 client defaults (when all fields are 0):
+     *   max_retries = 5, backoff_scale_factor_ms = 500, max_backoff_secs = 20,
+     *   jitter_mode = FULL, initial_bucket_capacity = 500
+     */
+    struct {
+        /** Maximum number of retries per request. 0 = S3 default (5).
+         *  Note: the S3 client default differs from the aws-c-io exponential backoff default (10)
+         *  and the aws-c-io standard retry strategy default (3). */
+        size_t max_retries;
+
+        /** Base delay in milliseconds for exponential backoff (delay = scale_factor * 2^attempt).
+         *  0 = default (500). */
+        uint32_t backoff_scale_factor_ms;
+
+        /** Maximum backoff delay in seconds (ceiling on any single retry delay).
+         *  0 = default (20). */
+        uint32_t max_backoff_secs;
+
+        /** Jitter mode for retry backoff.
+         *  0 (AWS_EXPONENTIAL_BACKOFF_JITTER_DEFAULT) = FULL jitter.
+         *  See enum aws_exponential_backoff_jitter_mode in aws/io/retry_strategy.h. */
+        enum aws_exponential_backoff_jitter_mode jitter_mode;
+
+        /** Token bucket capacity per host partition (circuit breaker). 0 = default (500). */
+        size_t initial_bucket_capacity;
+    } retry_config;
+
+    /**
      * TODO: move MD5 config to checksum config.
      * For multi-part upload, content-md5 will be calculated if the AWS_MR_CONTENT_MD5_ENABLED is specified
      *     or initial request has content-md5 header.
