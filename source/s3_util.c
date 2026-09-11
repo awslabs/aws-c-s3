@@ -22,6 +22,13 @@
 #    pragma warning(disable : 4996)
 #endif
 
+/* Defined by the build system from the VERSION file (see CMakeLists.txt) so the version reported in the
+ * user agent cannot drift from the released version. The fallback only applies to builds that do not go
+ * through our CMakeLists. */
+#ifndef AWS_S3_CLIENT_VERSION
+#    define AWS_S3_CLIENT_VERSION "unknown"
+#endif
+
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
 const struct aws_byte_cursor g_s3express_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3express");
@@ -353,7 +360,24 @@ int aws_last_error_or_unknown(void) {
     return error;
 }
 
-void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message) {
+/* Map of feature ID flag -> User-Agent metric ID string. Order matches the enum definition
+ * and determines the emission order in the m/ section. */
+static const struct {
+    uint32_t flag;
+    const char *id;
+} s_feature_id_strings[] = {
+    {AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, "AX"},
+    {AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, "AY"},
+    {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, "AZ"},
+    {AWS_S3_FEATURE_ID_ON_EC2, "Aa"},
+    {AWS_S3_FEATURE_ID_FILE_PATH, "Ab"},
+};
+
+void aws_s3_add_user_agent_header(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    uint32_t feature_ids) {
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
 
@@ -363,9 +387,6 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     if (!platform_cursor.len) {
         platform_cursor = g_user_agent_header_unknown;
     }
-    const size_t user_agent_length = g_user_agent_header_product_name.len + forward_slash.len +
-                                     g_s3_client_version.len + space_delimiter.len + g_user_agent_header_platform.len +
-                                     forward_slash.len + platform_cursor.len;
 
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     AWS_ASSERT(headers != NULL);
@@ -376,25 +397,20 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     struct aws_byte_buf user_agent_buffer;
     AWS_ZERO_STRUCT(user_agent_buffer);
 
+    /* Start with generous initial capacity */
+    const size_t initial_capacity = 256;
+
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
-        /* If the header was found, then create a buffer with the total size we'll need, and append the current user
-         * agent header with a trailing space. */
         aws_byte_buf_init(
-            &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + user_agent_length);
-
+            &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + initial_capacity);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
-
         aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
-
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
-
-        /* If the header was not found, then create a buffer with just the size of the user agent string that is about
-         * to be appended to the buffer. */
-        aws_byte_buf_init(&user_agent_buffer, allocator, user_agent_length);
+        aws_byte_buf_init(&user_agent_buffer, allocator, initial_capacity);
     }
 
-    /* Append the client's user-agent string. */
+    /* Append the client's user-agent string: aws-c-s3/{version} platform/{instance-type} */
     {
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_product_name);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
@@ -403,6 +419,27 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_platform);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
+    }
+
+    /* Append feature IDs m/ section per UA 2.1 SEP.
+     * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas.
+     * The section is omitted entirely when no flags are set. */
+    if (feature_ids != 0) {
+        aws_byte_buf_append_dynamic(
+            &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/"));
+
+        bool first = true;
+        for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
+            if (feature_ids & s_feature_id_strings[i].flag) {
+                if (!first) {
+                    aws_byte_buf_append_dynamic(
+                        &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(","));
+                }
+                struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
+                aws_byte_buf_append_dynamic(&user_agent_buffer, &id_cursor);
+                first = false;
+            }
+        }
     }
 
     /* Apply the updated header. */
