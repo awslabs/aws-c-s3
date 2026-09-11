@@ -426,6 +426,11 @@ struct aws_s3_meta_request {
     /* Number of entries in combine_slots. Zero when combine_slots is NULL. */
     uint32_t combine_slot_count;
 
+    /* Bitmask of enum aws_s3_feature_id emitted in the User-Agent m/ section for every request
+     * belonging to this meta request. Client-level flags OR'd with per-request flags derived from
+     * aws_s3_meta_request_options at creation time. Immutable after init. */
+    uint32_t feature_ids;
+
     /* Destination path for a download. The file itself is created or truncated once at init through a
      * short-lived stdio handle; received bytes are written only through the descriptors in
      * `recv_file_write_fd_slots` and `recv_file_ordered_fds`. */

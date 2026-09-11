@@ -385,6 +385,13 @@ struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *te
  * If client is not specified, a new mock client will be created for the meta request. */
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester);
 
+/* Like aws_s3_tester_mock_meta_request_new, but lets the caller supply per-request options
+ * (e.g. part_size, recv_filepath). options->message is filled in with a dummy request if NULL.
+ * No client is attached, so options that require one (e.g. send_filepath) are not supported. */
+struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new_with_options(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request_options *options);
+
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf);
 
 void aws_s3_tester_lock_synced_data(struct aws_s3_tester *tester);
