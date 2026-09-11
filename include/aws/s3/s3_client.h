@@ -745,6 +745,10 @@ struct aws_s3_checksum_config {
      * they exist. Calculate the corresponding checksum on the response bodies. The meta request will finish with a did
      * validate field and set the error code to AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the calculated
      * checksum, and checksum found in the response header do not match.
+     *
+     * A checksum is only used when it describes the bytes being downloaded. For a ranged GET the object's own
+     * checksum covers bytes the caller did not ask for, so only the checksums of individual part responses can be
+     * validated. See the did_validate field of aws_s3_meta_request_result for what ends up being reported.
      */
     bool validate_response_checksum;
 
@@ -1120,15 +1124,22 @@ struct aws_s3_meta_request_result {
     /* Response status of the failed request or of the entire meta request. */
     int response_status;
 
-    /* Only set for GET request.
-     * Was the server side checksum compared against a calculated checksum of the response body. This may be false
-     * even if validate_get_response_checksum was set because the object was uploaded without a checksum, or was
-     * uploaded as a multipart object.
+    /* Only set for GET requests.
+     * True if every byte delivered was compared against a checksum the server reported. That happens two ways: the
+     * object's own checksum covered the whole download and was compared against a running sum of it, or every part
+     * response carried a checksum of its own and each was compared against that part's bytes. Either way, a
+     * mismatch fails the meta request with AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH.
      *
-     * If the object to get is multipart object, the part checksum MAY be validated if the part size to get matches the
-     * part size uploaded. In that case, if any part mismatch the checksum received, the meta request will fail with
-     * checksum mismatch. However, even if the parts checksum were validated, this will NOT be set to true, as the
-     * checksum for the whole meta request was NOT validated.
+     * This may be false even if validate_response_checksum was set:
+     *  - the object was uploaded without a checksum;
+     *  - the download is a ranged GET, so the object's own checksum covers bytes the caller did not ask for, and
+     *    the parts being fetched carried no checksum of their own;
+     *  - the object was uploaded as a multipart upload with a composite checksum, which describes a list of part
+     *    checksums rather than the object's bytes, and the parts being fetched do not line up with the parts
+     *    uploaded. An object uploaded with a full-object checksum is validated like any single-part object.
+     *
+     * It is also all-or-nothing: if any one part response carried no checksum, this stays false even though the
+     * other parts were checked.
      **/
     bool did_validate;
 
