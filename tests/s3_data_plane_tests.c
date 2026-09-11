@@ -6129,8 +6129,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         /* The tests has been done, we are safe to touch the synced data from test results. */
         ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* Part 1 is the discovery range: 0 to the default range - 1. */
-        ASSERT_SUCCESS(
-            s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
         /* Part 2 picks up at the default range and runs one optimal part size further. */
         ASSERT_SUCCESS(s_check_get_part_metrics_helper(
             &test_results,
@@ -6381,8 +6380,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
         /* Part 1 covers 0 to the optimal part size - 1. */
-        ASSERT_SUCCESS(
-            s_check_get_part_metrics_helper(&test_results, 1, 0, MB_TO_BYTES(stored_part_size_mb) - 1));
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, MB_TO_BYTES(stored_part_size_mb) - 1));
 
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
@@ -6408,8 +6406,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         /* The tests has been done, we are safe to touch the synced data from test results. */
         ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* Part 1 is the discovery range: 0 to the default range - 1. */
-        ASSERT_SUCCESS(
-            s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
         /* Part 2 picks up at the default range and runs to the optimal part size. */
         ASSERT_SUCCESS(s_check_get_part_metrics_helper(
             &test_results, 2, (size_t)g_default_part_size_fallback, MB_TO_BYTES(stored_part_size_mb) - 1));

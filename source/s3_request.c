@@ -234,8 +234,7 @@ struct aws_s3_body_write *aws_s3_body_write_new_from_request(struct aws_s3_reque
     AWS_PRECONDITION(request->meta_request);
 
     struct aws_s3_meta_request *meta_request = request->meta_request;
-    struct aws_s3_body_write *body_write =
-        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_body_write));
+    struct aws_s3_body_write *body_write = aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_body_write));
 
     body_write->allocator = meta_request->allocator;
 
