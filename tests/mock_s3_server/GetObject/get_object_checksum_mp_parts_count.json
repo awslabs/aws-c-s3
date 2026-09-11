@@ -1,0 +1,16 @@
+{
+  "status": 200,
+  "headers": {
+    "ETag": "checksummppartscountmocketag",
+    "Date": "Thu, 12 Jan 2023 00:04:21 GMT",
+    "Last-Modified": "Tue, 10 Jan 2023 23:39:32 GMT",
+    "Accept-Ranges": "bytes",
+    "Content-Type": "binary/octet-stream",
+    "x-amz-checksum-crc32": "wyCR/w==",
+    "x-amz-checksum-type": "FULL_OBJECT",
+    "x-amz-mp-parts-count": "4"
+  },
+  "body": [
+    "<data-to-send>"
+  ]
+}

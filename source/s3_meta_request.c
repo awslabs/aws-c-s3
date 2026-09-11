@@ -1615,8 +1615,9 @@ static bool s_header_value_from_list(
     return false;
 }
 
-/* Return if we found the checksum from headers or not. */
-static bool s_get_part_response_headers_checksum_helper(
+/* Capture the checksum this part's response carries, if it carries one we can use, so that the part's body can be
+ * validated against it as it arrives. */
+static void s_get_part_response_headers_checksum_helper(
     struct aws_s3_connection *connection,
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_header *headers,
@@ -1638,12 +1639,10 @@ static bool s_get_part_response_headers_checksum_helper(
                     &connection->request->request_level_response_header_checksum, meta_request->allocator, header_sum);
                 connection->request->request_level_running_response_sum =
                     aws_checksum_new(meta_request->allocator, algorithm);
-                AWS_ASSERT(connection->request->request_level_running_response_sum != NULL);
             }
-            return true;
+            return;
         }
     }
-    return false;
 }
 
 /* Check to see if we need to create a request_level_combine_sum for combine the checksum for the full object */
@@ -2007,18 +2006,24 @@ static void s_s3_meta_request_stream_complete(struct aws_http_stream *stream, in
          * whole-object checksum has a combine sum but nothing to compare anything against on its own. */
         if (error_code == AWS_OP_SUCCESS && request->request_level_response_header_checksum.len > 0) {
             struct aws_s3_checksum *part_sum = request->request_level_running_response_sum;
-            AWS_FATAL_ASSERT(part_sum != NULL);
-            request->did_validate = true;
-            request->validation_algorithm = part_sum->algorithm;
-            request->checksum_match = s_validate_checksum(part_sum, &request->request_level_response_header_checksum);
-            if (!request->checksum_match) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p Checksum mismatch! (request=%p, response status=%d)",
-                    (void *)meta_request,
-                    (void *)request,
-                    request->send_data.response_status);
-                error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+            if (part_sum != NULL) {
+                request->did_validate = true;
+                request->validation_algorithm = part_sum->algorithm;
+                request->checksum_match =
+                    s_validate_checksum(part_sum, &request->request_level_response_header_checksum);
+                if (!request->checksum_match) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p Checksum mismatch! (request=%p, response status=%d)",
+                        (void *)meta_request,
+                        (void *)request,
+                        request->send_data.response_status);
+                    error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+                }
+            } else {
+                /* part sum in theory will only be null if crt does not support the checksum. skip validation in that
+                 * case. */
+                request->did_validate = false;
             }
         } else {
             request->did_validate = false;

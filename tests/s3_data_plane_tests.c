@@ -5002,9 +5002,9 @@ static int s_test_s3_round_trip_multipart_get_fc_header(struct aws_allocator *al
  * parts for those parts to be recombined into that checksum. A per-meta-request part size gives each one
  * what it needs from a single client, and on a PUT it doubles as the multipart threshold.
  *
- * With validate_response_checksum set, the download discovers the object with a HEAD, which never carries
- * x-amz-mp-parts-count, so the whole-object checksum is taken at the meta request level (a composite
- * checksum is still rejected there, since its trailing "-N" makes the value the wrong length). Combinable
+ * With validate_response_checksum set, the download discovers the object with a HEAD, whose checksum
+ * describes the whole object, so it is taken at the meta request level (a composite checksum is still
+ * rejected there, since its trailing "-N" makes the value the wrong length). Combinable
  * algorithms then have each part digest its own body and fold the digests together when the meta request
  * finishes; the rest fall back to feeding the running sum from the delivery thread in object order. Looping
  * the whole priority list covers both branches.

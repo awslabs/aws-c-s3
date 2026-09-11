@@ -746,6 +746,68 @@ static int s_discover_object_range_and_size(
     return result;
 }
 
+/* Does the checksum carried by this discovery response cover exactly the bytes this meta request will deliver?
+ *
+ * The meta-request-level checksum is compared against a running sum of every byte handed to the caller, so
+ * adopting a value that describes any other span of bytes reports intact data as a mismatch. Two things have to
+ * line up: the download has to be the whole object, and the response's checksum has to describe the whole object
+ * rather than one part or one range of it. */
+static bool s_discovery_checksum_covers_download(
+    const struct aws_s3_request *request,
+    uint64_t object_range_start,
+    uint64_t object_range_end,
+    uint64_t object_size,
+    uint64_t first_part_size) {
+
+    if (object_size == 0) {
+        /* Nothing to deliver, so whatever the response carries is the empty object's own checksum. */
+        return true;
+    }
+
+    if (object_range_start != 0 || object_range_end != object_size - 1) {
+        /* A ranged download. No checksum of the whole object can be checked against a slice of it. */
+        return false;
+    }
+
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+            /* HeadObject reports the object's own checksum. */
+            return true;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+            /* A partNumber request reports part 1's checksum, which is the object's checksum only when part 1 is
+             * the entire object, i.e. when the object was not uploaded as a multipart upload. */
+            return first_part_size == object_size;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+            /* A ranged GET reports the checksum of the bytes it returned, so it covers the object only when this
+             * one request spanned the whole thing. */
+            return request->part_range_start == 0 && request->part_range_end >= object_size - 1;
+        default:
+            return false;
+    }
+}
+
+/* Are the bytes this one response returned the entire download, so that no other request carries data? A response
+ * whose body is the whole download and which already validated itself needs no meta-request-level checksum: the
+ * running sum would hash the same bytes a second time to reach a verdict the request level already has. */
+static bool s_request_body_is_entire_download(
+    const struct aws_s3_request *request,
+    uint64_t object_range_start,
+    uint64_t object_range_end,
+    uint64_t first_part_size) {
+
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+            /* Part 1 starts at the beginning of the object, so its body is [0, first_part_size - 1]. An empty
+             * response reports first_part_size == 0 and so never covers anything. */
+            return object_range_start == 0 && first_part_size > object_range_end;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+            return request->part_range_start <= object_range_start && request->part_range_end >= object_range_end;
+        default:
+            /* HeadObject returns no body. */
+            return false;
+    }
+}
+
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -906,12 +968,30 @@ static void s_s3_auto_ranged_get_request_finished(
 
         /* Check for checksums if requested to */
         if (meta_request->checksum_config.validate_response_checksum) {
-            if (aws_s3_check_headers_for_checksum(
+            if (!s_discovery_checksum_covers_download(
+                    request, object_range_start, object_range_end, object_size, first_part_size)) {
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Discovery response's checksum does not cover the bytes being downloaded. The download "
+                    "will not be validated against a whole-object checksum.",
+                    (void *)meta_request);
+            } else if (
+                request->did_validate &&
+                s_request_body_is_entire_download(request, object_range_start, object_range_end, first_part_size)) {
+                /* This response's body was already compared against a checksum header of its own, and that body is
+                 * every byte the meta request delivers, so there is nothing left for a meta-request-level sum to
+                 * check. update() reports the outcome through the all-parts-validated promotion instead. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Discovery response covered the whole download and was already validated against its own "
+                    "checksum.",
+                    (void *)meta_request);
+            } else if (
+                aws_s3_check_headers_for_checksum(
                     meta_request,
                     request->send_data.response_headers,
                     &meta_request->meta_request_level_running_response_sum,
-                    &meta_request->meta_request_level_response_header_checksum,
-                    true) != AWS_OP_SUCCESS) {
+                    &meta_request->meta_request_level_response_header_checksum) != AWS_OP_SUCCESS) {
                 error_code = aws_last_error_or_unknown();
                 goto update_synced_data;
             }
