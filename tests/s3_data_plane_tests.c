@@ -7361,8 +7361,7 @@ static int s_test_s3_put_object_part_size_exceeds_max_part_size(struct aws_alloc
         struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
             allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
         ASSERT_NOT_NULL(message);
-        struct aws_input_stream *body_stream =
-            aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        struct aws_input_stream *body_stream = aws_s3_test_input_stream_new(allocator, (size_t)content_length);
         aws_http_message_set_body_stream(message, body_stream);
 
         struct aws_s3_meta_request_options meta_request_options = {
@@ -7382,8 +7381,7 @@ static int s_test_s3_put_object_part_size_exceeds_max_part_size(struct aws_alloc
         struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
             allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
         ASSERT_NOT_NULL(message);
-        struct aws_input_stream *body_stream =
-            aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        struct aws_input_stream *body_stream = aws_s3_test_input_stream_new(allocator, (size_t)content_length);
         aws_http_message_set_body_stream(message, body_stream);
 
         struct aws_s3_meta_request_options meta_request_options = {
@@ -7403,8 +7401,7 @@ static int s_test_s3_put_object_part_size_exceeds_max_part_size(struct aws_alloc
         struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
             allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
         ASSERT_NOT_NULL(message);
-        struct aws_input_stream *body_stream =
-            aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        struct aws_input_stream *body_stream = aws_s3_test_input_stream_new(allocator, (size_t)content_length);
         aws_http_message_set_body_stream(message, body_stream);
 
         struct aws_s3_meta_request_options meta_request_options = {

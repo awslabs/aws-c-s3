@@ -711,6 +711,14 @@ static void s_s3_meta_request_destroy(void *user_data) {
     /* Clean up our initial http message */
     aws_s3_meta_request_checksum_config_storage_cleanup(&meta_request->checksum_config);
     meta_request->request_body_async_stream = aws_async_input_stream_release(meta_request->request_body_async_stream);
+    if (meta_request->request_body_parallel_stream != NULL) {
+        struct aws_future_void *shutdown_future =
+            aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
+        aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+        meta_request->request_body_parallel_stream = NULL;
+        aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
+        aws_future_void_release(shutdown_future);
+    }
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
 
     void *meta_request_user_data = meta_request->user_data;
@@ -3004,6 +3012,9 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         struct aws_future_void *shutdown_future =
             aws_parallel_input_stream_get_shutdown_future(meta_request->request_body_parallel_stream);
         aws_parallel_input_stream_release(meta_request->request_body_parallel_stream);
+        /* NULL it out so the destroy path can tell an already-torn-down stream from a
+         * half-initialized meta request that never finished and still owns one. */
+        meta_request->request_body_parallel_stream = NULL;
         aws_future_void_wait(shutdown_future, MAX_TIMEOUT_NS_P);
         aws_future_void_release(shutdown_future);
     }

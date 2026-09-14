@@ -447,7 +447,8 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     /* The buffer reserved for each request is meta_request->part_size, EXCEPT when the body
      * streams from a file: aws_s3_request_new then sizes it at 2 * g_streaming_buffer_size
      * regardless of part size, so a part larger than max_part_size costs nothing extra. */
-    bool file_streaming = auto_ranged_put->base.fio_opts.should_stream && auto_ranged_put->base.recv_filepath != NULL;
+    bool file_streaming =
+        auto_ranged_put->base.fio_opts.should_stream && auto_ranged_put->base.request_body_parallel_stream != NULL;
 
     if (!file_streaming && part_size > client->max_part_size) {
         AWS_LOGF_ERROR(
