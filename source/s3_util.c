@@ -708,6 +708,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     uint64_t client_max_part_size,
     size_t *out_part_size,
     uint32_t *out_num_parts) {
+    (void)client_max_part_size;
 
     AWS_FATAL_ASSERT(out_part_size);
     AWS_FATAL_ASSERT(out_num_parts);
