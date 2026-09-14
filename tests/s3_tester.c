@@ -196,6 +196,8 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->validation_algorithm = result->validation_algorithm;
     meta_request_test_results->recv_file_direct_io_fallback_count =
         aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count);
+    /* Settled during init, before any body is delivered, so it is stable by the time we finish. */
+    meta_request_test_results->recv_file_direct_io = meta_request->recv_file_direct_io;
     /* Read without the lock: the value is latched once, before the first body is dispatched, and
      * never revisited, so by the time the meta request is finishing it cannot still be changing. */
     meta_request_test_results->out_of_order_delivery =
@@ -1650,6 +1652,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, NULL);
                 }
                 meta_request_options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
+                printf("##### %s\n", aws_string_c_str(filepath_str));
                 meta_request_options.recv_file_option = options->get_options.recv_file_option;
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
                 meta_request_options.recv_file_delete_on_failure = options->get_options.recv_file_delete_on_failure;

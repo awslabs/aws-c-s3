@@ -40,6 +40,99 @@
 /* The part the mock server delays. 1-based, matching aws_s3_request_metrics_get_part_number. */
 #define S_DELAYED_PART_NUMBER 2
 
+/* Geometry of /get_object_parallel_write_aligned: a 256 KiB object in four aligned 64 KiB parts.
+ * Every part's file offset and length is page-aligned on a 4 KiB page, so the whole transfer stays on
+ * O_DIRECT and recv_file_direct_io_fallback_count stays 0 -- which is what makes that counter usable
+ * as proof that direct I/O was really used. */
+#define S_ALIGNED_PART_SIZE (64 * 1024)
+#define S_ALIGNED_PART_COUNT 4
+#define S_ALIGNED_OBJECT_SIZE ((uint64_t)S_ALIGNED_PART_COUNT * S_ALIGNED_PART_SIZE)
+
+/* Byte the mock server serves at object offset `offset`, matching its position-derived generator. */
+static uint8_t s_positional_byte(uint64_t offset) {
+    return (uint8_t)(32 + (offset % 90));
+}
+
+/* aws_s3_tester's pre_exist_file_length fills the pre-existing file with this. */
+#define S_PRE_EXIST_FILL 'a'
+
+/* Assert the received file is `expected_len` bytes, that its first `prefix_len` bytes are the untouched
+ * pre-existing fill, and that every byte after that is the object byte for `object_offset_origin + i`.
+ *
+ * The prefix check is what catches a part written at the wrong file offset: the fill is a constant run
+ * while the object bytes vary every byte, so an object part landing inside the prefix shows up
+ * immediately. Reports the first wrong offset, since which offset is wrong identifies the bad part. */
+static int s_check_recv_file_content(
+    struct aws_s3_meta_request_test_results *out_results,
+    uint64_t expected_len,
+    uint64_t prefix_len,
+    uint64_t object_offset_origin) {
+
+    ASSERT_UINT_EQUALS(expected_len, out_results->received_file_size);
+    ASSERT_UINT_EQUALS(expected_len, out_results->received_file_content.len);
+
+    for (uint64_t i = 0; i < out_results->received_file_content.len; ++i) {
+        uint8_t expected =
+            i < prefix_len ? (uint8_t)S_PRE_EXIST_FILL : s_positional_byte(object_offset_origin + (i - prefix_len));
+        if (out_results->received_file_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at file offset %" PRIu64 " (prefix_len %" PRIu64 ", object origin %" PRIu64
+                "): expected %u, got %u",
+                i,
+                prefix_len,
+                object_offset_origin,
+                (unsigned)expected,
+                (unsigned)out_results->received_file_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results->received_file_content.buffer[i]);
+        }
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Assert the transfer really ran on the parallel out-of-order path with O_DIRECT, so a test that means
+ * to cover those cannot quietly pass having used the ordered or buffered path instead. The direct-I/O
+ * expectation follows the platform, matching how the other direct-I/O tests phrase it. */
+static int s_check_direct_io_out_of_order(
+    struct aws_s3_meta_request_test_results *out_results,
+    size_t expected_part_count) {
+
+    ASSERT_TRUE(out_results->out_of_order_delivery);
+
+    if (aws_file_direct_io_is_supported()) {
+        /* Both, not just the counter: a path that abandoned direct I/O without recording a fallback
+         * would leave the count at 0, so the count alone cannot tell "used O_DIRECT throughout" from
+         * "never used O_DIRECT at all". The flag is what the writers consult when opening. */
+        ASSERT_TRUE(out_results->recv_file_direct_io);
+        ASSERT_UINT_EQUALS(0, out_results->recv_file_direct_io_fallback_count);
+    } else {
+        ASSERT_FALSE(out_results->recv_file_direct_io);
+        ASSERT_UINT_EQUALS(1, out_results->recv_file_direct_io_fallback_count);
+    }
+
+    ASSERT_UINT_EQUALS(expected_part_count, aws_array_list_length(&out_results->synced_data.succeed_metrics));
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Ranged-GET geometry over /get_object_parallel_write_aligned. Both ranges below span exactly three
+ * whole parts, so every file offset AND every write length stays page-aligned and the direct-I/O
+ * fallback counter stays a clean signal. A range running to the object's end would instead leave a
+ * short final part, whose unaligned length takes the per-write buffered fallback and would bump that
+ * same counter for a reason unrelated to what these tests check. */
+#define S_RANGED_PART_COUNT 3
+#define S_RANGED_LENGTH ((uint64_t)S_RANGED_PART_COUNT * S_ALIGNED_PART_SIZE)
+
+/* Starts at part 2's boundary and runs to the object's last byte: 262143 - 65536 + 1 == S_RANGED_LENGTH. */
+#define S_RANGED_ALIGNED_START ((uint64_t)65536)
+#define S_RANGED_ALIGNED_RANGE "bytes=65536-262143"
+
+/* Deliberately not page-aligned: 197607 - 1000 + 1 == S_RANGED_LENGTH. The file offsets stay aligned
+ * anyway because they are measured from the range start, which is the property under test. */
+#define S_RANGED_UNALIGNED_START ((uint64_t)1000)
+#define S_RANGED_UNALIGNED_RANGE "bytes=1000-197607"
+
 static int s_validate_time_metrics(struct aws_s3_request_metrics *metrics, bool is_last_attempt) {
     uint64_t start = 0, end = 0, duration = 0;
     int error_code = aws_s3_request_metrics_get_error_code(metrics);
@@ -1835,6 +1928,267 @@ TEST_CASE(parallel_write_delayed_part_mock_server) {
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
+}
+
+/* Test that a download over an existing file replaces it rather than leaving any of it behind.
+ *
+ * The pre-existing file is deliberately LONGER than the object (384 KiB vs 256 KiB), so a path that
+ * wrote the parts without truncating would leave the tail of the old file in place and be caught by
+ * the size assertion. The pre-existing length is page-aligned so it cannot be the reason O_DIRECT
+ * falls back; CREATE_OR_REPLACE truncates to empty anyway, leaving base_position 0. */
+TEST_CASE(parallel_write_create_or_replace_existing_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_ALIGNED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .pre_exist_file_length = S_ALIGNED_OBJECT_SIZE + (128 * 1024),
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_check_direct_io_out_of_order(&out_results, S_ALIGNED_PART_COUNT));
+
+    /* No prefix: the whole file is object bytes from offset 0, and the old tail is gone. */
+    ASSERT_SUCCESS(s_check_recv_file_content(&out_results, S_ALIGNED_OBJECT_SIZE, 0 /*prefix_len*/, 0 /*origin*/));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that appending to an existing file writes every part past the existing bytes without disturbing
+ * them, which is the `recv_file_base_position` half of the file offset calculation.
+ *
+ * The pre-existing length is page-aligned on purpose: an unaligned one makes the init-time check give
+ * up on O_DIRECT and fall back to buffered, so the test would still pass while covering neither the
+ * direct-I/O path nor the alignment requirement. s_check_direct_io_out_of_order asserts the fallback
+ * did not happen, so that substitution cannot go unnoticed. */
+TEST_CASE(parallel_write_create_or_append_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_ALIGNED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    /* Page-aligned, and not a multiple of the part size, so a part placed at the wrong multiple of the
+     * part size cannot coincidentally land where the correct offset is. */
+    uint64_t prefix_len = 3 * 4096;
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
+                .pre_exist_file_length = prefix_len,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_check_direct_io_out_of_order(&out_results, S_ALIGNED_PART_COUNT));
+
+    /* The file grew by exactly the object, the existing bytes are untouched, and object byte 0 sits at
+     * file offset prefix_len rather than at 0. */
+    ASSERT_SUCCESS(
+        s_check_recv_file_content(&out_results, prefix_len + S_ALIGNED_OBJECT_SIZE, prefix_len, 0 /*origin*/));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that WRITE_TO_POSITION shifts every part by exactly the requested offset, which is the other
+ * caller-supplied half of `recv_file_base_position`.
+ *
+ * The offset is page-aligned so O_DIRECT survives, and is deliberately NOT a multiple of the part size:
+ * with a part-size offset, a part written at the wrong multiple of the part size could still land on a
+ * byte pattern that looks correct. WRITE_TO_POSITION also requires the file to already exist, so this
+ * covers writing into a pre-existing file without truncating it -- the mode is "r+", not "wb". */
+TEST_CASE(parallel_write_write_to_position_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_ALIGNED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    /* One page in, so the first page of the existing file must survive untouched. */
+    uint64_t write_position = 4096;
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
+                .recv_file_position = write_position,
+                /* Must exist, or the meta request fails with AWS_ERROR_S3_RECV_FILE_NOT_FOUND. Larger
+                 * than the write position so the object really is written into existing bytes. */
+                .pre_exist_file_length = 2 * 4096,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    ASSERT_SUCCESS(s_check_direct_io_out_of_order(&out_results, S_ALIGNED_PART_COUNT));
+
+    /* Object byte 0 sits at `write_position`, the bytes before it are the untouched existing fill, and
+     * the object's tail extended the file past its original length. */
+    ASSERT_SUCCESS(
+        s_check_recv_file_content(&out_results, write_position + S_ALIGNED_OBJECT_SIZE, write_position, 0 /*origin*/));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Shared body for the two ranged-GET tests: download `range` of the object to a fresh file and assert
+ * the file holds exactly that range starting at file offset 0.
+ *
+ * This is the `recv_file_object_offset_origin` half of the file offset calculation. Getting it wrong
+ * writes part 1 at the range start instead of at 0 -- the exact bug this path carried before the origin
+ * was introduced -- which leaves a hole at the front of the file and shows up as both a wrong length
+ * and a wrong first byte. */
+static int s_test_parallel_write_ranged_get(struct aws_allocator *allocator, const char *range, uint64_t range_start) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_ALIGNED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_file_io_options fio_opts = {
+        .direct_io = true,
+    };
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .fio_opts = &fio_opts,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .object_range = aws_byte_cursor_from_c_str(range),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* Three parts, not four: the range covers three of the object's four parts. Asserting the count
+     * also confirms the range really was applied rather than the whole object being fetched. */
+    ASSERT_SUCCESS(s_check_direct_io_out_of_order(&out_results, S_RANGED_PART_COUNT));
+
+    /* The file is exactly the range's length -- no leading hole -- and file offset 0 holds the object
+     * byte at `range_start`. */
+    ASSERT_SUCCESS(s_check_recv_file_content(&out_results, S_RANGED_LENGTH, 0 /*prefix_len*/, range_start));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Ranged GET whose range start is page-aligned. */
+TEST_CASE(parallel_write_ranged_get_aligned_start_mock_server) {
+    (void)ctx;
+    return s_test_parallel_write_ranged_get(allocator, S_RANGED_ALIGNED_RANGE, S_RANGED_ALIGNED_START);
+}
+
+/* Ranged GET whose range start is NOT page-aligned, which must not cost the transfer its O_DIRECT
+ * descriptor: file offsets are measured from the range start, so they stay aligned even though the
+ * range start is not. The direct-I/O assertion inside the shared body is what pins that down. */
+TEST_CASE(parallel_write_ranged_get_unaligned_start_mock_server) {
+    (void)ctx;
+    return s_test_parallel_write_ranged_get(allocator, S_RANGED_UNALIGNED_RANGE, S_RANGED_UNALIGNED_START);
 }
 
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.

@@ -488,6 +488,19 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_offset = start_range
         return response_config
 
+    if parsed_path.path == "/get_object_parallel_write_aligned":
+        # 256 KiB object served in four aligned 64 KiB parts, no delay. Every part's file offset is
+        # page-aligned, so O_DIRECT is used for all of them and the fallback counter stays at 0 --
+        # which is what lets a test assert direct I/O was really used rather than silently replaced
+        # by buffered writes. Bodies encode their own object offset, so a part landing at the wrong
+        # file offset is caught. Used by the recv_file_option and ranged-GET offset tests: the same
+        # object shape works for CREATE_OR_REPLACE, CREATE_OR_APPEND, WRITE_TO_POSITION and for a
+        # ranged GET, because a ranged GET's part boundaries are relative to the range start.
+        response_config = ResponseConfig("/get_object_parallel_write_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
+        return response_config
+
     if parsed_path.path == "/get_object_parallel_write_delay_part":
         # 256 KiB object served in 64 KiB parts (4 parts), with the part at offset 65536 (part 2)
         # delayed so parts 3 and 4 are written to the file while part 2 is still in flight. That

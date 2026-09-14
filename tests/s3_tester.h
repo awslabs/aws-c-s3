@@ -289,6 +289,12 @@ struct aws_s3_meta_request_test_results {
      * Tests can check this to verify the expected number of O_DIRECT fallbacks occurred. */
     size_t recv_file_direct_io_fallback_count;
 
+    /* Captured from meta_request->recv_file_direct_io via a finish callback: whether the writers
+     * actually held O_DIRECT descriptors. A zero fallback count does NOT imply this -- a path that
+     * gives up on direct I/O without recording a fallback leaves the count at 0 as well -- so a test
+     * that means to cover the direct-I/O path has to check this flag too. */
+    bool recv_file_direct_io;
+
     /* Captured from meta_request->synced_data.out_of_order_delivery via a finish callback. Lets a
      * test confirm parts really were written out of order, rather than the run having quietly taken
      * the ordered path and passed for the wrong reason. */
