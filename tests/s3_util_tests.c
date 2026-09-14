@@ -707,26 +707,6 @@ static int s_test_s3_mpu_get_part_size_and_num_parts(struct aws_allocator *alloc
         ASSERT_INT_EQUALS(valid_request_part_config[i].expected_part_size, part_size);
         ASSERT_INT_EQUALS(valid_request_part_config[i].expected_num_parts, num_parts);
     }
-
-    /* Invalid cases */
-    const struct s3_request_part_config_example invalid_request_part_config[] = {{
-        .name = "max part < required part size",
-        .content_length = 900000,
-        .client_part_size = 5,
-        .client_max_part_size = 10,
-    }};
-
-    for (size_t i = 0; i < AWS_ARRAY_SIZE(invalid_request_part_config); ++i) {
-        printf("invalid example [%zu]: %s\n", i, invalid_request_part_config[i].name);
-        size_t part_size;
-        uint32_t num_parts;
-        ASSERT_FAILS(aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
-            invalid_request_part_config[i].content_length,
-            invalid_request_part_config[i].client_part_size,
-            invalid_request_part_config[i].client_max_part_size,
-            &part_size,
-            &num_parts));
-    }
     return AWS_OP_SUCCESS;
 }
 

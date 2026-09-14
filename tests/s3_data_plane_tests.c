@@ -7320,6 +7320,113 @@ static int s_test_s3_put_fail_object_invalid_send_filepath(struct aws_allocator 
     return 0;
 }
 
+/* Verify the max_part_size gate in aws_s3_meta_request_auto_ranged_put_new.
+ *
+ * With a 256 MiB memory limit, the client derives max_part_size = min(mem_limit / 2, 5 GiB)
+ * = 128 MiB. A meta-request-level part size at or below that is accepted; anything above it is
+ * rejected with AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, because each request would need to
+ * reserve a full part-sized buffer from a pool that only has 128 MiB usable.
+ *
+ * The rejection must be a clean error from aws_s3_client_make_meta_request. Before this gate
+ * existed the oversized reservation reached the buffer pool and tripped a fatal assert.
+ *
+ * Note the body here is an in-memory stream, so streaming is off and the part size is the
+ * reservation size. The file-streaming exemption is covered by the mock server tests.
+ */
+AWS_TEST_CASE(test_s3_put_object_part_size_exceeds_max_part_size, s_test_s3_put_object_part_size_exceeds_max_part_size)
+static int s_test_s3_put_object_part_size_exceeds_max_part_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .memory_limit_in_bytes = MB_TO_BYTES(256),
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* max_part_size is derived as half the memory limit. */
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(128), client->max_part_size);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Content length must exceed the part size so this stays a multipart upload rather than
+     * dropping to a single-part default meta request, which does not run this gate. */
+    const uint64_t content_length = MB_TO_BYTES((uint64_t)512);
+
+    /* One byte over the limit is rejected. */
+    {
+        struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+            allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
+        ASSERT_NOT_NULL(message);
+        struct aws_input_stream *body_stream =
+            aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        aws_http_message_set_body_stream(message, body_stream);
+
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .message = message,
+            .part_size = MB_TO_BYTES(128) + 1,
+        };
+        ASSERT_NULL(aws_s3_client_make_meta_request(client, &meta_request_options));
+        ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, aws_last_error());
+
+        aws_input_stream_release(body_stream);
+        aws_http_message_release(message);
+    }
+
+    /* A part size well over the limit is rejected the same way. */
+    {
+        struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+            allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
+        ASSERT_NOT_NULL(message);
+        struct aws_input_stream *body_stream =
+            aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        aws_http_message_set_body_stream(message, body_stream);
+
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .message = message,
+            .part_size = MB_TO_BYTES(256),
+        };
+        ASSERT_NULL(aws_s3_client_make_meta_request(client, &meta_request_options));
+        ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, aws_last_error());
+
+        aws_input_stream_release(body_stream);
+        aws_http_message_release(message);
+    }
+
+    /* Exactly at the limit is accepted: the gate is >, not >=. */
+    {
+        struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+            allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
+        ASSERT_NOT_NULL(message);
+        struct aws_input_stream *body_stream =
+            aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        aws_http_message_set_body_stream(message, body_stream);
+
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .message = message,
+            .part_size = MB_TO_BYTES(128),
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(MB_TO_BYTES(128), meta_request->part_size);
+
+        aws_s3_meta_request_cancel(meta_request);
+        aws_s3_meta_request_release(meta_request);
+        aws_input_stream_release(body_stream);
+        aws_http_message_release(message);
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 static int s_assert_make_meta_request_fails(
     struct aws_allocator *allocator,
     struct aws_s3_meta_request_options *options,
