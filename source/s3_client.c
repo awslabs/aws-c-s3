@@ -902,6 +902,43 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
 
+    /* Validate the read-backpressure / initial-read-window pairing.
+     *
+     * When backpressure is enabled with a window smaller than part_size, no
+     * parts can be scheduled and downloads stall until the caller calls
+     * aws_s3_meta_request_increment_read_window. Fail fast at client
+     * construction rather than allowing a stalled client.
+     *
+     * When backpressure is disabled with a positive window, the window value
+     * is stored but every gating check is bypassed. Warn but do not fail:
+     * the client is still functional at native pool ceiling capacity, just
+     * not throttled the way the caller may have expected. */
+    if (client->enable_read_backpressure) {
+        if (client->initial_read_window < client->part_size) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "id=%p Could not create client. enable_read_backpressure is true but "
+                "initial_read_window (%zu bytes) is smaller than part_size (%zu bytes). "
+                "At least one full part must fit in the initial window; otherwise no parts "
+                "can be scheduled and downloads will stall. Increase initial_read_window to "
+                "at least part_size, or disable read backpressure.",
+                (void *)client,
+                client->initial_read_window,
+                client->part_size);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto on_error;
+        }
+    } else if (client->initial_read_window > 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p initial_read_window is set to %zu but enable_read_backpressure is false. "
+            "The window value has no runtime effect when backpressure is disabled; aws-c-s3 "
+            "skips all window gating. Enable backpressure or clear initial_read_window to "
+            "remove this warning.",
+            (void *)client,
+            client->initial_read_window);
+    }
+
     return client;
 
 on_error:
