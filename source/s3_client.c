@@ -237,34 +237,28 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #endif
 }
 
-/**
- * Resolves the effective throughput used for default memory pool sizing.
- *
- * If the caller provided a positive throughput, return it directly. Otherwise
- * attempt to auto-detect from the current EC2 environment via the per-family
- * NIC bandwidth table, applied only when the detected value is below the
- * conservative right-sizing threshold (10 Gbps). Returns 0.0 if no throughput
- * is provided and auto-detection fails or yields a value at/above the
- * threshold, in which case callers get the 2 GiB tier-table default.
- */
-static double s_resolve_effective_throughput_gbps(double provided_throughput_gbps) {
-    if (provided_throughput_gbps != 0.0) {
-        return provided_throughput_gbps;
-    }
-    const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
-    /*
-     * For now, we only right-size < 10 Gbps to minimize change. Right-sizing at higher
-     * bandwidth tiers can be addressed in the future.
-     */
-    if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
-        detected_platform->max_throughput_gbps < 10.0) {
-        return detected_platform->max_throughput_gbps;
-    }
-    return 0.0;
-}
-
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
-    return s_get_default_mem_limit_from_throughput(s_resolve_effective_throughput_gbps(throughput_target_gbps));
+    /*
+     * Resolve the effective throughput used for default memory pool sizing.
+     *
+     * If the caller provided a positive throughput, use it directly. Otherwise
+     * attempt to auto-detect from the current EC2 environment via the
+     * per-family NIC bandwidth table, applied only when the detected value is
+     * below the conservative right-sizing threshold (10 Gbps). Right-sizing
+     * at higher bandwidth tiers can be addressed in the future. When no
+     * throughput is provided and auto-detection fails or yields a value at/
+     * above the threshold, throughput stays 0.0 and callers get the 2 GiB
+     * tier-table default.
+     */
+    double effective_throughput_gbps = throughput_target_gbps;
+    if (effective_throughput_gbps == 0.0) {
+        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+            detected_platform->max_throughput_gbps < 10.0) {
+            effective_throughput_gbps = detected_platform->max_throughput_gbps;
+        }
+    }
+    return s_get_default_mem_limit_from_throughput(effective_throughput_gbps);
 }
 
 /* Returns the max number of connections allowed.
