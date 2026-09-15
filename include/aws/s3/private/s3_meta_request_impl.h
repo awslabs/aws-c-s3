@@ -176,6 +176,18 @@ struct aws_s3_meta_request_vtable {
     /********************* TEST ONLY STUB **************************/
     /* A stub to the update implementation from meta request with the lock held. Only for tests. */
     bool (*synced_update_stub)(struct aws_s3_meta_request *meta_request);
+
+    /* Stands in for the positional write to the receive file when set, so a test can make a write fail
+     * without arranging a real I/O error. Return AWS_OP_SUCCESS to stand in for a completed write, or
+     * aws_raise_error(...) and AWS_OP_ERR to fail one. Sits ahead of the descriptor open, so a stub
+     * that never returns success means no descriptor is ever opened.
+     *
+     * Covers both write paths, since they funnel through the same function: a parallel worker writing
+     * out of order, and the ordered delivery thread. Only for tests. */
+    int (*recv_file_write_stub)(
+        struct aws_s3_meta_request *meta_request,
+        uint64_t file_offset,
+        const struct aws_byte_cursor *body);
 #endif
 };
 

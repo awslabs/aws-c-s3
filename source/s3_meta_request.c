@@ -2718,6 +2718,12 @@ static int s_s3_recv_file_write(
     uint64_t file_offset,
     const struct aws_byte_cursor *body) {
 
+#ifdef AWS_C_S3_ENABLE_TEST_STUBS
+    if (meta_request->vtable->recv_file_write_stub != NULL) {
+        return meta_request->vtable->recv_file_write_stub(meta_request, file_offset, body);
+    }
+#endif
+
     if (!fds->open_attempted) {
         fds->open_attempted = true;
 
@@ -2775,26 +2781,39 @@ static int s_s3_recv_file_write(
 }
 
 /* Deliver response body to the appropriate sink: file or user callback. */
+/* Hand one part's body to whichever sink this download has: the receive file, or a body callback.
+ *
+ * Returns AWS_OP_SUCCESS, or AWS_OP_ERR with the reason raised. The caller reads the reason via
+ * aws_last_error_or_unknown() -- so read it immediately, before anything else can overwrite it. */
 static int s_deliver_body_to_sink(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
     uint64_t delivery_range_start,
     struct aws_s3_request *request) {
 
-    int error_code = AWS_ERROR_SUCCESS;
-
     if (meta_request->recv_filepath != NULL) {
-        error_code = s_s3_recv_file_write(
-            meta_request,
-            &meta_request->recv_file_ordered_fds,
-            s_s3_recv_file_offset(meta_request, delivery_range_start),
-            body);
+        if (s_s3_recv_file_write(
+                meta_request,
+                &meta_request->recv_file_ordered_fds,
+                s_s3_recv_file_offset(meta_request, delivery_range_start),
+                body) != AWS_OP_SUCCESS) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Failed writing body to file. aws-error:%s",
+                (void *)meta_request,
+                aws_error_name(aws_last_error()));
+            return AWS_OP_ERR;
+        }
         if (meta_request->client->enable_read_backpressure) {
+            /* Only for bytes that actually landed, matching the parallel write path: opening the window
+             * for a failed write would invite more data down a path that is already failing. */
             aws_s3_meta_request_increment_read_window(meta_request, body->len);
         }
-        return error_code;
+        return AWS_OP_SUCCESS;
     }
 
+    /* A callback signals failure by raising an error and returning non-zero, so the reason is already
+     * on the thread when we get here. */
     if (meta_request->body_callback_ex != NULL &&
         meta_request->body_callback_ex(
             meta_request,
@@ -2802,29 +2821,27 @@ static int s_deliver_body_to_sink(
             (struct aws_s3_meta_request_receive_body_extra_info){
                 .range_start = delivery_range_start, .ticket = request->ticket},
             meta_request->user_data)) {
-        error_code = aws_last_error_or_unknown();
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Response body callback raised error %d (%s).",
             (void *)meta_request,
-            error_code,
-            aws_error_str(error_code));
-        return error_code;
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
+        return AWS_OP_ERR;
     }
 
     if (meta_request->body_callback != NULL &&
         meta_request->body_callback(meta_request, body, delivery_range_start, meta_request->user_data)) {
-        error_code = aws_last_error_or_unknown();
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Response body callback raised error %d (%s).",
             (void *)meta_request,
-            error_code,
-            aws_error_str(error_code));
-        return error_code;
+            aws_last_error(),
+            aws_error_str(aws_last_error()));
+        return AWS_OP_ERR;
     }
 
-    return AWS_ERROR_SUCCESS;
+    return AWS_OP_SUCCESS;
 }
 
 /* Advance the contiguous delivered prefix by `bytes` for `part_number`, draining any later parts that
@@ -3115,7 +3132,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                             (uint64_t *)&request->send_data.metrics->time_metrics.deliver_start_timestamp_ns);
                     }
 
-                    error_code = s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request);
+                    if (s_deliver_body_to_sink(meta_request, &response_body, delivery_range_start, request) !=
+                        AWS_OP_SUCCESS) {
+                        /* Capture the reason before the metrics calls below, since any of them could
+                         * overwrite the thread's last error. */
+                        error_code = aws_last_error_or_unknown();
+                    }
 
                     if (request->send_data.metrics) {
                         struct aws_s3_request_metrics *metric = request->send_data.metrics;

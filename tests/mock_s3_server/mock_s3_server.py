@@ -465,6 +465,31 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_size = data_length
         return response_config
 
+    if parsed_path.path == "/get_object_parallel_write_empty_part":
+        # 256 KiB object in 4 x 64 KiB parts, where part 2 comes back with an EMPTY body while its
+        # Content-Range still claims the full 64 KiB range. Nothing validates body length against
+        # Content-Range, so the part reaches delivery as a zero-length one -- which is the only way to
+        # reach the zero-length branch of the delivery loop, since a zero-byte OBJECT has no later part
+        # whose accounting could reveal whether the empty one advanced the contiguous prefix.
+        if start_range == 65536:
+            return ResponseConfig("/get_object_parallel_write_empty_part", request=request)
+        response_config = ResponseConfig("/get_object_parallel_write_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_noncombinable":
+        # Same 256 KiB object, but the HEAD advertises a whole-object SHA256 instead of a CRC32.
+        # SHA256 cannot be combined from per-part digests, so the only way to verify it is to hash the
+        # body in object order -- which is what forces delivery back onto the ordered path even when
+        # out-of-order delivery was asked for. Part responses carry no checksum header, as with the
+        # combinable route.
+        if head_request:
+            return ResponseConfig("/get_object_checksum_noncombinable_head", request=request)
+        response_config = ResponseConfig("/get_object_checksum_combine_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     if parsed_path.path in ("/get_object_checksum_combine", "/get_object_checksum_combine_out_of_order"):
         # 256 KiB object of repeated 'a'. The whole-object CRC32 is advertised on the HEAD response only,
         # the way real S3 does for a single-part upload: ranged part responses carry no checksum header.
