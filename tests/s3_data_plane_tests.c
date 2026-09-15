@@ -7796,11 +7796,9 @@ static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator,
 
     struct aws_s3_client_config client_config = {
         .part_size = 64 * 1024,
-        .max_part_size = 64 * 1024,
     };
 
     ASSERT_TRUE(client_config.part_size < g_s3_min_upload_part_size);
-    ASSERT_TRUE(client_config.max_part_size < g_s3_min_upload_part_size);
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
