@@ -516,21 +516,13 @@ struct aws_s3_client *aws_s3_client_new(
     client->allocator = allocator;
 
     /*
-     * Determine the effective throughput used for default memory pool sizing
-     * and feature-ID comparisons. Uses the caller's throughput_target_gbps
-     * when provided, otherwise falls back to auto-detection from the current
-     * EC2 environment. See s_resolve_effective_throughput_gbps for details.
-     *
-     * This is resolved even when an explicit memory limit was configured so
-     * that the feature IDs below can compare the configured limit against
-     * the value the tier table would have chosen for this environment.
+     * Determine the default memory pool size. When no explicit memory limit was configured, size from the tier table.
+     * Resolves the effective throughput (caller-provided or auto-detected from the current EC2 environment) internally.
      */
-    double effective_throughput = s_resolve_effective_throughput_gbps(client_config->throughput_target_gbps);
-
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
         /* No explicit memory limit was set (programmatic or env var); size from the tier table. */
-        mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
+        mem_limit = aws_s3_default_memory_limit_for_throughput(client_config->throughput_target_gbps);
     } else {
         // cap memory limit to SIZE_MAX
         if (mem_limit_configured > SIZE_MAX) {
@@ -600,9 +592,8 @@ struct aws_s3_client *aws_s3_client_new(
         /* A memory limit was explicitly configured, either programmatically via
          * client_config->memory_limit_in_bytes or via the AWS_CRT_S3_MEMORY_LIMIT_IN_MB /
          * AWS_CRT_S3_MEMORY_LIMIT_IN_GIB environment variables. Flag it only if it differs
-         * from what the throughput tier table would have chosen for this environment
-         * (using the same effective_throughput the default path would have used). */
-        size_t default_mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
+         * from what the tier table would have chosen for this environment. */
+        size_t default_mem_limit = aws_s3_default_memory_limit_for_throughput(client_config->throughput_target_gbps);
         if (mem_limit != default_mem_limit) {
             client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT;
         }
