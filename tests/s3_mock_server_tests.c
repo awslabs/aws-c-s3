@@ -859,7 +859,8 @@ TEST_CASE(request_metrics_http_manager_metrics_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     struct aws_s3_tester_client_options client_options = {
-        .part_size = MB_TO_BYTES(1),
+        /* g_s3_min_upload_part_size clamps any smaller override up to 5MiB, so use that as the part size. */
+        .part_size = MB_TO_BYTES(5),
         .tls_usage = AWS_S3_TLS_DISABLED,
         .max_active_connections_override = 1,
     };
@@ -873,7 +874,7 @@ TEST_CASE(request_metrics_http_manager_metrics_mock_server) {
         .client = client,
         .put_options =
             {
-                .object_size_mb = 2,
+                .object_size_mb = 10, /* 2 parts of 5 MiB. */
                 .object_path_override = object_path,
             },
         .mock_server = true,
