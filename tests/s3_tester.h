@@ -145,6 +145,9 @@ struct aws_s3_tester_client_options {
     void *factory_user_data;
     uint64_t memory_limit_in_bytes;
     aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
+    /* Passed straight through to aws_s3_client_config. AWS_TRIBOOL_UNSET (0) is the default, so a test
+     * that does not set this gets whatever the client decides. */
+    enum aws_tribool out_of_order_delivery;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -158,6 +161,10 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. Passed through to aws_s3_meta_request_options.on_error_resume_token.
      * Note: the callback receives the tester's user_data; tests should use their own statics. */
     aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
+
+    /* Passed straight through to aws_s3_meta_request_options. Overrides whatever the client is set to,
+     * so a test can exercise the per-request override without a second client. */
+    enum aws_tribool out_of_order_delivery;
 
     /* Optional. When NULL, a message will attempted to be created by the meta request type specific options. */
     struct aws_http_message *message;
@@ -216,6 +223,10 @@ struct aws_s3_tester_meta_request_options {
         /* Read the downloaded file back into out_results->received_file_content. Opt-in, so tests
          * that only care about size do not slurp the whole object into memory. */
         bool capture_file_content;
+        /* Set when the test expects the body callback to be invoked out of object order. The default
+         * body callback stops asserting each range continues the last one, and instead assembles the
+         * object into out_results->received_body_content by range_start. */
+        bool allow_out_of_order_body;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -303,6 +314,28 @@ struct aws_s3_meta_request_test_results {
     /* The downloaded file's bytes, when get_options.capture_file_content was set. Read after the
      * meta request finished and before the tester deletes the file. */
     struct aws_byte_buf received_file_content;
+
+    /* Set from get_options.allow_out_of_order_body. Turns off the default body callback's
+     * "each range continues the last one" assertion, which out-of-order delivery breaks by design. */
+    bool allow_out_of_order_body;
+
+    /* The object assembled from the body callback, each range placed at its own offset. Only filled
+     * when allow_out_of_order_body is set, which is what makes it meaningful: it proves the callback
+     * handed over the right bytes AND the right range_start for each one. */
+    struct aws_byte_buf received_body_content;
+
+    /* True once a body arrived at an offset behind one already delivered. Without this a passing
+     * out-of-order test could just as well have delivered everything in order. */
+    bool body_arrived_out_of_order;
+
+    /* Highest object offset reached by any delivered body, used to detect the above. */
+    uint64_t highest_body_range_end;
+
+    /* Captured from synced_data at finish: the gap-free prefix and the grand total of delivered bytes.
+     * These are what a download resume token reports as continuous_downloaded_bytes and
+     * total_downloaded_bytes, so a test can check the prefix bookkeeping without pausing. */
+    uint64_t num_bytes_delivered;
+    uint64_t num_bytes_delivered_total;
 
     /* Record data from progress_callback() */
     struct {

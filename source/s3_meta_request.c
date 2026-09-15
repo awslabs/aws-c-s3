@@ -43,11 +43,24 @@ AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_append_mode, "a+b");
 AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_update_mode, "r+");
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
-static int s_s3_completed_write_pred(const void *a, const void *b);
+static int s_s3_completed_delivery_pred(const void *a, const void *b);
 static void s_s3_meta_request_close_write_fds(struct aws_s3_meta_request *meta_request);
 static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
 static void s_s3_meta_request_destroy(void *user_data);
+
+/* What the caller asked for regarding out-of-order delivery: this request's own override when it set
+ * one, otherwise the client's setting. AWS_TRIBOOL_UNSET means nobody expressed a preference, leaving
+ * the choice to whatever the destination defaults to.
+ *
+ * Read both at init, to decide whether to allocate write-worker descriptors, and again when the
+ * delivery order is latched. Neither input changes after init, so the two agree. */
+static enum aws_tribool s_s3_meta_request_out_of_order_preference(const struct aws_s3_meta_request *meta_request) {
+    if (meta_request->out_of_order_delivery_override != AWS_TRIBOOL_UNSET) {
+        return meta_request->out_of_order_delivery_override;
+    }
+    return meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET;
+}
 
 static void s_s3_meta_request_init_signing_date_time(
     struct aws_s3_meta_request *meta_request,
@@ -233,7 +246,8 @@ int aws_s3_meta_request_init_base(
     /* Zero is a valid descriptor, so the sentinel has to be written explicitly over the calloc. */
     meta_request->recv_file_ordered_fds.fd = AWS_FILE_INVALID_FD;
     /* Every part, including part 1, extends the contiguous written prefix. */
-    meta_request->synced_data.next_contiguous_write_part = 1;
+    meta_request->synced_data.next_contiguous_delivered_part = 1;
+    meta_request->out_of_order_delivery_override = options->out_of_order_delivery;
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -278,11 +292,11 @@ int aws_s3_meta_request_init_base(
     }
 
     if (aws_priority_queue_init_dynamic(
-            &meta_request->synced_data.completed_write_parts_tracker,
+            &meta_request->synced_data.completed_deliveries_tracker,
             meta_request->allocator,
             s_default_body_streaming_priority_queue_size,
-            sizeof(struct aws_s3_completed_write),
-            s_s3_completed_write_pred)) {
+            sizeof(struct aws_s3_completed_delivery),
+            s_s3_completed_delivery_pred)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not initialize completed-write queue for meta request",
@@ -515,8 +529,10 @@ int aws_s3_meta_request_init_base(
         /* One descriptor slot per file I/O loop, so a write worker never shares a descriptor.
          * Only a client gives us that loop group; without one no body is delivered at all (body
          * delivery asserts on the client), so the ordered path's own descriptor covers that case.
-         * Skipped when the client has ruled out out-of-order delivery, since nothing would use them. */
-        bool out_of_order_allowed = client != NULL && client->out_of_order_delivery != AWS_TRIBOOL_FALSE;
+         * Skipped when out-of-order delivery has been ruled out, since nothing would use them. A file
+         * destination goes out of order unless asked not to, so UNSET still allocates. */
+        bool out_of_order_allowed =
+            client != NULL && s_s3_meta_request_out_of_order_preference(meta_request) != AWS_TRIBOOL_FALSE;
         if (out_of_order_allowed) {
             size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
             AWS_FATAL_ASSERT(loop_count > 0);
@@ -842,7 +858,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     AWS_ASSERT(aws_priority_queue_size(&meta_request->synced_data.pending_body_streaming_requests) == 0);
     aws_priority_queue_clean_up(&meta_request->synced_data.pending_body_streaming_requests);
 
-    aws_priority_queue_clean_up(&meta_request->synced_data.completed_write_parts_tracker);
+    aws_priority_queue_clean_up(&meta_request->synced_data.completed_deliveries_tracker);
 
     /* Slots own nothing, so a cancelled or failed meta request can just drop them. */
     aws_mem_release(meta_request->allocator, meta_request->combine_slots);
@@ -889,13 +905,13 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     return (*request_a)->part_number > (*request_b)->part_number;
 }
 
-static int s_s3_completed_write_pred(const void *a, const void *b) {
-    const struct aws_s3_completed_write *write_a = a;
-    const struct aws_s3_completed_write *write_b = b;
-    AWS_PRECONDITION(write_a);
-    AWS_PRECONDITION(write_b);
+static int s_s3_completed_delivery_pred(const void *a, const void *b) {
+    const struct aws_s3_completed_delivery *delivery_a = a;
+    const struct aws_s3_completed_delivery *delivery_b = b;
+    AWS_PRECONDITION(delivery_a);
+    AWS_PRECONDITION(delivery_b);
 
-    return write_a->part_number > write_b->part_number;
+    return delivery_a->part_number > delivery_b->part_number;
 }
 
 /* Close every descriptor opened for writing parts. Idempotent. */
@@ -2438,6 +2454,52 @@ static bool s_s3_meta_request_needs_ordered_body(const struct aws_s3_meta_reques
            !meta_request->meta_request_level_checksum_combinable;
 }
 
+/* Resolve whether this transfer delivers bodies out of object order.
+ *
+ * Three inputs, each overriding the one before it:
+ *
+ *  1. What the destination defaults to. A file absorbs arrival order completely, since every part is
+ *     written at its own absolute offset, so it defaults to out of order. A body callback surfaces the
+ *     order to the caller through `range_start`, so it defaults to in order.
+ *  2. An explicit preference, from the request or the client. Either direction, either sink.
+ *  3. Whether the whole-object checksum can only be built by hashing the body in order. A correctness
+ *     constraint, so it wins over any preference.
+ *
+ * Called once, on the first body. Every input is settled by then: the destination and the preference at
+ * init, the checksum's demand while processing the first response's headers. */
+static bool s_s3_meta_request_resolve_out_of_order_delivery(const struct aws_s3_meta_request *meta_request) {
+    bool out_of_order;
+    if (meta_request->recv_filepath != NULL) {
+        /* Needs the per-worker descriptors, which init only allocates given a client that had not
+         * already ruled out-of-order delivery out. */
+        if (meta_request->recv_file_write_fd_slots == NULL) {
+            return false;
+        }
+        out_of_order = true;
+    } else if (meta_request->client != NULL) {
+        out_of_order = false;
+    } else {
+        /* No client, so no delivery machinery to route parts through out of order. */
+        return false;
+    }
+
+    enum aws_tribool preference = s_s3_meta_request_out_of_order_preference(meta_request);
+    if (preference != AWS_TRIBOOL_UNSET) {
+        out_of_order = preference == AWS_TRIBOOL_TRUE;
+    }
+
+    if (out_of_order && s_s3_meta_request_needs_ordered_body(meta_request)) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Delivering in object order despite out-of-order delivery being available: this "
+            "response's whole-object checksum can only be verified by hashing the body in order.",
+            (void *)meta_request);
+        return false;
+    }
+
+    return out_of_order;
+}
+
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
@@ -2447,46 +2509,39 @@ void aws_s3_meta_request_stream_response_body_synced(
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(request->part_number > 0);
 
-    /* Resolve the delivery order once, on the first body. Both inputs are settled by now: the worker
-     * descriptors were sized at init, and the whole-object checksum's ordering demand was determined
-     * while processing the first response's headers. Latching keeps a single transfer from mixing the
-     * two paths, whose byte accounting is not interchangeable. */
+    /* Latched on the first body and never revisited: a mode that changed partway would leave the two
+     * paths' byte accounting inconsistent. */
     if (meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_UNSET) {
-
-        /* Only a file destination with worker descriptors to write through can deliver out of order.
-         * Those are allocated only when the meta request has a client, so their presence is also what
-         * makes the client setting below safe to read. */
-        bool supported = meta_request->recv_filepath != NULL && meta_request->recv_file_write_fd_slots != NULL;
-
-        /* The client's preference, defaulting to on wherever the destination allows it. */
-        bool requested = supported && meta_request->client->out_of_order_delivery != AWS_TRIBOOL_FALSE;
-
-        /* A correctness constraint, so it outranks the preference rather than being overridden by it. */
-        bool ordered_required = s_s3_meta_request_needs_ordered_body(meta_request);
-        if (requested && supported && ordered_required) {
-            AWS_LOGF_WARN(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Delivering in object order despite out-of-order delivery being available: this "
-                "response's whole-object checksum can only be verified by hashing the body in order.",
-                (void *)meta_request);
-        }
-
         meta_request->synced_data.out_of_order_delivery =
-            (requested && supported && !ordered_required) ? AWS_TRIBOOL_TRUE : AWS_TRIBOOL_FALSE;
+            s_s3_meta_request_resolve_out_of_order_delivery(meta_request) ? AWS_TRIBOOL_TRUE : AWS_TRIBOOL_FALSE;
     }
 
-    /* Out-of-order delivery: bypass the priority queue entirely. Every write carries its own absolute
-     * file offset, so parts need no ordering relative to each other. */
+    /* Out-of-order delivery: bypass the priority queue entirely, so a part never waits on the part
+     * ahead of it. Every part carries its own absolute offset, so they need no ordering relative to
+     * each other. */
     if (meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE) {
 
         ++meta_request->synced_data.num_parts_delivery_sent;
 
-        /* Hand the body off. The request owns nothing the write still needs, so the caller's release
-         * can destroy it now instead of the pending write pinning it alive. */
-        struct aws_s3_body_write *body_write = aws_s3_body_write_new_from_request(request);
+        if (meta_request->recv_filepath != NULL) {
+            /* Hand the body off to a write worker. The request owns nothing the write still needs, so
+             * the caller's release can destroy it now instead of the pending write pinning it alive. */
+            struct aws_s3_body_write *body_write = aws_s3_body_write_new_from_request(request);
 
-        aws_atomic_fetch_add(&meta_request->client->num_pending_writes, 1);
-        s_s3_body_write_schedule(body_write);
+            aws_atomic_fetch_add(&meta_request->client->num_pending_writes, 1);
+            s_s3_body_write_schedule(body_write);
+            return;
+        }
+
+        /* Callback sink: still deliver through the ordered event path, which is what keeps the callback
+         * firing one part at a time on io_event_loop. Skipping the queue only removes the wait for
+         * earlier parts; it does not move the callback off that thread. */
+        struct aws_s3_meta_request_event event = {.type = AWS_S3_META_REQUEST_EVENT_RESPONSE_BODY};
+        aws_s3_request_acquire(request);
+        event.u.response_body.completed_request = request;
+        aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
+
+        aws_atomic_fetch_add(&meta_request->client->stats.num_requests_streaming_response, 1);
         return;
     }
 
@@ -2772,11 +2827,15 @@ static int s_deliver_body_to_sink(
     return AWS_ERROR_SUCCESS;
 }
 
-/* Advance the contiguous written prefix by `bytes` for `part_number`, draining any later parts that
+/* Advance the contiguous delivered prefix by `bytes` for `part_number`, draining any later parts that
  * finished first. Only the prefix feeds `num_bytes_delivered`, because that is what the download
  * resume token reports as continuously downloaded -- counting an out-of-order part would claim bytes
- * past a hole that was never written. */
-static void s_s3_meta_request_record_written_part_synced(
+ * past a hole the sink never received.
+ *
+ * Call this once per part, once that part is entirely delivered. Both out-of-order sinks use it: a
+ * write worker after its part reaches the file, and the event delivery task after a part's last
+ * chunk reaches the body callback. */
+static void s_s3_meta_request_record_delivered_part_synced(
     struct aws_s3_meta_request *meta_request,
     uint32_t part_number,
     uint64_t bytes) {
@@ -2786,24 +2845,24 @@ static void s_s3_meta_request_record_written_part_synced(
     /* Every written part counts toward the total, whether or not it extends the contiguous prefix. */
     meta_request->synced_data.num_bytes_delivered_total += bytes;
 
-    if (part_number != meta_request->synced_data.next_contiguous_write_part) {
-        struct aws_s3_completed_write entry = {.part_number = part_number, .bytes = bytes};
-        aws_priority_queue_push(&meta_request->synced_data.completed_write_parts_tracker, &entry);
+    if (part_number != meta_request->synced_data.next_contiguous_delivered_part) {
+        struct aws_s3_completed_delivery entry = {.part_number = part_number, .bytes = bytes};
+        aws_priority_queue_push(&meta_request->synced_data.completed_deliveries_tracker, &entry);
         return;
     }
 
     meta_request->synced_data.num_bytes_delivered += bytes;
-    ++meta_request->synced_data.next_contiguous_write_part;
+    ++meta_request->synced_data.next_contiguous_delivered_part;
 
-    struct aws_s3_completed_write *top = NULL;
-    while (aws_priority_queue_top(&meta_request->synced_data.completed_write_parts_tracker, (void **)&top) ==
+    struct aws_s3_completed_delivery *top = NULL;
+    while (aws_priority_queue_top(&meta_request->synced_data.completed_deliveries_tracker, (void **)&top) ==
                AWS_OP_SUCCESS &&
-           top->part_number == meta_request->synced_data.next_contiguous_write_part) {
+           top->part_number == meta_request->synced_data.next_contiguous_delivered_part) {
 
-        struct aws_s3_completed_write entry;
-        aws_priority_queue_pop(&meta_request->synced_data.completed_write_parts_tracker, &entry);
+        struct aws_s3_completed_delivery entry;
+        aws_priority_queue_pop(&meta_request->synced_data.completed_deliveries_tracker, &entry);
         meta_request->synced_data.num_bytes_delivered += entry.bytes;
-        ++meta_request->synced_data.next_contiguous_write_part;
+        ++meta_request->synced_data.next_contiguous_delivered_part;
     }
 }
 
@@ -2868,7 +2927,7 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
         ++meta_request->synced_data.num_parts_delivery_completed;
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            s_s3_meta_request_record_written_part_synced(meta_request, body_write->part_number, body_write->body.len);
+            s_s3_meta_request_record_delivered_part_synced(meta_request, body_write->part_number, body_write->body.len);
         } else {
             /* A body that never reached the file must fail the meta request, otherwise the caller is
              * handed a silently truncated file. */
@@ -2929,6 +2988,14 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
     uint32_t num_parts_delivered = 0;
     uint64_t num_bytes_delivered = 0;
     uint64_t bytes_allowed_to_deliver = 0;
+    bool out_of_order_delivery = false;
+
+    /* Parts fully delivered during this tick, when delivery is out of order. Recorded at the end so the
+     * contiguous prefix advances under the lock in one pass, rather than taking it per part. Unused on
+     * the ordered path, where the prefix and the total simply advance together. */
+    struct aws_array_list completed_deliveries;
+    aws_array_list_init_dynamic(
+        &completed_deliveries, meta_request->allocator, 1, sizeof(struct aws_s3_completed_delivery));
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -2944,6 +3011,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
         bytes_allowed_to_deliver = meta_request->synced_data.read_window_running_total -
                                    meta_request->io_threaded_data.num_bytes_delivery_completed;
+
+        /* Latched before the first body was queued, so it cannot change while this task runs. */
+        out_of_order_delivery = meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE;
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
@@ -2969,6 +3039,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 if (response_body.len == 0) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
+                    if (out_of_order_delivery && error_code == AWS_ERROR_SUCCESS) {
+                        /* Still has to close its slot in the prefix, or every later part parks behind
+                         * a part that was never going to contribute any bytes. */
+                        struct aws_s3_completed_delivery completed = {.part_number = request->part_number, .bytes = 0};
+                        aws_array_list_push_back(&completed_deliveries, &completed);
+                    }
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
                     aws_s3_request_release(request);
@@ -2996,20 +3072,23 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 /* 3. Sequential order validation */
                 uint64_t delivery_range_start = request->part_range_start + bytes_delivered_for_request;
                 AWS_ASSERT(request->part_number >= 1);
-                if (request->part_number == 1) {
-                    meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
+                if (!out_of_order_delivery) {
+                    /* Check sequential order when we are not deliverying out of order. */
+                    if (request->part_number == 1) {
+                        meta_request->io_threaded_data.next_deliver_range_start = delivery_range_start;
+                    }
+                    if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
+                        AWS_LOGF_ERROR(
+                            AWS_LS_S3_META_REQUEST,
+                            "id=%p: Unexpected code error. Please report the error to the team, "
+                            "delivery_range_start:%" PRIu64 ", next_deliver_range_start:%" PRIu64 ".",
+                            (void *)meta_request,
+                            delivery_range_start,
+                            meta_request->io_threaded_data.next_deliver_range_start);
+                        error_code = AWS_ERROR_INVALID_STATE;
+                    }
+                    meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
                 }
-                if (delivery_range_start != meta_request->io_threaded_data.next_deliver_range_start) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: Unexpected code error. Please report the error to the team, "
-                        "delivery_range_start:%" PRIu64 ", next_deliver_range_start:%" PRIu64 ".",
-                        (void *)meta_request,
-                        delivery_range_start,
-                        meta_request->io_threaded_data.next_deliver_range_start);
-                    error_code = AWS_ERROR_INVALID_STATE;
-                }
-                meta_request->io_threaded_data.next_deliver_range_start += response_body.len;
 
                 /* 4. Checksum update */
                 if (error_code == AWS_ERROR_SUCCESS && meta_request->meta_request_level_running_response_sum &&
@@ -3018,6 +3097,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                      * bytes in object order, which is what this delivery loop guarantees. Combinable
                      * algorithms fold in each part's own checksum when the part completes instead, so there
                      * is nothing to do here. */
+                    AWS_ASSERT(!out_of_order_delivery); /* s_s3_meta_request_needs_ordered_body() ruled it out */
                     if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
                         error_code = aws_last_error();
                         AWS_LOGF_ERROR(
@@ -3057,6 +3137,16 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
+                    if (out_of_order_delivery && error_code == AWS_ERROR_SUCCESS) {
+                        /* The part is done, so it can take its place in the prefix. Its byte count is
+                         * everything handed over across every tick, not just this one, which is why this
+                         * waits for the part to finish rather than counting each chunk. */
+                        struct aws_s3_completed_delivery completed = {
+                            .part_number = request->part_number,
+                            .bytes = event.u.response_body.bytes_delivered,
+                        };
+                        aws_array_list_push_back(&completed_deliveries, &completed);
+                    }
                     request->send_data.metrics =
                         s_s3_request_finish_up_and_release_metrics(request->send_data.metrics, meta_request);
                     aws_s3_request_release(request);
@@ -3140,14 +3230,25 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
-        /* This path delivers in object order, so the prefix and the total advance together. */
-        meta_request->synced_data.num_bytes_delivered += num_bytes_delivered;
-        meta_request->synced_data.num_bytes_delivered_total += num_bytes_delivered;
+        if (out_of_order_delivery) {
+            /* The prefix stops at the first part still missing, so it advances per completed part rather
+             * than by this tick's byte count. Each recorded part adds its own bytes to the total. */
+            for (size_t i = 0; i < aws_array_list_length(&completed_deliveries); ++i) {
+                struct aws_s3_completed_delivery completed;
+                aws_array_list_get_at(&completed_deliveries, &completed, i);
+                s_s3_meta_request_record_delivered_part_synced(meta_request, completed.part_number, completed.bytes);
+            }
+        } else {
+            /* This path delivers in object order, so the prefix and the total advance together. */
+            meta_request->synced_data.num_bytes_delivered += num_bytes_delivered;
+            meta_request->synced_data.num_bytes_delivered_total += num_bytes_delivered;
+        }
         meta_request->synced_data.event_delivery_active = false;
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
     aws_array_list_clean_up(&incomplete_deliver_events_array);
+    aws_array_list_clean_up(&completed_deliveries);
 
     aws_s3_client_schedule_process_work(client);
     aws_s3_meta_request_release(meta_request);

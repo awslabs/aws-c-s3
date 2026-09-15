@@ -155,8 +155,36 @@ static int s_s3_test_meta_request_body_callback(
         ASSERT_TRUE(object_range_known);
     }
 
-    ASSERT_TRUE((object_range_start + meta_request_test_results->expected_range_start) == range_start);
-    meta_request_test_results->expected_range_start += body->len;
+    if (meta_request_test_results->allow_out_of_order_body) {
+        /* Out-of-order delivery breaks contiguity by design, so instead of asserting each range
+         * continues the last one, place it at its own offset. A test that then finds the whole object
+         * intact has verified both the bytes and the range_start of every delivery. */
+        size_t object_offset = (size_t)(range_start - object_range_start);
+        size_t range_end = object_offset + body->len;
+        if (meta_request_test_results->received_body_content.capacity < range_end) {
+            ASSERT_SUCCESS(aws_byte_buf_reserve(&meta_request_test_results->received_body_content, range_end));
+        }
+        if (meta_request_test_results->received_body_content.len < range_end) {
+            /* Zero the gap so a hole reads as zeros rather than as whatever the allocator returned. */
+            memset(
+                meta_request_test_results->received_body_content.buffer +
+                    meta_request_test_results->received_body_content.len,
+                0,
+                range_end - meta_request_test_results->received_body_content.len);
+            meta_request_test_results->received_body_content.len = range_end;
+        }
+        memcpy(meta_request_test_results->received_body_content.buffer + object_offset, body->ptr, body->len);
+
+        if (range_start < meta_request_test_results->highest_body_range_end) {
+            meta_request_test_results->body_arrived_out_of_order = true;
+        }
+        if (range_start + body->len > meta_request_test_results->highest_body_range_end) {
+            meta_request_test_results->highest_body_range_end = range_start + body->len;
+        }
+    } else {
+        ASSERT_TRUE((object_range_start + meta_request_test_results->expected_range_start) == range_start);
+        meta_request_test_results->expected_range_start += body->len;
+    }
 
     if (meta_request_test_results->body_callback != NULL) {
         return meta_request_test_results->body_callback(meta_request, body, range_start, user_data);
@@ -202,6 +230,14 @@ static void s_s3_test_meta_request_finish(
      * never revisited, so by the time the meta request is finishing it cannot still be changing. */
     meta_request_test_results->out_of_order_delivery =
         meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE;
+
+    /* The two delivered-byte counters the download resume token is built from. Taken under the lock
+     * because an out-of-order sink may still have been advancing them from another thread until the
+     * meta request finished. */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    meta_request_test_results->num_bytes_delivered = meta_request->synced_data.num_bytes_delivered;
+    meta_request_test_results->num_bytes_delivered_total = meta_request->synced_data.num_bytes_delivered_total;
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -566,6 +602,9 @@ void aws_s3_meta_request_test_results_init(
     AWS_ZERO_STRUCT(*test_meta_request);
     test_meta_request->allocator = allocator;
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
+    /* Zero capacity, but it carries the allocator, so the body callback can reserve into it as ranges
+     * arrive without knowing the object size up front. */
+    aws_byte_buf_init(&test_meta_request->received_body_content, allocator, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
     aws_array_list_init_dynamic(
@@ -583,6 +622,7 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
     aws_string_destroy(test_meta_request->error_response_operation_name);
     aws_http_headers_release(test_meta_request->response_headers);
     aws_byte_buf_clean_up(&test_meta_request->received_file_content);
+    aws_byte_buf_clean_up(&test_meta_request->received_body_content);
     while (aws_array_list_length(&test_meta_request->synced_data.metrics) > 0) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_back(&test_meta_request->synced_data.metrics, (void **)&metrics);
@@ -1446,6 +1486,7 @@ int aws_s3_tester_client_new(
         .enable_s3express = options->s3express_provider_override_factory != NULL,
         .memory_limit_in_bytes = options->memory_limit_in_bytes,
         .buffer_pool_factory_fn = options->buffer_pool_factory_fn,
+        .out_of_order_delivery = options->out_of_order_delivery,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,
@@ -1576,6 +1617,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .fio_opts = options->fio_opts,
         .part_size = options->part_size,
         .on_error_resume_token = options->on_error_resume_token,
+        .out_of_order_delivery = options->out_of_order_delivery,
     };
 
     if (options->mock_server) {
@@ -1882,6 +1924,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->upload_review_callback = options->upload_review_callback;
 
     out_results->algorithm = options->expected_validate_checksum_alg;
+    out_results->allow_out_of_order_body = options->get_options.allow_out_of_order_body;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 

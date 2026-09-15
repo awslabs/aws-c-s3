@@ -2065,6 +2065,392 @@ TEST_CASE(parallel_write_delayed_part_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* Test that out-of-order delivery reaches the body callback, not just a file, and that each range the
+ * callback hands over carries the correct offset AND the correct bytes for that offset.
+ *
+ * The mock server holds part 2 back while parts 3 and 4 are served immediately, so with the ordering
+ * wait removed the callback must see part 1, then parts 3 and 4, then part 2 -- a range_start that
+ * goes backwards. The tester assembles each range into `received_body_content` at `range_start`, so a
+ * fully intact object at the end proves every delivery reported the offset its bytes actually belong
+ * at; a part delivered with the wrong range_start would land on top of another part and corrupt it.
+ *
+ * The callback is still invoked from one thread, one part at a time. This test covers the order
+ * change only, not concurrency. */
+TEST_CASE(out_of_order_body_callback_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        /* A body callback needs the explicit opt-in; UNSET would leave delivery in object order. */
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+                /* No file_on_disk: the point is that this works with the callback as the sink. */
+                .allow_out_of_order_body = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* Without this the assertions below could pass on a run that quietly took the ordered path. */
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    /* And this is what proves the ordering wait was actually skipped: some range arrived behind one
+     * already delivered. An ordered run would never satisfy it. */
+    ASSERT_TRUE(out_results.body_arrived_out_of_order);
+
+    size_t expected_size = (size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_body_size);
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_body_content.len);
+
+    /* Parts 3 and 4 finished ahead of part 2, so they had to park in the completed-deliveries heap and
+     * then drain once part 2 closed the gap. Both counters reaching the full object size is what shows
+     * the drain happened -- a prefix that stopped at part 1 would leave a resume token from this
+     * transfer understating what the caller already has. */
+    ASSERT_UINT_EQUALS(expected_size, out_results.num_bytes_delivered);
+    ASSERT_UINT_EQUALS(expected_size, out_results.num_bytes_delivered_total);
+
+    /* The delay must not have collapsed the transfer into fewer, larger parts, or there would be no
+     * out-of-order delivery to observe. */
+    ASSERT_UINT_EQUALS(S_DELAYED_PART_COUNT, aws_array_list_length(&out_results.synced_data.succeed_metrics));
+
+    /* Report the first wrong offset rather than just that the object differs, since which offset is
+     * wrong is what identifies the misdelivered range. */
+    for (size_t i = 0; i < out_results.received_body_content.len; ++i) {
+        uint8_t expected = (uint8_t)(32 + (i % 90));
+        if (out_results.received_body_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at object offset %zu: expected %u, got %u",
+                i,
+                (unsigned)expected,
+                (unsigned)out_results.received_body_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results.received_body_content.buffer[i]);
+        }
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that AWS_TRIBOOL_UNSET leaves body-callback delivery in object order.
+ *
+ * A caller consuming the body through a callback may be appending to its own sink, so gaps have to be
+ * asked for rather than arriving on upgrade. This uses the same delayed-part route as the test above,
+ * where an out-of-order path would visibly reorder, and deliberately does NOT set
+ * allow_out_of_order_body -- so the tester's default body callback asserts every range continues the
+ * last one, and a regression that opted the callback in by default would fail there. */
+TEST_CASE(ordered_body_callback_by_default_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE, .tls_usage = AWS_S3_TLS_DISABLED,
+        /* .out_of_order_delivery left AWS_TRIBOOL_UNSET on purpose. */
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* The whole point: no recv_filepath, no explicit opt-in, so delivery stayed ordered. */
+    ASSERT_FALSE(out_results.out_of_order_delivery);
+
+    ASSERT_UINT_EQUALS((size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE, out_results.received_body_size);
+
+    /* Ordered delivery keeps the prefix and the total identical, so a resume token from here would
+     * report the same value for both. */
+    ASSERT_UINT_EQUALS(S_DELAYED_PART_COUNT, aws_array_list_length(&out_results.synced_data.succeed_metrics));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that AWS_TRIBOOL_FALSE forces ordered delivery even to a file, where out-of-order is otherwise
+ * the default. Nothing else covers the explicit opt-out, so without this a change that ignored the
+ * setting would only be caught by whatever downstream cared about a valid partial file. */
+TEST_CASE(ordered_write_to_file_when_disabled_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .out_of_order_delivery = AWS_TRIBOOL_FALSE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* The setting was honored: a file destination would otherwise have gone out of order here. */
+    ASSERT_FALSE(out_results.out_of_order_delivery);
+
+    /* Ordered or not, the file still has to be correct -- this guards against the opt-out disabling
+     * more than the ordering. */
+    size_t expected_size = (size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_content.len);
+    for (size_t i = 0; i < out_results.received_file_content.len; ++i) {
+        uint8_t expected = (uint8_t)(32 + (i % 90));
+        if (out_results.received_file_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at object offset %zu: expected %u, got %u",
+                i,
+                (unsigned)expected,
+                (unsigned)out_results.received_file_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results.received_file_content.buffer[i]);
+        }
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that a request opting IN beats a client set to off, for a file destination.
+ *
+ * This is the direction that has to reach further than the latch: init only allocates the per-worker
+ * descriptors when out-of-order delivery is still possible, so an override the allocation site did not
+ * consult would leave the request with no descriptors and silently fall back to ordered writes. */
+TEST_CASE(out_of_order_override_on_beats_client_off_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .out_of_order_delivery = AWS_TRIBOOL_FALSE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        /* The override, pulling in the opposite direction to the client. */
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* The request's TRUE won, despite the client's FALSE. */
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    size_t expected_size = (size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_content.len);
+    for (size_t i = 0; i < out_results.received_file_content.len; ++i) {
+        uint8_t expected = (uint8_t)(32 + (i % 90));
+        if (out_results.received_file_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at object offset %zu: expected %u, got %u",
+                i,
+                (unsigned)expected,
+                (unsigned)out_results.received_file_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results.received_file_content.buffer[i]);
+        }
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that a request opting OUT beats a client set to on, for a file destination -- the override in
+ * the other direction, which only the latch has to honor. */
+TEST_CASE(out_of_order_override_off_beats_client_on_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .out_of_order_delivery = AWS_TRIBOOL_FALSE,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    /* The request's FALSE won, despite the client's TRUE. */
+    ASSERT_FALSE(out_results.out_of_order_delivery);
+
+    size_t expected_size = (size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_content.len);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that a request can opt a body callback in while the client says nothing, which is the override
+ * path a caller most likely wants: one download delivered out of order without reconfiguring a client
+ * shared with everything else. */
+TEST_CASE(out_of_order_override_on_body_callback_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_DELAYED_PART_SIZE, .tls_usage = AWS_S3_TLS_DISABLED,
+        /* Client left UNSET, which on its own keeps a body callback in order. */
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_delay_part"),
+                .allow_out_of_order_body = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+    ASSERT_TRUE(out_results.body_arrived_out_of_order);
+
+    size_t expected_size = (size_t)S_DELAYED_PART_COUNT * S_DELAYED_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_body_content.len);
+    ASSERT_UINT_EQUALS(expected_size, out_results.num_bytes_delivered);
+    for (size_t i = 0; i < out_results.received_body_content.len; ++i) {
+        uint8_t expected = (uint8_t)(32 + (i % 90));
+        if (out_results.received_body_content.buffer[i] != expected) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "First wrong byte at object offset %zu: expected %u, got %u",
+                i,
+                (unsigned)expected,
+                (unsigned)out_results.received_body_content.buffer[i]);
+            ASSERT_UINT_EQUALS(expected, out_results.received_body_content.buffer[i]);
+        }
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Test that a download over an existing file replaces it rather than leaving any of it behind.
  *
  * The pre-existing file is deliberately LONGER than the object (384 KiB vs 256 KiB), so a path that

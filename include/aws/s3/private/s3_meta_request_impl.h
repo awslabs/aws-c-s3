@@ -86,10 +86,13 @@ struct aws_s3_recv_file_fds {
     bool open_attempted;
 };
 
-/* One parallel file write that finished ahead of an earlier part, parked in
- * `synced_data.completed_write_parts_tracker` until the gap before it closes.
- * Used for tracking the continuoes downloaded length. */
-struct aws_s3_completed_write {
+/* One part that reached its sink ahead of an earlier part, parked in
+ * `synced_data.completed_deliveries_tracker` until the gap before it closes. Used for tracking the
+ * contiguous downloaded length, which is what the download resume token reports.
+ *
+ * Both out-of-order sinks park here: a parallel file write, and a body callback delivered without
+ * waiting on the part ahead of it. */
+struct aws_s3_completed_delivery {
     uint32_t part_number;
     uint64_t bytes;
 };
@@ -272,28 +275,29 @@ struct aws_s3_meta_request {
 
         /* Bytes delivered contiguously from the start of the range, with no gaps. This is what the
          * download resume token reports as `continuous_downloaded_bytes`, so it may only count a part
-         * once every earlier part has also landed. `next_contiguous_write_part` and
-         * `completed_write_parts_tracker` track that for out-of-order delivery. */
+         * once every earlier part has also landed. `next_contiguous_delivered_part` and
+         * `completed_deliveries_tracker` track that for out-of-order delivery. */
         uint64_t num_bytes_delivered;
 
         /* Every byte delivered, including parts that landed past a gap. Reported as the token's
          * `total_downloaded_bytes`. Equal to `num_bytes_delivered` when delivery was in order. */
         uint64_t num_bytes_delivered_total;
 
-        /* Whether bodies reach the file out of object order, each through the descriptor of whichever
-         * worker takes it. AWS_TRIBOOL_UNSET until the first body dispatch resolves it from the
-         * client's `out_of_order_delivery` preference and what the destination and response allow --
-         * the whole-object checksum's ordering demand is only known after the first response's
-         * headers. Never revisited once resolved: a mode that changed partway would leave the two
-         * paths' byte accounting inconsistent. */
+        /* Whether bodies reach their sink out of object order: to a file through the descriptor of
+         * whichever worker takes the part, or to the body callback without waiting on the part ahead of
+         * it. AWS_TRIBOOL_UNSET until the first body dispatch resolves it from the client's
+         * `out_of_order_delivery` preference and what the destination and response allow -- the
+         * whole-object checksum's ordering demand is only known after the first response's headers.
+         * Never revisited once resolved: a mode that changed partway would leave the two paths' byte
+         * accounting inconsistent. */
         enum aws_tribool out_of_order_delivery;
 
-        /* Next part number that would extend the contiguous written prefix. */
-        uint32_t next_contiguous_write_part;
+        /* Next part number that would extend the contiguous delivered prefix. */
+        uint32_t next_contiguous_delivered_part;
 
-        /* Min-heap by part number of parallel writes that completed ahead of an earlier part, holding
-         * `struct aws_s3_completed_write`. Drained into `num_bytes_delivered` as the gap closes. */
-        struct aws_priority_queue completed_write_parts_tracker;
+        /* Min-heap by part number of parts that reached their sink ahead of an earlier part, holding
+         * `struct aws_s3_completed_delivery`. Drained into `num_bytes_delivered` as the gap closes. */
+        struct aws_priority_queue completed_deliveries_tracker;
 
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
@@ -439,6 +443,10 @@ struct aws_s3_meta_request {
     bool recv_file_delete_on_failure;
     /* When true, attempt O_DIRECT for writes. Only read when a writer opens its descriptor. */
     bool recv_file_direct_io;
+
+    /* This request's override of the client's `out_of_order_delivery`, from the creation options.
+     * AWS_TRIBOOL_UNSET means defer to the client. Immutable after init. */
+    enum aws_tribool out_of_order_delivery_override;
 
     /* One descriptor pair per write worker, indexed by the worker's file_io_elg loop index.
      * Length is recv_file_write_fd_slot_count.

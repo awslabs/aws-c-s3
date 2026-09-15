@@ -367,8 +367,9 @@ struct aws_s3_client {
      * Ignored unless `enable_read_backpressure` is true. */
     const size_t initial_read_window;
 
-    /* Whether a download to a file may write received parts out of object order. AWS_TRIBOOL_UNSET
-     * means the caller expressed no preference and the client decides. */
+    /* Whether a download may deliver received parts out of object order. AWS_TRIBOOL_UNSET
+     * means the caller expressed no preference and the client decides, which currently means out of
+     * order to a file and in order to a body callback. */
     const enum aws_tribool out_of_order_delivery;
 
     /**

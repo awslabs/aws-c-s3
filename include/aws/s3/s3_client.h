@@ -738,26 +738,37 @@ struct aws_s3_client_config {
     void *buffer_pool_user_data;
 
     /**
-     * WARNING: experimental/unstable:
-     * Whether a download to a file may write received parts as they arrive rather than in object order.
-     * Writing out of order lets several parts reach the disk at once, which is what allows a download to
-     * exceed the throughput of a single writer. Only affects downloads given a `recv_filepath`.
+     * Whether a download may deliver received parts as they arrive rather than in object order.
      *
-     * The trade is what a partial file contains. Ordered delivery leaves a valid prefix, so an
-     * interrupted download yields a file that is short but complete as far as it goes. Out-of-order
-     * delivery can leave gaps, so a partial file is only meaningful together with the download resume
-     * token, which reports how many bytes from the start are contiguous.
+     * For a download given a `recv_filepath`, writing out of order lets several parts reach the disk at
+     * once, which is what allows a download to exceed the throughput of a single writer. This is on
+     * unless you turn it off: each part is written at its own absolute file offset, so arrival order is
+     * invisible in the finished file.
+     *
+     * For a download delivered through `body_callback`, out-of-order delivery stops a part from waiting
+     * on the part ahead of it, which frees its buffer sooner and removes the latency a single slow part
+     * adds to everything behind it. It does NOT make the callback concurrent: the callback still fires
+     * from one thread, one part at a time, exactly as it does today. Only the order changes, so
+     * `range_start` no longer advances contiguously and your sink must place each range by
+     * `range_start` rather than appending. Because that is visible in your own code, it requires
+     * AWS_TRIBOOL_TRUE -- AWS_TRIBOOL_UNSET leaves callback delivery in object order.
+     *
+     * The trade for a file destination is what a partial file contains. Ordered delivery leaves a valid
+     * prefix, so an interrupted download yields a file that is short but complete as far as it goes.
+     * Out-of-order delivery can leave gaps, so a partial file is only meaningful together with the
+     * download resume token, which reports how many bytes from the start are contiguous.
      *
      * Ignored when a response carries a whole-object checksum that can only be verified by hashing the
      * body in order; such a request delivers in order and logs a warning.
      *
-     * Leave AWS_TRIBOOL_UNSET to let the client decide, which currently means writing out of order
-     * wherever the destination allows it.
+     * Leave AWS_TRIBOOL_UNSET to let the client decide, which currently means out of order for a file
+     * destination and in order for a body callback.
+     *
+     * A single request can override this via `aws_s3_meta_request_options.out_of_order_delivery`.
      */
     enum aws_tribool out_of_order_delivery;
 
     /**
-     * WARNING: experimental/unstable:
      * Optional.
      * Number of threads the client dedicates to file I/O.
      *
@@ -924,6 +935,16 @@ struct aws_s3_meta_request_options {
      * This only works with recv_filepath set.
      */
     bool recv_file_delete_on_failure;
+
+    /**
+     * Optional.
+     * Per-request override of the client's `out_of_order_delivery`. See that field for what the setting
+     * means and what each sink defaults to.
+     *
+     * AWS_TRIBOOL_UNSET, the default, defers to the client. Anything else wins over the client, so a
+     * single request can opt in or out without a separate client.
+     */
+    enum aws_tribool out_of_order_delivery;
 
     /**
      * Optional.
