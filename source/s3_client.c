@@ -2286,11 +2286,16 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Could not allocate buffer for request with tag %d for the meta request.",
+            "id=%p Could not allocate buffer for request with tag %d for the meta request due to error %d (%s).",
             (void *)meta_request,
-            request->request_tag);
+            request->request_tag,
+            error_code,
+            aws_error_str(error_code));
 
-        s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        /* Propagate the pool's error rather than flattening it, so an unserviceable part size
+         * surfaces as AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT instead of a generic
+         * allocation failure. */
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, error_code);
         s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
         return;
     }
@@ -2366,7 +2371,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = request_size,
+            .size = aws_min_size(request->buffer_size, request_size),
         };
 
         struct aws_s3_reserve_memory_payload *payload =

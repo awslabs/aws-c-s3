@@ -690,7 +690,24 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     AWS_FATAL_ASSERT(meta.size != 0);
-    AWS_FATAL_ASSERT(meta.size <= buffer_pool->mem_limit);
+
+    /* A reservation bigger than the pool's usable limit can never be satisfied: even releasing
+     * every outstanding buffer would not make room. s_try_reserve_synced would return NULL and
+     * the request would park on pending_reserves forever, so fail the future instead.
+     * This also covers meta.can_block reservations, which cannot wait at all.
+     * Note: mem_limit is immutable after construction, so this is safe to read unlocked. */
+    if (meta.size > buffer_pool->mem_limit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot reserve a buffer of %zu bytes; it exceeds the buffer pool's usable memory limit of %zu bytes. "
+            "Increase the client memory limit or reduce the part size.",
+            meta.size,
+            buffer_pool->mem_limit);
+
+        struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(buffer_pool->base_allocator);
+        aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return future;
+    }
 
     aws_mutex_lock(&buffer_pool->mutex);
 

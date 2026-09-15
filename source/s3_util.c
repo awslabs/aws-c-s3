@@ -708,6 +708,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     uint64_t client_max_part_size,
     size_t *out_part_size,
     uint32_t *out_num_parts) {
+    (void)client_max_part_size;
 
     AWS_FATAL_ASSERT(out_part_size);
     AWS_FATAL_ASSERT(out_num_parts);
@@ -734,16 +735,6 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     }
 
     size_t part_size = (size_t)part_size_uint64;
-
-    if (part_size > client_max_part_size) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "Could not create meta request; required part size for request is %" PRIu64
-            ", but current maximum part size is %" PRIu64,
-            (uint64_t)part_size,
-            (uint64_t)client_max_part_size);
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-    }
 
     if (part_size < client_part_size) {
         part_size = client_part_size;
