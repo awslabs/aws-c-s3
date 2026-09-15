@@ -60,10 +60,7 @@ uint64_t aws_s3_request_get_payload_size(struct aws_s3_request *request) {
     if (aws_sub_u64_checked(request->part_range_end, request->part_range_start, &result) != AWS_OP_SUCCESS) {
         return 0;
     }
-
-    /* The request buffer size can be different than the part range in the request, for case where streaming from file
-     * direclty to avoid buffering the full part. */
-    return aws_min_u64(result + 1, request->buffer_size);
+    return result + 1;
 }
 
 static void s_populate_metrics_from_message(struct aws_s3_request *request, struct aws_http_message *message) {

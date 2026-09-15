@@ -2371,7 +2371,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = request_size,
+            .size = aws_min_size(request->buffer_size, request_size),
         };
 
         struct aws_s3_reserve_memory_payload *payload =
