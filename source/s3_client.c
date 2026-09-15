@@ -264,8 +264,7 @@ static double s_resolve_effective_throughput_gbps(double provided_throughput_gbp
 }
 
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
-    return s_get_default_mem_limit_from_throughput(
-        s_resolve_effective_throughput_gbps(throughput_target_gbps));
+    return s_get_default_mem_limit_from_throughput(s_resolve_effective_throughput_gbps(throughput_target_gbps));
 }
 
 /* Returns the max number of connections allowed.
