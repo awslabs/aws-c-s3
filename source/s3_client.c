@@ -237,6 +237,37 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #endif
 }
 
+/**
+ * Resolves the effective throughput used for default memory pool sizing.
+ *
+ * If the caller provided a positive throughput, return it directly. Otherwise
+ * attempt to auto-detect from the current EC2 environment via the per-family
+ * NIC bandwidth table, applied only when the detected value is below the
+ * conservative right-sizing threshold (10 Gbps). Returns 0.0 if no throughput
+ * is provided and auto-detection fails or yields a value at/above the
+ * threshold, in which case callers get the 2 GiB tier-table default.
+ */
+static double s_resolve_effective_throughput_gbps(double provided_throughput_gbps) {
+    if (provided_throughput_gbps != 0.0) {
+        return provided_throughput_gbps;
+    }
+    const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+    /*
+     * For now, we only right-size < 10 Gbps to minimize change. Right-sizing at higher
+     * bandwidth tiers can be addressed in the future.
+     */
+    if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+        detected_platform->max_throughput_gbps < 10.0) {
+        return detected_platform->max_throughput_gbps;
+    }
+    return 0.0;
+}
+
+size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
+    return s_get_default_mem_limit_from_throughput(
+        s_resolve_effective_throughput_gbps(throughput_target_gbps));
+}
+
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections based on the client
@@ -486,34 +517,16 @@ struct aws_s3_client *aws_s3_client_new(
     client->allocator = allocator;
 
     /*
-     * Determine the effective throughput used for default memory pool sizing.
-     *
-     * If the caller provided a throughput_target_gbps, use it directly.
-     * Otherwise, try to auto-detect from the current EC2 environment
-     * using the per-family NIC bandwidth table. This allows CRT to
-     * right-size its memory pool on EC2 instances without requiring
-     * the caller (CLI/SDK) to query and pass the throughput.
-     *
-     * If auto-detection fails (not on EC2, unknown family), the
-     * effective throughput remains 0.0, which maps to the 2 GiB
-     * default in the tier table.
+     * Determine the effective throughput used for default memory pool sizing
+     * and feature-ID comparisons. Uses the caller's throughput_target_gbps
+     * when provided, otherwise falls back to auto-detection from the current
+     * EC2 environment. See s_resolve_effective_throughput_gbps for details.
      *
      * This is resolved even when an explicit memory limit was configured so
      * that the feature IDs below can compare the configured limit against
      * the value the tier table would have chosen for this environment.
      */
-    double effective_throughput = client_config->throughput_target_gbps;
-    if (effective_throughput == 0.0) {
-        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
-        /*
-         * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
-         * applying proper EC2 throughput values in the future.
-         */
-        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
-            detected_platform->max_throughput_gbps < 10.0) {
-            effective_throughput = detected_platform->max_throughput_gbps;
-        }
-    }
+    double effective_throughput = s_resolve_effective_throughput_gbps(client_config->throughput_target_gbps);
 
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
@@ -902,33 +915,35 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
 
-    /* Validate the read-backpressure / initial-read-window pairing.
+    /* Diagnose the read-backpressure / initial-read-window pairing.
      *
-     * When backpressure is enabled with a window smaller than part_size, no
-     * parts can be scheduled and downloads stall until the caller calls
-     * aws_s3_meta_request_increment_read_window. Fail fast at client
-     * construction rather than allowing a stalled client.
+     * When backpressure is enabled with a zero window, no parts can EVER be
+     * scheduled (auto_ranged_get's scheduling check gates on
+     * read_data_requested >= read_window_running_total, which is 0 >= 0 on
+     * the first attempt). Downloads stall indefinitely until the caller
+     * invokes aws_s3_meta_request_increment_read_window. Warn loudly so the
+     * caller can find the config bug in logs, but do not fail construction --
+     * some existing callers may already be in this state and we don't want
+     * to break them.
      *
      * When backpressure is disabled with a positive window, the window value
-     * is stored but every gating check is bypassed. Warn but do not fail:
-     * the client is still functional at native pool ceiling capacity, just
-     * not throttled the way the caller may have expected. */
-    if (client->enable_read_backpressure) {
-        if (client->initial_read_window < client->part_size) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Could not create client. enable_read_backpressure is true but "
-                "initial_read_window (%zu bytes) is smaller than part_size (%zu bytes). "
-                "At least one full part must fit in the initial window; otherwise no parts "
-                "can be scheduled and downloads will stall. Increase initial_read_window to "
-                "at least part_size, or disable read backpressure.",
-                (void *)client,
-                client->initial_read_window,
-                client->part_size);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            goto on_error;
-        }
-    } else if (client->initial_read_window > 0) {
+     * is stored but every gating check is bypassed. Warn similarly: the
+     * client is still functional at native pool ceiling capacity, just not
+     * throttled the way the caller may have expected.
+     *
+     * Any positive initial_read_window paired with enable_read_backpressure
+     * is valid: aws_s3_auto_ranged_get schedules the first part as long as
+     * the window is > 0, then normal backpressure gating kicks in once
+     * bytes accumulate. See the comment in s_s3_auto_ranged_get_update. */
+    if (client->enable_read_backpressure && client->initial_read_window == 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p enable_read_backpressure is true but initial_read_window is 0. "
+            "No parts will be scheduled and downloads will stall indefinitely until "
+            "aws_s3_meta_request_increment_read_window is called. Set initial_read_window "
+            "to a positive value, or disable read backpressure.",
+            (void *)client);
+    } else if (!client->enable_read_backpressure && client->initial_read_window > 0) {
         AWS_LOGF_WARN(
             AWS_LS_S3_CLIENT,
             "id=%p initial_read_window is set to %zu but enable_read_backpressure is false. "
