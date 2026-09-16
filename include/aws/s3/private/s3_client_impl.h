@@ -50,6 +50,9 @@ struct aws_s3_endpoint_options {
     /* DNS TTL to use for addresses for this endpoint. */
     size_t dns_host_address_ttl_seconds;
 
+    /* DNS host resolution frequency. */
+    uint64_t dns_resolve_frequency_ns;
+
     /* Client that owns this endpoint */
     struct aws_s3_client *client;
 
@@ -493,6 +496,9 @@ struct aws_s3_meta_request_resume_token *aws_s3_meta_request_resume_token_new(st
 
 AWS_S3_API
 void aws_s3_set_dns_ttl(size_t ttl);
+
+AWS_S3_API
+void aws_s3_set_dns_resolve_frequency(uint64_t freq);
 
 AWS_S3_API
 uint32_t aws_s3_client_get_max_requests_prepare(struct aws_s3_client *client);

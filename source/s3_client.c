@@ -81,6 +81,7 @@ const uint32_t g_max_num_connections = 10000;
  */
 static const uint32_t s_default_max_retries = 5;
 static size_t s_dns_host_address_ttl_seconds = 5 * 60;
+static uint64_t s_dns_resolve_frequency_ns = 0;  /* `0` to use aws-c-io's default value */
 
 /* Default time until a connection is declared dead, while handling a request but seeing no activity.
  * 30 seconds mirrors the value currently used by the Java SDK. */
@@ -235,6 +236,10 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
         return GB_TO_BYTES(2);
     }
 #endif
+}
+
+void aws_s3_set_dns_resolve_frequency(uint64_t freq) {
+    s_dns_resolve_frequency_ns = freq;
 }
 
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
@@ -1381,6 +1386,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
                 .client_bootstrap = client->client_bootstrap,
                 .tls_connection_options = is_https ? client->tls_connection_options : NULL,
                 .dns_host_address_ttl_seconds = s_dns_host_address_ttl_seconds,
+                .dns_resolve_frequency_ns = s_dns_resolve_frequency_ns,
                 .client = client,
                 .max_connections = aws_s3_client_get_max_active_connections(client, NULL),
                 .port = port,
