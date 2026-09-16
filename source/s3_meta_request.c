@@ -49,19 +49,6 @@ static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
 static void s_s3_meta_request_destroy(void *user_data);
 
-/* What the caller asked for regarding out-of-order delivery: this request's own override when it set
- * one, otherwise the client's setting. AWS_TRIBOOL_UNSET means nobody expressed a preference, leaving
- * the choice to whatever the destination defaults to.
- *
- * Read both at init, to decide whether to allocate write-worker descriptors, and again when the
- * delivery order is latched. Neither input changes after init, so the two agree. */
-static enum aws_tribool s_s3_meta_request_out_of_order_preference(const struct aws_s3_meta_request *meta_request) {
-    if (meta_request->out_of_order_delivery_override != AWS_TRIBOOL_UNSET) {
-        return meta_request->out_of_order_delivery_override;
-    }
-    return meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET;
-}
-
 static void s_s3_meta_request_init_signing_date_time(
     struct aws_s3_meta_request *meta_request,
     struct aws_date_time *date_time);
@@ -529,10 +516,21 @@ int aws_s3_meta_request_init_base(
         /* One descriptor slot per file I/O loop, so a write worker never shares a descriptor.
          * Only a client gives us that loop group; without one no body is delivered at all (body
          * delivery asserts on the client), so the ordered path's own descriptor covers that case.
-         * Skipped when out-of-order delivery has been ruled out, since nothing would use them. A file
-         * destination goes out of order unless asked not to, so UNSET still allocates. */
+         * Skipped when out-of-order delivery has been ruled out, since nothing would use them.
+         *
+         * Asks the same decision function the delivery-order latch uses, so the two cannot disagree
+         * about which preference wins. The checksum's ordering demand is not known this early, and
+         * passing false for it is what we want anyway: a constraint discovered later just leaves these
+         * descriptors unused, whereas skipping them here would leave a request that turns out to be
+         * eligible with nothing to write through. */
         bool out_of_order_allowed =
-            client != NULL && s_s3_meta_request_out_of_order_preference(meta_request) != AWS_TRIBOOL_FALSE;
+            client != NULL &&
+            aws_s3_resolve_delivery_order(
+                true /*file_sink*/,
+                false /*callback_sink*/,
+                meta_request->out_of_order_delivery_override,
+                client->out_of_order_delivery,
+                false /*whole_object_checksum_needs_order, unknown this early*/) == AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
         if (out_of_order_allowed) {
             size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
             AWS_FATAL_ASSERT(loop_count > 0);
@@ -2456,48 +2454,28 @@ static bool s_s3_meta_request_needs_ordered_body(const struct aws_s3_meta_reques
 
 /* Resolve whether this transfer delivers bodies out of object order.
  *
- * Three inputs, each overriding the one before it:
- *
- *  1. What the destination defaults to. A file absorbs arrival order completely, since every part is
- *     written at its own absolute offset, so it defaults to out of order. A body callback surfaces the
- *     order to the caller through `range_start`, so it defaults to in order.
- *  2. An explicit preference, from the request or the client. Either direction, either sink.
- *  3. Whether the whole-object checksum can only be built by hashing the body in order. A correctness
- *     constraint, so it wins over any preference.
- *
- * Called once, on the first body. Every input is settled by then: the destination and the preference at
- * init, the checksum's demand while processing the first response's headers. */
+ * Reads the four inputs off the meta request and hands them to aws_s3_resolve_delivery_order(), which
+ * holds the policy. Called once, on the first body: every input is settled by then -- the destination
+ * and the preference at init, the checksum's demand while processing the first response's headers. */
 static bool s_s3_meta_request_resolve_out_of_order_delivery(const struct aws_s3_meta_request *meta_request) {
-    bool out_of_order;
-    if (meta_request->recv_filepath != NULL) {
-        /* Needs the per-worker descriptors, which init only allocates given a client that had not
-         * already ruled out-of-order delivery out. */
-        if (meta_request->recv_file_write_fd_slots == NULL) {
-            return false;
-        }
-        out_of_order = true;
-    } else if (meta_request->client != NULL) {
-        out_of_order = false;
-    } else {
-        /* No client, so no delivery machinery to route parts through out of order. */
-        return false;
-    }
+    enum aws_s3_delivery_order order = aws_s3_resolve_delivery_order(
+        /* A file sink needs the per-worker descriptors, which init only allocates given a client that
+         * had not already ruled out-of-order delivery out. */
+        meta_request->recv_filepath != NULL && meta_request->recv_file_write_fd_slots != NULL,
+        meta_request->recv_filepath == NULL && meta_request->client != NULL,
+        meta_request->out_of_order_delivery_override,
+        meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET,
+        s_s3_meta_request_needs_ordered_body(meta_request));
 
-    enum aws_tribool preference = s_s3_meta_request_out_of_order_preference(meta_request);
-    if (preference != AWS_TRIBOOL_UNSET) {
-        out_of_order = preference == AWS_TRIBOOL_TRUE;
-    }
-
-    if (out_of_order && s_s3_meta_request_needs_ordered_body(meta_request)) {
+    if (order == AWS_S3_DELIVERY_ORDER_IN_ORDER_FOR_CHECKSUM) {
         AWS_LOGF_WARN(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Delivering in object order despite out-of-order delivery being available: this "
             "response's whole-object checksum can only be verified by hashing the body in order.",
             (void *)meta_request);
-        return false;
     }
 
-    return out_of_order;
+    return order == AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
 }
 
 void aws_s3_meta_request_stream_response_body_synced(

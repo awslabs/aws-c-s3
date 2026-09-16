@@ -1045,3 +1045,106 @@ static int s_test_s3_checksum_header(struct aws_allocator *allocator, void *ctx)
     aws_s3_library_clean_up();
     return 0;
 }
+
+/* Table over every combination of the four inputs aws_s3_resolve_delivery_order() takes: which sink the
+ * download has, the request override, the client setting, and whether a whole-object checksum demands
+ * in-order hashing. 2 sinks x 3 x 3 preferences x 2 = 36 rows, plus the no-sink cases.
+ *
+ * This is the policy stated directly, rather than inferred from what a download happened to do. */
+AWS_TEST_CASE(test_s3_resolve_delivery_order, s_test_s3_resolve_delivery_order)
+static int s_test_s3_resolve_delivery_order(struct aws_allocator *allocator, void *ctx) {
+    (void)allocator;
+    (void)ctx;
+
+    /* Shorthand so the table stays readable. */
+    const enum aws_tribool U = AWS_TRIBOOL_UNSET;
+    const enum aws_tribool T = AWS_TRIBOOL_TRUE;
+    const enum aws_tribool F = AWS_TRIBOOL_FALSE;
+    const enum aws_s3_delivery_order OOO = AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
+    const enum aws_s3_delivery_order ORD = AWS_S3_DELIVERY_ORDER_IN_ORDER;
+    const enum aws_s3_delivery_order SUM = AWS_S3_DELIVERY_ORDER_IN_ORDER_FOR_CHECKSUM;
+
+    struct delivery_order_vector {
+        const char *name;
+        bool file_sink;
+        bool callback_sink;
+        enum aws_tribool request_override;
+        enum aws_tribool client_setting;
+        bool checksum_needs_order;
+        enum aws_s3_delivery_order expected;
+    };
+
+    const struct delivery_order_vector vectors[] = {
+        /* A file sink defaults to out of order: every part is written at its own absolute offset, so
+         * arrival order is invisible in the finished file. */
+        {"file/unset/unset", true, false, U, U, false, OOO},
+        {"file/unset/true", true, false, U, T, false, OOO},
+        {"file/unset/false", true, false, U, F, false, ORD},
+        /* A request override wins over the client, in both directions. */
+        {"file/true/unset", true, false, T, U, false, OOO},
+        {"file/true/true", true, false, T, T, false, OOO},
+        {"file/true/false", true, false, T, F, false, OOO},
+        {"file/false/unset", true, false, F, U, false, ORD},
+        {"file/false/true", true, false, F, T, false, ORD},
+        {"file/false/false", true, false, F, F, false, ORD},
+
+        /* The checksum constraint outranks every preference above, and is reported distinctly only when
+         * out-of-order was actually wanted -- a request already going in order has nothing overridden. */
+        {"file/unset/unset+sum", true, false, U, U, true, SUM},
+        {"file/unset/true+sum", true, false, U, T, true, SUM},
+        {"file/unset/false+sum", true, false, U, F, true, ORD},
+        {"file/true/unset+sum", true, false, T, U, true, SUM},
+        {"file/true/true+sum", true, false, T, T, true, SUM},
+        {"file/true/false+sum", true, false, T, F, true, SUM},
+        {"file/false/unset+sum", true, false, F, U, true, ORD},
+        {"file/false/true+sum", true, false, F, T, true, ORD},
+        {"file/false/false+sum", true, false, F, F, true, ORD},
+
+        /* A callback sink defaults to IN ORDER: the caller sees arrival order through range_start, so
+         * out-of-order has to be asked for rather than arriving on an upgrade. This is the one row that
+         * differs from the file sink under the same inputs. */
+        {"cb/unset/unset", false, true, U, U, false, ORD},
+        {"cb/unset/true", false, true, U, T, false, OOO},
+        {"cb/unset/false", false, true, U, F, false, ORD},
+        {"cb/true/unset", false, true, T, U, false, OOO},
+        {"cb/true/true", false, true, T, T, false, OOO},
+        {"cb/true/false", false, true, T, F, false, OOO},
+        {"cb/false/unset", false, true, F, U, false, ORD},
+        {"cb/false/true", false, true, F, T, false, ORD},
+        {"cb/false/false", false, true, F, F, false, ORD},
+
+        {"cb/unset/unset+sum", false, true, U, U, true, ORD},
+        {"cb/unset/true+sum", false, true, U, T, true, SUM},
+        {"cb/unset/false+sum", false, true, U, F, true, ORD},
+        {"cb/true/unset+sum", false, true, T, U, true, SUM},
+        {"cb/true/true+sum", false, true, T, T, true, SUM},
+        {"cb/true/false+sum", false, true, T, F, true, SUM},
+        {"cb/false/unset+sum", false, true, F, U, true, ORD},
+        {"cb/false/true+sum", false, true, F, T, true, ORD},
+        {"cb/false/false+sum", false, true, F, F, true, ORD},
+
+        /* No sink at all: nothing to deliver out of order, whatever anyone asked for. Reachable when a
+         * meta request has no client, so no delivery machinery to route parts through. */
+        {"none/unset/unset", false, false, U, U, false, ORD},
+        {"none/true/true", false, false, T, T, false, ORD},
+        {"none/true/true+sum", false, false, T, T, true, ORD},
+    };
+
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(vectors); ++i) {
+        const struct delivery_order_vector *v = &vectors[i];
+        enum aws_s3_delivery_order actual = aws_s3_resolve_delivery_order(
+            v->file_sink, v->callback_sink, v->request_override, v->client_setting, v->checksum_needs_order);
+        if (actual != v->expected) {
+            /* Name the row rather than only the index, so a failure says which rule broke. */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_GENERAL,
+                "delivery order vector \"%s\": expected %d, got %d",
+                v->name,
+                (int)v->expected,
+                (int)actual);
+            ASSERT_UINT_EQUALS(v->expected, actual);
+        }
+    }
+
+    return AWS_OP_SUCCESS;
+}

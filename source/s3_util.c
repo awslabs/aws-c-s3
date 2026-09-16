@@ -757,6 +757,38 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     return AWS_OP_SUCCESS;
 }
 
+enum aws_s3_delivery_order aws_s3_resolve_delivery_order(
+    bool file_sink,
+    bool callback_sink,
+    enum aws_tribool request_override,
+    enum aws_tribool client_setting,
+    bool whole_object_checksum_needs_order) {
+
+    bool out_of_order;
+    if (file_sink) {
+        out_of_order = true;
+    } else if (callback_sink) {
+        out_of_order = false;
+    } else {
+        /* No sink that could take parts out of order. */
+        return AWS_S3_DELIVERY_ORDER_IN_ORDER;
+    }
+
+    /* A request override wins over the client setting. */
+    enum aws_tribool preference = request_override != AWS_TRIBOOL_UNSET ? request_override : client_setting;
+    if (preference != AWS_TRIBOOL_UNSET) {
+        out_of_order = preference == AWS_TRIBOOL_TRUE;
+    }
+
+    if (!out_of_order) {
+        return AWS_S3_DELIVERY_ORDER_IN_ORDER;
+    }
+    if (whole_object_checksum_needs_order) {
+        return AWS_S3_DELIVERY_ORDER_IN_ORDER_FOR_CHECKSUM;
+    }
+    return AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
+}
+
 int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string) {
     if (aws_byte_cursor_eq_c_str_ignore_case(&error_code_string, "SlowDown")) {
         return AWS_ERROR_S3_SLOW_DOWN;
