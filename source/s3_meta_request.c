@@ -2972,6 +2972,7 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
     (void)task;
     struct aws_s3_body_write_task_args *body_write = arg;
     struct aws_s3_meta_request *meta_request = body_write->meta_request;
+    struct aws_s3_client *client = meta_request->client;
 
     int error_code = AWS_ERROR_SUCCESS;
 
@@ -3015,7 +3016,7 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
                 metrics->time_metrics.deliver_end_timestamp_ns - metrics->time_metrics.deliver_start_timestamp_ns;
         }
 
-        if (error_code == AWS_ERROR_SUCCESS && meta_request->client->enable_read_backpressure) {
+        if (error_code == AWS_ERROR_SUCCESS && client->enable_read_backpressure) {
             aws_s3_meta_request_increment_read_window(meta_request, body_write->body.len);
         }
     } else {
@@ -3050,17 +3051,15 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
                 body_write->metrics = aws_s3_request_metrics_release(body_write->metrics);
             }
         }
+        size_t prev_pending = aws_atomic_fetch_sub(&client->num_pending_writes, 1);
+        AWS_FATAL_ASSERT(prev_pending > 0);
 
         aws_s3_meta_request_unlock_synced_data(meta_request);
         /* END CRITICAL SECTION */
     }
 
-    size_t prev_pending = aws_atomic_fetch_sub(&meta_request->client->num_pending_writes, 1);
-    AWS_FATAL_ASSERT(prev_pending > 0);
-
-    aws_s3_client_schedule_process_work(meta_request->client);
-
     /* Releases the buffer ticket, which is what frees this part's pool memory. */
+    aws_s3_client_schedule_process_work(client);
     s_s3_body_write_task_args_destroy(body_write);
 }
 
