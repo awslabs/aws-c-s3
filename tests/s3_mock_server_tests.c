@@ -366,6 +366,141 @@ TEST_CASE(multipart_upload_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+TEST_CASE(multipart_upload_meta_request_part_size_over_memory_limit_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Client keeps the default part size; only the memory limit is constrained. */
+    struct aws_s3_tester_client_options client_options = {
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .memory_limit_in_bytes = MB_TO_BYTES(256),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+    struct aws_s3_file_io_options fio_options = {
+        .should_stream = true,
+    };
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .fio_opts = &fio_options,
+        /* Meta-request-level part size override: this is what ends up as
+         * meta_request->part_size, and therefore as the buffer pool reserve size. */
+        .part_size = MB_TO_BYTES(256),
+        .put_options =
+            {
+                .file_on_disk = true,
+                .object_size_mb = 300,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_SUCCESS(
+        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(multipart_upload_meta_request_part_size_over_memory_limit_no_stream_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .memory_limit_in_bytes = MB_TO_BYTES(256),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        /* No .fio_opts: streaming is off, so the full part size is reserved. */
+        .part_size = MB_TO_BYTES(256),
+        .put_options =
+            {
+                .file_on_disk = true,
+                .object_size_mb = 300,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, out_results.finished_error_code);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(multipart_upload_meta_request_part_size_over_memory_limit_not_on_disk_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .memory_limit_in_bytes = MB_TO_BYTES(256),
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+    struct aws_s3_file_io_options fio_options = {
+        .should_stream = true,
+    };
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .fio_opts = &fio_options,
+        .part_size = MB_TO_BYTES(256),
+        .put_options =
+            {
+                /* No .file_on_disk: no parallel read stream, so streaming cannot engage. */
+                .object_size_mb = 300,
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, out_results.finished_error_code);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 static void s_upload_part_with_n_retries(struct aws_s3_request *request, struct aws_http_message *message) {
     if (message == NULL) {
         return;

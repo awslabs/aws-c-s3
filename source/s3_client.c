@@ -237,6 +237,30 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #endif
 }
 
+size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
+    /*
+     * Resolve the effective throughput used for default memory pool sizing.
+     *
+     * If the caller provided a positive throughput, use it directly. Otherwise
+     * attempt to auto-detect from the current EC2 environment via the
+     * per-family NIC bandwidth table, applied only when the detected value is
+     * below the conservative right-sizing threshold (10 Gbps). Right-sizing
+     * at higher bandwidth tiers can be addressed in the future. When no
+     * throughput is provided and auto-detection fails or yields a value at/
+     * above the threshold, throughput stays 0.0 and callers get the 2 GiB
+     * tier-table default.
+     */
+    double effective_throughput_gbps = throughput_target_gbps;
+    if (effective_throughput_gbps == 0.0) {
+        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+            detected_platform->max_throughput_gbps < 10.0) {
+            effective_throughput_gbps = detected_platform->max_throughput_gbps;
+        }
+    }
+    return s_get_default_mem_limit_from_throughput(effective_throughput_gbps);
+}
+
 /* Returns the max number of connections allowed.
  *
  * When meta request is NULL, this will return the overall allowed number of connections based on the client
@@ -486,39 +510,13 @@ struct aws_s3_client *aws_s3_client_new(
     client->allocator = allocator;
 
     /*
-     * Determine the effective throughput used for default memory pool sizing.
-     *
-     * If the caller provided a throughput_target_gbps, use it directly.
-     * Otherwise, try to auto-detect from the current EC2 environment
-     * using the per-family NIC bandwidth table. This allows CRT to
-     * right-size its memory pool on EC2 instances without requiring
-     * the caller (CLI/SDK) to query and pass the throughput.
-     *
-     * If auto-detection fails (not on EC2, unknown family), the
-     * effective throughput remains 0.0, which maps to the 2 GiB
-     * default in the tier table.
-     *
-     * This is resolved even when an explicit memory limit was configured so
-     * that the feature IDs below can compare the configured limit against
-     * the value the tier table would have chosen for this environment.
+     * Determine the default memory pool size. When no explicit memory limit was configured, size from the tier table.
+     * Resolves the effective throughput (caller-provided or auto-detected from the current EC2 environment) internally.
      */
-    double effective_throughput = client_config->throughput_target_gbps;
-    if (effective_throughput == 0.0) {
-        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
-        /*
-         * For now, we will only right-size < 10 Gbps to minimize change. We can address right-sizing and
-         * applying proper EC2 throughput values in the future.
-         */
-        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
-            detected_platform->max_throughput_gbps < 10.0) {
-            effective_throughput = detected_platform->max_throughput_gbps;
-        }
-    }
-
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
         /* No explicit memory limit was set (programmatic or env var); size from the tier table. */
-        mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
+        mem_limit = aws_s3_default_memory_limit_for_throughput(client_config->throughput_target_gbps);
     } else {
         // cap memory limit to SIZE_MAX
         if (mem_limit_configured > SIZE_MAX) {
@@ -588,9 +586,8 @@ struct aws_s3_client *aws_s3_client_new(
         /* A memory limit was explicitly configured, either programmatically via
          * client_config->memory_limit_in_bytes or via the AWS_CRT_S3_MEMORY_LIMIT_IN_MB /
          * AWS_CRT_S3_MEMORY_LIMIT_IN_GIB environment variables. Flag it only if it differs
-         * from what the throughput tier table would have chosen for this environment
-         * (using the same effective_throughput the default path would have used). */
-        size_t default_mem_limit = s_get_default_mem_limit_from_throughput(effective_throughput);
+         * from what the tier table would have chosen for this environment. */
+        size_t default_mem_limit = aws_s3_default_memory_limit_for_throughput(client_config->throughput_target_gbps);
         if (mem_limit != default_mem_limit) {
             client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT;
         }
@@ -901,6 +898,45 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+
+    /* Diagnose the read-backpressure / initial-read-window pairing.
+     *
+     * When backpressure is enabled with a zero window, no parts can EVER be
+     * scheduled (auto_ranged_get's scheduling check gates on
+     * read_data_requested >= read_window_running_total, which is 0 >= 0 on
+     * the first attempt). Downloads stall indefinitely until the caller
+     * invokes aws_s3_meta_request_increment_read_window. Warn loudly so the
+     * caller can find the config bug in logs, but do not fail construction --
+     * some existing callers may already be in this state and we don't want
+     * to break them.
+     *
+     * When backpressure is disabled with a positive window, the window value
+     * is stored but every gating check is bypassed. Warn similarly: the
+     * client is still functional at native pool ceiling capacity, just not
+     * throttled the way the caller may have expected.
+     *
+     * Any positive initial_read_window paired with enable_read_backpressure
+     * is valid: aws_s3_auto_ranged_get schedules the first part as long as
+     * the window is > 0, then normal backpressure gating kicks in once
+     * bytes accumulate. See the comment in s_s3_auto_ranged_get_update. */
+    if (client->enable_read_backpressure && client->initial_read_window == 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p enable_read_backpressure is true but initial_read_window is 0. "
+            "No parts will be scheduled and downloads will stall indefinitely until "
+            "aws_s3_meta_request_increment_read_window is called. Set initial_read_window "
+            "to a positive value, or disable read backpressure.",
+            (void *)client);
+    } else if (!client->enable_read_backpressure && client->initial_read_window > 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p initial_read_window is set to %zu but enable_read_backpressure is false. "
+            "The window value has no runtime effect when backpressure is disabled; aws-c-s3 "
+            "skips all window gating. Enable backpressure or clear initial_read_window to "
+            "remove this warning.",
+            (void *)client,
+            client->initial_read_window);
+    }
 
     return client;
 
@@ -2286,11 +2322,16 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Could not allocate buffer for request with tag %d for the meta request.",
+            "id=%p Could not allocate buffer for request with tag %d for the meta request due to error %d (%s).",
             (void *)meta_request,
-            request->request_tag);
+            request->request_tag,
+            error_code,
+            aws_error_str(error_code));
 
-        s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        /* Propagate the pool's error rather than flattening it, so an unserviceable part size
+         * surfaces as AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT instead of a generic
+         * allocation failure. */
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, error_code);
         s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
         return;
     }
@@ -2366,7 +2407,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = request_size,
+            .size = aws_min_size(request->buffer_size, request_size),
         };
 
         struct aws_s3_reserve_memory_payload *payload =

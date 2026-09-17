@@ -121,6 +121,27 @@ const struct aws_s3_platform_info *aws_s3_get_current_platform_info(void);
 AWS_S3_API
 struct aws_byte_cursor aws_s3_get_current_platform_ec2_intance_type(bool cached_only);
 
+/**
+ * Returns the default memory pool size that aws-c-s3 would use for a given
+ * throughput target. Matches the tier-based sizing aws_s3_client_new applies
+ * when the caller does not set an explicit memory_limit_in_bytes.
+ *
+ * If throughput_target_gbps > 0, the tier table is applied directly.
+ *
+ * If throughput_target_gbps == 0, aws-c-s3 attempts to auto-detect the
+ * throughput from the current EC2 environment via the per-family NIC
+ * bandwidth table. If auto-detection succeeds and the detected throughput
+ * is below the conservative right-sizing threshold (10 Gbps), the tier
+ * table is applied to the detected value. Otherwise the 2 GiB default is
+ * returned.
+ *
+ * Bindings can call this to size a language-side memory pool (e.g. a Java
+ * DirectByteBuffer pool) to match the native default without duplicating
+ * the tier table or the auto-detection logic.
+ */
+AWS_S3_API
+size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps);
+
 /*
  * Retrieves a list of EC2 instance types with recommended configuration.
  * Returns aws_array_list<aws_byte_cursor>. The caller is responsible for cleaning up the array list.

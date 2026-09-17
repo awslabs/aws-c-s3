@@ -444,6 +444,28 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_release(allocator, auto_ranged_put);
         return NULL;
     }
+    /* The buffer reserved for each request is meta_request->part_size, EXCEPT when the body
+     * streams from a file: aws_s3_request_new then sizes it at 2 * g_streaming_buffer_size
+     * regardless of part size, so a part larger than max_part_size costs nothing extra. */
+    bool file_streaming =
+        auto_ranged_put->base.fio_opts.should_stream && auto_ranged_put->base.request_body_parallel_stream != NULL;
+
+    if (!file_streaming && part_size > client->max_part_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not create auto-ranged-put meta request; part size of %" PRIu64
+            " exceeds the maximum part size of %" PRIu64 ". Increase the client memory limit, raise max_part_size, "
+            "or reduce the part size.",
+            (void *)&auto_ranged_put->base,
+            (uint64_t)part_size,
+            client->max_part_size);
+
+        /* Release before raising: aws_s3_meta_request_release runs destructors that can
+         * overwrite the thread-local error, and the caller reads aws_last_error(). */
+        aws_s3_meta_request_release(&auto_ranged_put->base);
+        aws_raise_error(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return NULL;
+    }
 
     auto_ranged_put->has_content_length = has_content_length;
     auto_ranged_put->content_length = has_content_length ? content_length : 0;
