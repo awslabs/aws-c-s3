@@ -281,6 +281,14 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
+        /* One byte per part (0-indexed: part 1 is index 0). Set when a part finishes sinking —
+         * written to the file or delivered through the body callback. Checked when the meta request
+         * is about to complete: every byte must be 1. Catches any path that drops or duplicates a
+         * part. Allocated by the auto-ranged-get implementation once total_num_parts is known;
+         * NULL for meta request types that do not split a download into parts. */
+        uint8_t *parts_delivered_mask;
+        uint32_t parts_delivered_mask_count;
+
         /* Bytes delivered contiguously from the start of the range, with no gaps. This is what the
          * download resume token reports as `continuous_downloaded_bytes`, so it may only count a part
          * once every earlier part has also landed. `next_contiguous_delivered_part` and

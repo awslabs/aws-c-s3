@@ -2288,6 +2288,219 @@ TEST_CASE(out_of_order_override_allocates_write_slots_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* ============================ spread requests ============================ */
+
+TEST_CASE(spread_requests_mock_server) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+    ASSERT_TRUE(out_results.spread_count > 1);
+    ASSERT_UINT_EQUALS(S_PART_COUNT, aws_array_list_length(&out_results.synced_data.succeed_metrics));
+    size_t expected_size = (size_t)S_PART_COUNT * S_PART_SIZE;
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_size);
+    ASSERT_UINT_EQUALS(expected_size, out_results.received_file_content.len);
+    for (size_t i = 0; i < out_results.received_file_content.len; ++i) {
+        uint8_t expected = s_positional_byte(i);
+        if (out_results.received_file_content.buffer[i] != expected) {
+            ASSERT_UINT_EQUALS(expected, out_results.received_file_content.buffer[i]);
+        }
+    }
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(spread_requests_declined_when_delivery_ordered_mock_server) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .out_of_order_delivery = AWS_TRIBOOL_FALSE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_FALSE(out_results.out_of_order_delivery);
+    ASSERT_UINT_EQUALS(0, out_results.spread_count);
+    ASSERT_UINT_EQUALS((size_t)S_PART_COUNT * S_PART_SIZE, out_results.received_file_size);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(spread_requests_forced_sequential_mock_server) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_string *env_name = aws_string_new_from_c_str(allocator, "AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS");
+    struct aws_string *env_value = aws_string_new_from_c_str(allocator, "1");
+    ASSERT_SUCCESS(aws_set_environment_value(env_name, env_value));
+    aws_string_destroy(env_value);
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(0, out_results.spread_count);
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+    ASSERT_UINT_EQUALS((size_t)S_PART_COUNT * S_PART_SIZE, out_results.received_file_size);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    ASSERT_SUCCESS(aws_unset_environment_value(env_name));
+    aws_string_destroy(env_name);
+    return AWS_OP_SUCCESS;
+}
+
+/* ============================ env var ordered delivery ============================ */
+
+TEST_CASE(env_ordered_delivery_changes_default_mock_server) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_string *env_name = aws_string_new_from_c_str(allocator, "AWS_CRT_S3_ORDERED_DELIVERY");
+    struct aws_string *env_value = aws_string_new_from_c_str(allocator, "1");
+    ASSERT_SUCCESS(aws_set_environment_value(env_name, env_value));
+    aws_string_destroy(env_value);
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .capture_file_content = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_FALSE(out_results.out_of_order_delivery);
+    ASSERT_UINT_EQUALS((size_t)S_PART_COUNT * S_PART_SIZE, out_results.received_file_size);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    ASSERT_SUCCESS(aws_unset_environment_value(env_name));
+    aws_string_destroy(env_name);
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(env_ordered_delivery_yields_to_explicit_request_mock_server) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_string *env_name = aws_string_new_from_c_str(allocator, "AWS_CRT_S3_ORDERED_DELIVERY");
+    struct aws_string *env_value = aws_string_new_from_c_str(allocator, "1");
+    ASSERT_SUCCESS(aws_set_environment_value(env_name, env_value));
+    aws_string_destroy(env_value);
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write_aligned"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+    ASSERT_UINT_EQUALS((size_t)S_PART_COUNT * S_PART_SIZE, out_results.received_file_size);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    ASSERT_SUCCESS(aws_unset_environment_value(env_name));
+    aws_string_destroy(env_name);
+    return AWS_OP_SUCCESS;
+}
+
 /* ============================ write-failure propagation ============================
  *
  * A write that fails must fail the meta request. If it did not, the caller would be handed a file

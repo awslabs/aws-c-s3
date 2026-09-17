@@ -72,6 +72,24 @@ struct aws_s3_auto_ranged_get {
         uint32_t num_parts_failed;
         uint32_t num_parts_checksum_validated;
 
+        /* Block-cyclic spread: parts are handed out across `spread_count` far-apart regions of the
+         * object instead of sweeping it from start to end. 0 means object order (no spreading).
+         *
+         * The first `spread_large_lanes` regions get `spread_stride + 1` parts each; the rest get
+         * `spread_stride`. `spread_first_part` is the first part to spread (discovery may have
+         * already taken part 1). `spread_parts_handed_out` is the counter that drives the formula.
+         *
+         * Together these produce a part number from a single increment -- no per-lane state. */
+        uint32_t spread_count;
+        uint32_t spread_stride;
+        uint32_t spread_large_lanes;
+        uint32_t spread_first_part;
+        uint32_t spread_parts_handed_out;
+
+        /* One byte per part (1-indexed, so element 0 is part 1). Set when a part number is handed out
+         * by `update`. Checked when the last part is requested: every byte must be 1.
+         * Allocated when spreading is set up; parts already requested before that point (discovery) are
+         * pre-marked. */
         uint32_t object_range_known : 1;
 
         /* True if object_range_known, and it's found to be empty.
