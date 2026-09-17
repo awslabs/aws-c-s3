@@ -1966,6 +1966,165 @@ TEST_CASE(default_head_object_with_checksum_header_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* The caller can hand the client the checksum of the data a GET returns instead of having the client learn one from
+ * the service. Downloads below use /get_object_opaque_etag, a 256 KiB object of repeated 'a' whose responses carry
+ * no checksum header of any kind, so the caller's value is the only thing validation can run against. That path also
+ * has no HEAD response to serve, so a download that still tried to discover a checksum would fail outright. */
+static int s_test_get_object_expected_checksum(
+    struct aws_allocator *allocator,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_cursor expected_checksum,
+    struct aws_byte_cursor object_range,
+    uint64_t expected_body_size,
+    int expected_error_code) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        /* validate_get_response_checksum is deliberately left unset: supplying a checksum is by itself a request
+         * to validate against it. */
+        .expected_checksum = expected_checksum,
+        .expected_checksum_algorithm = algorithm,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag"),
+                .object_range = object_range,
+            },
+        .mock_server = true,
+        .validate_type = expected_error_code == AWS_ERROR_SUCCESS ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS
+                                                                  : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(expected_error_code, out_results.finished_error_code);
+    /* Whether the value matched or not, the data was compared against it. */
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(algorithm, out_results.validation_algorithm);
+    /* A mismatch is only found once the last part has been checksummed, so every requested byte is delivered
+     * either way. */
+    ASSERT_UINT_EQUALS(expected_body_size, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* The whole object, in four parts. CRC32 combines, so the parts checksum themselves as they stream and the digests
+ * are folded into the value the caller gave. */
+TEST_CASE(get_object_expected_checksum_crc32_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_CRC32,
+        aws_byte_cursor_from_c_str("uo2NxA=="),
+        (struct aws_byte_cursor){0} /*object_range*/,
+        262144 /*expected_body_size*/,
+        AWS_ERROR_SUCCESS);
+}
+
+/* Same download with SHA256, which does not combine: the body is fed to a single running sum in object order as it
+ * is delivered. */
+TEST_CASE(get_object_expected_checksum_sha256_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_SHA256,
+        aws_byte_cursor_from_c_str("3T3eh2I9mms1TGjJQ9GJyJxjZS2UXnu98JhsrpGklSE="),
+        (struct aws_byte_cursor){0} /*object_range*/,
+        262144 /*expected_body_size*/,
+        AWS_ERROR_SUCCESS);
+}
+
+/* The value covers the requested bytes, not the object: here 128 KiB out of the middle of the object, which the
+ * service has no checksum of to report. */
+TEST_CASE(get_object_expected_checksum_range_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_CRC32,
+        aws_byte_cursor_from_c_str("ypdRMA=="),
+        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=65536-196607"),
+        131072 /*expected_body_size*/,
+        AWS_ERROR_SUCCESS);
+}
+
+/* The CRC32 of the first 64 KiB, offered as the checksum of all 256 KiB. */
+TEST_CASE(get_object_expected_checksum_mismatch_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_CRC32,
+        aws_byte_cursor_from_c_str("wyCR/w=="),
+        (struct aws_byte_cursor){0} /*object_range*/,
+        262144 /*expected_body_size*/,
+        AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+}
+
+/* What the caller supplies is what the download is validated against, even where the service reports a checksum of
+ * its own. Every part response here carries the correct CRC32 of its own 64 KiB, so per-part validation passes, and
+ * the object's CRC32 is discoverable; the caller's value is wrong for the 256 KiB delivered, and that is what
+ * decides the outcome. */
+TEST_CASE(get_object_expected_checksum_takes_precedence_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .validate_get_response_checksum = true,
+        /* The CRC32 of 64 KiB of 'a', which is one part rather than the whole download. */
+        .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+        .expected_checksum_algorithm = AWS_SCA_CRC32,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_per_part_header"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.
  * We trigger this by having the mock server delay 60 seconds before sending the response. */
 TEST_CASE(get_object_throughput_failure_mock_server) {

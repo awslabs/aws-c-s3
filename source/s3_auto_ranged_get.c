@@ -188,8 +188,11 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 
-    /* If we don't need checksum validation, then discover the size of the object while trying to get the first part. */
-    if (!meta_request->checksum_config.validate_response_checksum) {
+    /* If we don't need checksum validation, then discover the size of the object while trying to get the first part.
+     * Same when we already have the checksum to validate against, which at this point means the caller supplied it:
+     * the HeadObject below exists only to learn a checksum from the service. */
+    if (!meta_request->checksum_config.validate_response_checksum ||
+        meta_request->meta_request_level_running_response_sum != NULL) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE;
     }
 
@@ -966,8 +969,10 @@ static void s_s3_auto_ranged_get_request_finished(
             }
         }
 
-        /* Check for checksums if requested to */
-        if (meta_request->checksum_config.validate_response_checksum) {
+        /* Check for checksums if requested to, unless we already have one covering the download: the caller
+         * supplied it, so there is nothing to discover and the discovery response's own value must not replace it. */
+        if (meta_request->checksum_config.validate_response_checksum &&
+            meta_request->meta_request_level_running_response_sum == NULL) {
             if (!s_discovery_checksum_covers_download(
                     request, object_range_start, object_range_end, object_size, first_part_size)) {
                 AWS_LOGF_DEBUG(

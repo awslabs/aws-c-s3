@@ -182,6 +182,10 @@ struct aws_s3_tester_meta_request_options {
     enum aws_s3_checksum_algorithm expected_validate_checksum_alg;
     bool disable_put_trailing_checksum;
     bool checksum_via_header;
+    /* Optional. The checksum of the data the GET is expected to return, base64-encoded, and its algorithm.
+     * Passed through to the meta request's checksum_config. */
+    struct aws_byte_cursor expected_checksum;
+    enum aws_s3_checksum_algorithm expected_checksum_algorithm;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
