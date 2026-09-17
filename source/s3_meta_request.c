@@ -367,16 +367,25 @@ static int s_s3_meta_request_init_recv_file(
      * delivery asserts on the client), so the ordered path's own descriptor covers that case.
      * Skipped when out-of-order delivery has been ruled out, since nothing would use them.
      *
-     * Asks the same decision function the delivery-order latch uses, so the two cannot disagree
+     * The type check is a filter, not a guarantee: an auto-ranged GET is the only implementation that
+     * ever resolves the delivery order out of order, and it always carries this type -- but so does a
+     * GET whose query already names a partNumber, which the client routes to the default
+     * implementation instead. Such a request never resolves anything and writes through the ordered
+     * path's descriptor, so over-allocating here costs it a few unused slots and nothing else. Under-
+     * allocating is the direction that would matter, and this cannot do that.
+     *
+     * Asks the same decision function the delivery-order resolution uses, so the two cannot disagree
      * about which preference wins. The checksum's ordering demand is not consulted here and does not
-     * need to be: it is applied at the latch, and a constraint discovered then just leaves these
+     * need to be: it is applied at discovery, and a constraint discovered then just leaves these
      * descriptors unused, whereas skipping them here would leave a request that turns out to be
      * eligible with nothing to write through. */
-    bool out_of_order_allowed = client != NULL && aws_s3_allow_out_of_order_delivery(
-                                                      true /*file_sink*/,
-                                                      false /*callback_sink*/,
-                                                      meta_request->out_of_order_delivery_override,
-                                                      client->out_of_order_delivery);
+    bool out_of_order_allowed = client != NULL && meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+                                aws_s3_allow_out_of_order_delivery(
+                                    true /*file_sink*/,
+                                    false /*callback_sink*/,
+                                    meta_request->out_of_order_delivery_override,
+                                    client->out_of_order_delivery,
+                                    client->out_of_order_delivery_env);
     if (out_of_order_allowed) {
         size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
         AWS_FATAL_ASSERT(loop_count > 0);
@@ -456,6 +465,8 @@ int aws_s3_meta_request_init_base(
     /* Every part, including part 1, extends the contiguous written prefix. */
     meta_request->synced_data.next_contiguous_delivered_part = 1;
     meta_request->out_of_order_delivery_override = options->out_of_order_delivery;
+    /* Only an auto-ranged GET ever resolves this, at discovery. Everything else stays in object order. */
+    aws_atomic_init_int(&meta_request->out_of_order_delivery, 0);
 
     if (part_size == SIZE_MAX) {
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
@@ -2551,46 +2562,6 @@ static void s_s3_body_write_schedule(struct aws_s3_body_write_task_args *body_wr
     aws_event_loop_schedule_task_now(loop, &body_write->task);
 }
 
-/* True when the whole-object checksum can only be assembled by feeding bytes in object order, which
- * the parallel-write path cannot do. Stable for the life of the meta request by the time part 2
- * exists: both fields are set while processing the first response's headers.
- * Combinable algorithms fold each part's own digest in at finish, so they place no ordering demand. */
-static bool s_s3_meta_request_needs_ordered_body(const struct aws_s3_meta_request *meta_request) {
-    return meta_request->meta_request_level_running_response_sum != NULL &&
-           !meta_request->meta_request_level_checksum_combinable;
-}
-
-/* Resolve whether this transfer delivers bodies out of object order.
- *
- * Reads the sink shape and the preference off the meta request and hands them to
- * aws_s3_allow_out_of_order_delivery(), then applies the one constraint that outranks a preference.
- * Called once, on the first body: every input is settled by then -- the destination and the preference
- * at init, the checksum's demand while processing the first response's headers. */
-static bool s_s3_meta_request_resolve_out_of_order_delivery(const struct aws_s3_meta_request *meta_request) {
-    bool out_of_order = aws_s3_allow_out_of_order_delivery(
-        /* A file sink needs the per-worker descriptors, which init only allocates given a client that
-         * had not already ruled out-of-order delivery out. */
-        meta_request->recv_filepath != NULL && meta_request->recv_file_write_fd_slots != NULL,
-        meta_request->recv_filepath == NULL && meta_request->client != NULL,
-        meta_request->out_of_order_delivery_override,
-        meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET);
-
-    /* A whole-object checksum that cannot be folded per part has to be hashed in object order, which the
-     * parallel path cannot do. A correctness constraint, so it overrides the preference -- and worth
-     * saying out loud, since it is the one case where the caller asked for out-of-order delivery and did
-     * not get it. */
-    if (out_of_order && s_s3_meta_request_needs_ordered_body(meta_request)) {
-        AWS_LOGF_WARN(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Delivering in object order despite out-of-order delivery being available: this "
-            "response's whole-object checksum can only be verified by hashing the body in order.",
-            (void *)meta_request);
-        return false;
-    }
-
-    return out_of_order;
-}
-
 void aws_s3_meta_request_stream_response_body_synced(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request) {
@@ -2600,17 +2571,10 @@ void aws_s3_meta_request_stream_response_body_synced(
     AWS_PRECONDITION(request);
     AWS_PRECONDITION(request->part_number > 0);
 
-    /* Latched on the first body and never revisited: a mode that changed partway would leave the two
-     * paths' byte accounting inconsistent. */
-    if (meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_UNSET) {
-        meta_request->synced_data.out_of_order_delivery =
-            s_s3_meta_request_resolve_out_of_order_delivery(meta_request) ? AWS_TRIBOOL_TRUE : AWS_TRIBOOL_FALSE;
-    }
-
     /* Out-of-order delivery: bypass the priority queue entirely, so a part never waits on the part
      * ahead of it. Every part carries its own absolute offset, so they need no ordering relative to
      * each other. */
-    if (meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE) {
+    if (aws_atomic_load_int(&meta_request->out_of_order_delivery) != 0) {
 
         ++meta_request->synced_data.num_parts_delivery_sent;
 
@@ -3120,12 +3084,12 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         bytes_allowed_to_deliver = meta_request->synced_data.read_window_running_total -
                                    meta_request->io_threaded_data.num_bytes_delivery_completed;
 
-        /* Latched before the first body was queued, so it cannot change while this task runs. */
-        out_of_order_delivery = meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE;
-
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
+
+    /* Resolved before the first body was queued, so it cannot change while this task runs. */
+    out_of_order_delivery = aws_atomic_load_int(&meta_request->out_of_order_delivery) != 0;
     if (bytes_allowed_to_deliver > SIZE_MAX) {
         bytes_allowed_to_deliver = SIZE_MAX;
     }
@@ -3205,7 +3169,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                      * bytes in object order, which is what this delivery loop guarantees. Combinable
                      * algorithms fold in each part's own checksum when the part completes instead, so there
                      * is nothing to do here. */
-                    AWS_ASSERT(!out_of_order_delivery); /* s_s3_meta_request_needs_ordered_body() ruled it out */
+                    AWS_ASSERT(!out_of_order_delivery); /* a non-combinable whole-object checksum ruled it out */
                     if (aws_checksum_update(meta_request->meta_request_level_running_response_sum, &response_body)) {
                         error_code = aws_last_error();
                         AWS_LOGF_ERROR(

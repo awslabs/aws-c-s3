@@ -762,7 +762,9 @@ struct aws_s3_client_config {
      * body in order; such a request delivers in order and logs a warning.
      *
      * Leave AWS_TRIBOOL_UNSET to let the client decide, which currently means out of order for a file
-     * destination and in order for a body callback.
+     * destination and in order for a body callback. The AWS_CRT_S3_ORDERED_DELIVERY environment variable
+     * changes that decision to in order for both; it applies only when neither this field nor the request
+     * asked for something, so setting either one keeps the answer yours.
      *
      * A single request can override this via `aws_s3_meta_request_options.out_of_order_delivery`.
      */

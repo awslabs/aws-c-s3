@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
+#include <aws/common/environment.h>
 #include <aws/io/stream.h>
 #include <aws/io/uri.h>
 #include <aws/testing/aws_test_harness.h>
@@ -1818,6 +1819,63 @@ TEST_CASE(multipart_download_checksum_combine_out_of_order_mock_server) {
      * Combining out of arrival order has to produce the same digest as combining in order. */
     return s_test_multipart_download_checksum_combine(
         allocator, aws_byte_cursor_from_c_str("/get_object_checksum_combine_out_of_order"));
+}
+
+/* A combinable whole-object checksum does NOT force ordered delivery: each part folds its own digest in
+ * at finish, so the body never has to be hashed in object order. Downloads to a file, the sink that
+ * delivers out of order by default, and asserts both that the combined checksum still validated and that
+ * delivery really was out of order.
+ *
+ * Pins where the delivery order is resolved. Whether a whole-object checksum can be folded per part is
+ * settled by aws_s3_meta_request_setup_checksum_combine_synced, under the meta request lock; resolving the
+ * delivery order any earlier reads "not combinable" and quietly demotes this download to ordered delivery
+ * while still producing a correct file, which nothing else here would notice. */
+TEST_CASE(download_checksum_combine_delivers_out_of_order_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_combine"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    /* The whole-object checksum was folded from the parts and matched. */
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(262144, out_results.received_file_size);
+
+    /* And it got there without giving up out-of-order delivery. */
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
 }
 
 /* A 64 KiB object that downloads as a single part, where the part response carries the whole-object

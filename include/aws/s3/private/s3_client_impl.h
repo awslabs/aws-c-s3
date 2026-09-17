@@ -372,6 +372,17 @@ struct aws_s3_client {
      * order to a file and in order to a body callback. */
     const enum aws_tribool out_of_order_delivery;
 
+    /* The environment's answer to the same question, consulted only when neither the request nor the
+     * client expressed a preference. AWS_TRIBOOL_FALSE when AWS_CRT_S3_ORDERED_DELIVERY is set,
+     * AWS_TRIBOOL_UNSET otherwise.
+     *
+     * Never AWS_TRIBOOL_TRUE. The environment can ask for ordered delivery but cannot turn out-of-order
+     * delivery on, because doing so to a body callback would change what the caller's own sink sees --
+     * `range_start` stops advancing contiguously -- and an operator is not in a position to know whether
+     * that application places parts by offset or appends them. Asking for ordered delivery is safe in
+     * both directions: it is what a caller who says nothing to a body callback already gets. */
+    const enum aws_tribool out_of_order_delivery_env;
+
     /**
      * Timeout in ms for upload request for request after sending to the response first byte received.
      */

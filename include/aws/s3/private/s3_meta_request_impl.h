@@ -291,15 +291,6 @@ struct aws_s3_meta_request {
          * `total_downloaded_bytes`. Equal to `num_bytes_delivered` when delivery was in order. */
         uint64_t num_bytes_delivered_total;
 
-        /* Whether bodies reach their sink out of object order: to a file through the descriptor of
-         * whichever worker takes the part, or to the body callback without waiting on the part ahead of
-         * it. AWS_TRIBOOL_UNSET until the first body dispatch resolves it from the client's
-         * `out_of_order_delivery` preference and what the destination and response allow -- the
-         * whole-object checksum's ordering demand is only known after the first response's headers.
-         * Never revisited once resolved: a mode that changed partway would leave the two paths' byte
-         * accounting inconsistent. */
-        enum aws_tribool out_of_order_delivery;
-
         /* Next part number that would extend the contiguous delivered prefix. */
         uint32_t next_contiguous_delivered_part;
 
@@ -456,6 +447,24 @@ struct aws_s3_meta_request {
      * AWS_TRIBOOL_UNSET means defer to the client. Immutable after init. */
     enum aws_tribool out_of_order_delivery_override;
 
+    /* Whether bodies reach their sink out of object order: to a file through the descriptor of whichever
+     * worker takes the part, or to the body callback without waiting on the part ahead of it. Nonzero
+     * for yes.
+     *
+     * Written once, by the auto-ranged GET implementation as it finishes discovery. That is the earliest
+     * point the answer is knowable -- a whole-object checksum's ordering demand arrives with the discovery
+     * response's headers -- and the last point at which no part but discovery's own exists, so nothing has
+     * been delivered under one answer and then finds another. Read-only from then on.
+     *
+     * Stays false under every other implementation. Out-of-order delivery is a statement about the order of
+     * a download's parts, and an implementation that does not split a download into parts has no such
+     * order. Note that this is about the implementation and not `type`: a GET whose query already names a
+     * partNumber carries type GET_OBJECT but runs as a default meta request, and so leaves this false.
+     *
+     * Atomic because a retried discovery resolves this while the event delivery task may be draining a
+     * telemetry or progress event from the attempt that failed. */
+    struct aws_atomic_var out_of_order_delivery;
+
     /* One descriptor pair per write worker, indexed by the worker's file_io_elg loop index.
      * Length is recv_file_write_fd_slot_count.
      *
@@ -472,8 +481,8 @@ struct aws_s3_meta_request {
     size_t recv_file_write_fd_slot_count;
 
     /* Descriptor for the ordered delivery path, which has no worker slot of its own. Owned by the meta
-     * request's io_event_loop thread, the only thread that writes when
-     * `synced_data.out_of_order_delivery` is false, so it is never shared with a worker. */
+     * request's io_event_loop thread, the only thread that writes when `out_of_order_delivery` is false,
+     * so it is never shared with a worker. */
     struct aws_s3_recv_file_fds recv_file_ordered_fds;
 
     /* Base file offset for writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,

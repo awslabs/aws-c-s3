@@ -325,17 +325,21 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
 /**
  * Whether a download may deliver bodies out of object order.
  *
- * Two inputs, the second overriding the first:
+ * Three inputs. The first preference expressed wins, and the destination's default applies when none is:
  *
- *  1. What the destination defaults to. A file absorbs arrival order completely, since every part is
+ *  1. The request's override, then the client's setting. Either direction, either sink -- a preference
+ *     passed through the API means the caller's own code is built around that answer.
+ *  2. The environment's setting, asked only when neither of those said anything. Lets an operator change
+ *     what an indifferent caller gets without overruling one who asked.
+ *  3. What the destination defaults to. A file absorbs arrival order completely, since every part is
  *     written at its own absolute offset, so it defaults to out of order. A body callback surfaces the
  *     order to the caller through `range_start`, so it defaults to in order. Neither sink means there
  *     is nothing that could deliver out of order.
- *  2. An explicit preference, from the request or the client. Either direction, either sink.
  *
  * A whole-object checksum that can only be built by hashing the body in object order is a correctness
  * constraint that outranks the answer here. It is applied by the caller rather than passed in, because
- * the constraint is not known at every call site -- see s_s3_meta_request_resolve_out_of_order_delivery.
+ * the constraint is not known at every call site -- see the auto-ranged GET's discovery finish, which
+ * applies it there.
  *
  * Pure, so the policy can be exercised directly rather than inferred from a download's behaviour.
  */
@@ -344,7 +348,8 @@ bool aws_s3_allow_out_of_order_delivery(
     bool file_sink,
     bool callback_sink,
     enum aws_tribool request_override,
-    enum aws_tribool client_setting);
+    enum aws_tribool client_setting,
+    enum aws_tribool env_setting);
 
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
  * numbers begin at one. Intended to be used in conjunction

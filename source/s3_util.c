@@ -759,7 +759,8 @@ bool aws_s3_allow_out_of_order_delivery(
     bool file_sink,
     bool callback_sink,
     enum aws_tribool request_override,
-    enum aws_tribool client_setting) {
+    enum aws_tribool client_setting,
+    enum aws_tribool env_setting) {
 
     bool out_of_order;
     if (file_sink) {
@@ -774,8 +775,16 @@ bool aws_s3_allow_out_of_order_delivery(
         return false;
     }
 
-    /* A request override wins over the client setting. */
-    enum aws_tribool preference = request_override != AWS_TRIBOOL_UNSET ? request_override : client_setting;
+    /* First preference expressed wins, and the environment is asked last. So an operator can change what
+     * a caller who expressed nothing gets, but cannot overrule one who asked -- a setting passed through
+     * the API means the caller's own code is built around that answer. */
+    enum aws_tribool preference = request_override;
+    if (preference == AWS_TRIBOOL_UNSET) {
+        preference = client_setting;
+    }
+    if (preference == AWS_TRIBOOL_UNSET) {
+        preference = env_setting;
+    }
     if (preference != AWS_TRIBOOL_UNSET) {
         out_of_order = preference == AWS_TRIBOOL_TRUE;
     }

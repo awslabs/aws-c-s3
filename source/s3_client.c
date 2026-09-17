@@ -99,6 +99,11 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 
+/* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
+ * object order. Consulted below both the request and the client setting, so it changes the default rather
+ * than overruling a caller. See `aws_s3_client.out_of_order_delivery_env`. */
+static const char *s_ordered_delivery_env_var = "AWS_CRT_S3_ORDERED_DELIVERY";
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -930,6 +935,20 @@ struct aws_s3_client *aws_s3_client_new(
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
     *((enum aws_tribool *)&client->out_of_order_delivery) = client_config->out_of_order_delivery;
+
+    {
+        struct aws_string *ordered_delivery = aws_get_env_nonempty(allocator, s_ordered_delivery_env_var);
+        if (ordered_delivery != NULL) {
+            *((enum aws_tribool *)&client->out_of_order_delivery_env) = AWS_TRIBOOL_FALSE;
+            aws_string_destroy(ordered_delivery);
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "id=%p %s is set, so a download that does not ask for a delivery order of its own delivers "
+                "its body in object order.",
+                (void *)client,
+                s_ordered_delivery_env_var);
+        }
+    }
 
     /* Diagnose the read-backpressure / initial-read-window pairing.
      *

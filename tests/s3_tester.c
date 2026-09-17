@@ -226,10 +226,9 @@ static void s_s3_test_meta_request_finish(
         aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count);
     /* Settled during init, before any body is delivered, so it is stable by the time we finish. */
     meta_request_test_results->recv_file_direct_io = meta_request->recv_file_direct_io;
-    /* Read without the lock: the value is latched once, before the first body is dispatched, and
-     * never revisited, so by the time the meta request is finishing it cannot still be changing. */
-    meta_request_test_results->out_of_order_delivery =
-        meta_request->synced_data.out_of_order_delivery == AWS_TRIBOOL_TRUE;
+    /* Resolved once, at discovery, and never revisited, so by the time the meta request is finishing it
+     * cannot still be changing. */
+    meta_request_test_results->out_of_order_delivery = aws_atomic_load_int(&meta_request->out_of_order_delivery) != 0;
 
     /* The two delivered-byte counters the download resume token is built from. Taken under the lock
      * because an out-of-order sink may still have been advancing them from another thread until the

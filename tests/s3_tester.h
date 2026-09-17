@@ -306,7 +306,7 @@ struct aws_s3_meta_request_test_results {
      * that means to cover the direct-I/O path has to check this flag too. */
     bool recv_file_direct_io;
 
-    /* Captured from meta_request->synced_data.out_of_order_delivery via a finish callback. Lets a
+    /* Captured from meta_request->out_of_order_delivery via a finish callback. Lets a
      * test confirm parts really were written out of order, rather than the run having quietly taken
      * the ordered path and passed for the wrong reason. */
     bool out_of_order_delivery;

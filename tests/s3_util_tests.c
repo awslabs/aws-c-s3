@@ -1046,9 +1046,10 @@ static int s_test_s3_checksum_header(struct aws_allocator *allocator, void *ctx)
     return 0;
 }
 
-/* Table over every combination of the three inputs aws_s3_allow_out_of_order_delivery() takes: which sink
- * the download has, the request override, and the client setting. 2 sinks x 3 x 3 preferences = 18 rows,
- * plus the no-sink cases.
+/* Table over the inputs aws_s3_allow_out_of_order_delivery() takes: which sink the download has, the
+ * request override, the client setting, and the environment's setting. The first three are covered
+ * exhaustively with the environment silent (2 sinks x 3 x 3 = 18 rows), plus the no-sink cases, plus the
+ * rows that pin where the environment sits in the order of precedence.
  *
  * The checksum's ordering demand is not an input here -- it is applied by the caller, and covered by
  * noncombinable_checksum_forces_ordered_delivery_mock_server.
@@ -1070,47 +1071,61 @@ static int s_test_s3_allow_out_of_order_delivery(struct aws_allocator *allocator
         bool callback_sink;
         enum aws_tribool request_override;
         enum aws_tribool client_setting;
+        enum aws_tribool env_setting;
         bool expected;
     };
 
     const struct delivery_order_vector vectors[] = {
         /* A file sink defaults to out of order: every part is written at its own absolute offset, so
          * arrival order is invisible in the finished file. */
-        {"file/unset/unset", true, false, U, U, true},
-        {"file/unset/true", true, false, U, T, true},
-        {"file/unset/false", true, false, U, F, false},
+        {"file/unset/unset", true, false, U, U, U, true},
+        {"file/unset/true", true, false, U, T, U, true},
+        {"file/unset/false", true, false, U, F, U, false},
         /* A request override wins over the client, in both directions. */
-        {"file/true/unset", true, false, T, U, true},
-        {"file/true/true", true, false, T, T, true},
-        {"file/true/false", true, false, T, F, true},
-        {"file/false/unset", true, false, F, U, false},
-        {"file/false/true", true, false, F, T, false},
-        {"file/false/false", true, false, F, F, false},
+        {"file/true/unset", true, false, T, U, U, true},
+        {"file/true/true", true, false, T, T, U, true},
+        {"file/true/false", true, false, T, F, U, true},
+        {"file/false/unset", true, false, F, U, U, false},
+        {"file/false/true", true, false, F, T, U, false},
+        {"file/false/false", true, false, F, F, U, false},
 
         /* A callback sink defaults to IN ORDER: the caller sees arrival order through range_start, so
          * out-of-order has to be asked for rather than arriving on an upgrade. This is the one row that
          * differs from the file sink under the same inputs. */
-        {"cb/unset/unset", false, true, U, U, false},
-        {"cb/unset/true", false, true, U, T, true},
-        {"cb/unset/false", false, true, U, F, false},
-        {"cb/true/unset", false, true, T, U, true},
-        {"cb/true/true", false, true, T, T, true},
-        {"cb/true/false", false, true, T, F, true},
-        {"cb/false/unset", false, true, F, U, false},
-        {"cb/false/true", false, true, F, T, false},
-        {"cb/false/false", false, true, F, F, false},
+        {"cb/unset/unset", false, true, U, U, U, false},
+        {"cb/unset/true", false, true, U, T, U, true},
+        {"cb/unset/false", false, true, U, F, U, false},
+        {"cb/true/unset", false, true, T, U, U, true},
+        {"cb/true/true", false, true, T, T, U, true},
+        {"cb/true/false", false, true, T, F, U, true},
+        {"cb/false/unset", false, true, F, U, U, false},
+        {"cb/false/true", false, true, F, T, U, false},
+        {"cb/false/false", false, true, F, F, U, false},
 
         /* No sink that could take parts out of order: either no client at all, or a file sink whose
          * per-worker descriptors were never allocated. Ordered whatever anyone asked for -- the
          * parallel path would index a descriptor array that does not exist. */
-        {"none/unset/unset", false, false, U, U, false},
-        {"none/true/true", false, false, T, T, false},
+        {"none/unset/unset", false, false, U, U, U, false},
+        {"none/true/true", false, false, T, T, U, false},
+
+        /* The environment is consulted only when neither the request nor the client said anything, and it
+         * only ever asks for ordered delivery -- so the rows that matter are the ones where it changes a
+         * default, and the ones where an explicit preference has to survive it. */
+        {"file/unset/unset/env-ordered", true, false, U, U, F, false},
+        {"file/true/unset/env-ordered", true, false, T, U, F, true},
+        {"file/unset/true/env-ordered", true, false, U, T, F, true},
+        {"file/false/unset/env-ordered", true, false, F, U, F, false},
+        /* A callback sink already defaults to ordered, so the environment changes nothing there, and an
+         * explicit request for out-of-order still stands. */
+        {"cb/unset/unset/env-ordered", false, true, U, U, F, false},
+        {"cb/true/unset/env-ordered", false, true, T, U, F, true},
+        {"cb/unset/true/env-ordered", false, true, U, T, F, true},
     };
 
     for (size_t i = 0; i < AWS_ARRAY_SIZE(vectors); ++i) {
         const struct delivery_order_vector *v = &vectors[i];
-        bool actual =
-            aws_s3_allow_out_of_order_delivery(v->file_sink, v->callback_sink, v->request_override, v->client_setting);
+        bool actual = aws_s3_allow_out_of_order_delivery(
+            v->file_sink, v->callback_sink, v->request_override, v->client_setting, v->env_setting);
         if (actual != v->expected) {
             /* Name the row rather than only the index, so a failure says which rule broke. */
             AWS_LOGF_ERROR(
