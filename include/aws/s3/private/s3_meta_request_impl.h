@@ -70,9 +70,7 @@ struct aws_s3_combine_slot {
     size_t digest_len;
 };
 
-/* The descriptor one thread -- a write worker, or the ordered delivery thread -- writes received bytes
- * through. Opened on the owner's first body and closed at teardown, so bodies do not each pay an
- * open/close and no two threads share a struct file. */
+/* Wrapper of a file descriptors */
 struct aws_s3_recv_file_fds {
     /* The owner's descriptor: O_DIRECT when direct I/O is on for this transfer, buffered otherwise or
      * when the O_DIRECT open failed. AWS_FILE_INVALID_FD until opened. */
@@ -87,11 +85,9 @@ struct aws_s3_recv_file_fds {
 };
 
 /* One part that reached its sink ahead of an earlier part, parked in
- * `synced_data.completed_deliveries_tracker` until the gap before it closes. Used for tracking the
- * contiguous downloaded length, which is what the download resume token reports.
+ * `synced_data.completed_deliveries_tracker` until the gap before it closes.
  *
- * Both out-of-order sinks park here: a parallel file write, and a body callback delivered without
- * waiting on the part ahead of it. */
+ * Used for tracking the contiguous downloaded length, which is what the download resume token reports. */
 struct aws_s3_completed_delivery {
     uint32_t part_number;
     uint64_t bytes;

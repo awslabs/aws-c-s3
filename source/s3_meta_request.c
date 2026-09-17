@@ -178,6 +178,227 @@ static void s_validate_meta_request_checksum_on_finish(
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
+/* Bring `recv_filepath` into existence per the requested recv_file_option, settle whether writes
+ * can use O_DIRECT, and allocate the per-worker descriptor slots. No-op when the transfer has no
+ * receive file.
+ *
+ * On failure the error is already raised and the caller's `error:` label destroys the meta request,
+ * which is what deletes a file this transfer created. That is why `recv_filepath` is assigned before
+ * anything that can fail, and why `recv_file_delete_on_failure` is armed only once the file has been
+ * opened -- arming it earlier would let a CREATE_NEW that found a pre-existing file delete a file
+ * this transfer does not own.
+ *
+ * `part_size` is passed in rather than read off the meta request because it is not assigned there
+ * until after this runs. */
+static int s_s3_meta_request_init_recv_file(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_options *options,
+    size_t part_size) {
+
+    if (options->recv_filepath.len == 0) {
+        return AWS_OP_SUCCESS;
+    }
+
+    /* Rebound as locals so the body below reads the same as it did inline. `client` is NULL exactly
+     * when the meta request was created without one, which the fd-slot check below relies on. */
+    struct aws_allocator *allocator = meta_request->allocator;
+    struct aws_s3_client *client = meta_request->client;
+
+    meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
+
+    /* "direct_io" is what we'll attempt; we may flip it off below if any precondition fails.
+     * recv_file_direct_io_fallback_count tracks each fallback decision (init-time and write). */
+    bool direct_io = meta_request->fio_opts.direct_io;
+    size_t page_size = aws_system_info_page_size();
+    /* Accumulated locally because the field is atomic and nothing else can touch it yet. */
+    size_t direct_io_fallback_count = 0;
+    /* Where this transfer's byte 0 lands in the file. Needed for every write, not just O_DIRECT
+     * ones, because pwrite() takes an absolute offset rather than following a stream position. */
+    uint64_t base_position = 0;
+
+    /* Bring the file into existence per the requested recv_file_option, and read whatever the mode
+     * needs from it. This handle is init-only: nothing writes received bytes through it, so it is
+     * closed before this block ends. */
+    FILE *init_file = NULL;
+    bool file_length_read_failed = false;
+
+    switch (options->recv_file_option) {
+        case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
+            init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_create_mode);
+            break;
+
+        case AWS_S3_RECV_FILE_CREATE_NEW:
+            if (aws_path_exists(meta_request->recv_filepath)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cannot receive file via CREATE_NEW: file already exists",
+                    (void *)meta_request);
+                aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
+                return AWS_OP_ERR;
+            }
+            init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_create_mode);
+            break;
+
+        case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+            init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_append_mode);
+            /* For APPEND, the base position is the existing file size. It also has to be
+             * page-aligned for O_DIRECT writes to land at correct offsets. */
+            if (init_file != NULL) {
+                int64_t existing_len = 0;
+                if (aws_file_get_length(init_file, &existing_len) != AWS_OP_SUCCESS) {
+                    /* Recorded rather than jumped on, so the handle below is always closed. */
+                    file_length_read_failed = true;
+                    break;
+                }
+                base_position = (uint64_t)existing_len;
+                if (direct_io && base_position % page_size != 0) {
+                    AWS_LOGF_WARN(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p: O_DIRECT requested with CREATE_OR_APPEND but existing file size %" PRId64
+                        " is not page-aligned (page size %zu). Falling back to buffered I/O.",
+                        (void *)meta_request,
+                        existing_len,
+                        page_size);
+                    direct_io = false;
+                    ++direct_io_fallback_count;
+                }
+            }
+            break;
+
+        case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
+            if (!aws_path_exists(meta_request->recv_filepath)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
+                    (void *)meta_request);
+                aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
+                return AWS_OP_ERR;
+            }
+            init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_update_mode);
+            /* For WRITE_TO_POSITION, the base offset is set by the user. It also has to be
+             * page-aligned for O_DIRECT writes. No seek: every write carries its own offset. */
+            base_position = options->recv_file_position;
+            if (direct_io && base_position % page_size != 0) {
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: O_DIRECT requested with WRITE_TO_POSITION but recv_file_position %" PRIu64
+                    " is not page-aligned (page size %zu). Falling back to buffered I/O.",
+                    (void *)meta_request,
+                    options->recv_file_position,
+                    page_size);
+                direct_io = false;
+                ++direct_io_fallback_count;
+            }
+            break;
+
+        default:
+            AWS_ASSERT(false);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            return AWS_OP_ERR;
+    }
+
+    bool file_opened = init_file != NULL;
+    if (file_opened) {
+        fclose(init_file);
+        init_file = NULL;
+    }
+
+    if (!file_opened || file_length_read_failed) {
+        return AWS_OP_ERR;
+    }
+
+    /* Armed only now that this meta request has opened -- and so possibly created or truncated --
+     * the file. Arming it earlier would let an init failure that never touched the file, such as
+     * CREATE_NEW finding one already there, delete a file this transfer does not own. */
+    meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
+
+    /* Additional init-time fallback checks for O_DIRECT */
+    if (direct_io && !aws_file_direct_io_is_supported()) {
+        /* Platform doesn't support O_DIRECT. Fall back proactively at init rather than
+         * waiting for the first write to fail. */
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: O_DIRECT is not supported on this platform. Falling back to buffered I/O.",
+            (void *)meta_request);
+        direct_io = false;
+        ++direct_io_fallback_count;
+    }
+
+    if (direct_io && part_size % page_size != 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: O_DIRECT requires part_size to be page-aligned, but part_size is %zu and "
+            "page size is %zu. Falling back to buffered I/O.",
+            (void *)meta_request,
+            part_size,
+            page_size);
+        direct_io = false;
+        ++direct_io_fallback_count;
+    }
+
+    if (direct_io) {
+        /* Some destinations satisfy every check above yet still reject O_DIRECT at open -- /dev/null
+         * is the usual one. Probing here keeps that decision with the other init-time fallbacks, so
+         * `recv_file_direct_io` describes what the writers will really do and each of them is spared
+         * repeating the same failing open. The probe neither creates nor truncates: the descriptor
+         * API opens O_WRONLY only, and the file already exists by this point. */
+        int probe_fd = AWS_FILE_INVALID_FD;
+        if (aws_file_open_direct_io_for_write(meta_request->recv_filepath, &probe_fd) != AWS_OP_SUCCESS) {
+            AWS_LOGF_WARN(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Could not open %s with O_DIRECT. aws-error:%s. Falling back to buffered I/O.",
+                (void *)meta_request,
+                aws_string_c_str(meta_request->recv_filepath),
+                aws_error_name(aws_last_error()));
+            aws_reset_error();
+            direct_io = false;
+            ++direct_io_fallback_count;
+        } else {
+            aws_file_close_fd(probe_fd);
+        }
+    }
+
+    meta_request->recv_file_direct_io = direct_io;
+    meta_request->recv_file_base_position = base_position;
+    aws_atomic_init_int(&meta_request->recv_file_direct_io_fallback_count, direct_io_fallback_count);
+
+    /* One descriptor slot per file I/O loop, so a write worker never shares a descriptor.
+     * Only a client gives us that loop group; without one no body is delivered at all (body
+     * delivery asserts on the client), so the ordered path's own descriptor covers that case.
+     * Skipped when out-of-order delivery has been ruled out, since nothing would use them.
+     *
+     * Asks the same decision function the delivery-order latch uses, so the two cannot disagree
+     * about which preference wins. The checksum's ordering demand is not consulted here and does not
+     * need to be: it is applied at the latch, and a constraint discovered then just leaves these
+     * descriptors unused, whereas skipping them here would leave a request that turns out to be
+     * eligible with nothing to write through. */
+    bool out_of_order_allowed = client != NULL && aws_s3_allow_out_of_order_delivery(
+                                                      true /*file_sink*/,
+                                                      false /*callback_sink*/,
+                                                      meta_request->out_of_order_delivery_override,
+                                                      client->out_of_order_delivery);
+    if (out_of_order_allowed) {
+        size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
+        AWS_FATAL_ASSERT(loop_count > 0);
+        meta_request->recv_file_write_fd_slots =
+            aws_mem_calloc(allocator, loop_count, sizeof(*meta_request->recv_file_write_fd_slots));
+        for (size_t i = 0; i < loop_count; ++i) {
+            meta_request->recv_file_write_fd_slots[i].fd = AWS_FILE_INVALID_FD;
+        }
+        meta_request->recv_file_write_fd_slot_count = loop_count;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Out-of-order delivery available for download. direct_io=%d workers=%zu base_position=%" PRIu64,
+            (void *)meta_request,
+            (int)direct_io,
+            loop_count,
+            base_position);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -350,205 +571,8 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
-    if (options->recv_filepath.len > 0) {
-
-        meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
-
-        /* "direct_io" is what we'll attempt; we may flip it off below if any precondition fails.
-         * recv_file_direct_io_fallback_count tracks each fallback decision (init-time and write). */
-        bool direct_io = meta_request->fio_opts.direct_io;
-        size_t page_size = aws_system_info_page_size();
-        /* Accumulated locally because the field is atomic and nothing else can touch it yet. */
-        size_t direct_io_fallback_count = 0;
-        /* Where this transfer's byte 0 lands in the file. Needed for every write, not just O_DIRECT
-         * ones, because pwrite() takes an absolute offset rather than following a stream position. */
-        uint64_t base_position = 0;
-
-        /* Bring the file into existence per the requested recv_file_option, and read whatever the mode
-         * needs from it. This handle is init-only: nothing writes received bytes through it, so it is
-         * closed before this block ends. It exists because the descriptor APIs open O_WRONLY without
-         * O_CREAT or O_TRUNC, so only a stdio open can create or truncate the file.
-         * aws_fopen_safe() rather than aws_fopen() to pass the path as an aws_string, which is what
-         * converts correctly for non-ASCII paths on Windows. */
-        FILE *init_file = NULL;
-        bool file_length_read_failed = false;
-
-        switch (options->recv_file_option) {
-            case AWS_S3_RECV_FILE_CREATE_OR_REPLACE:
-                init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_create_mode);
-                break;
-
-            case AWS_S3_RECV_FILE_CREATE_NEW:
-                if (aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via CREATE_NEW: file already exists",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_ALREADY_EXISTS);
-                    goto error;
-                }
-                init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_create_mode);
-                break;
-
-            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
-                init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_append_mode);
-                /* For APPEND, the base position is the existing file size. It also has to be
-                 * page-aligned for O_DIRECT writes to land at correct offsets. */
-                if (init_file != NULL) {
-                    int64_t existing_len = 0;
-                    if (aws_file_get_length(init_file, &existing_len) != AWS_OP_SUCCESS) {
-                        /* Recorded rather than jumped on, so the handle below is always closed. */
-                        file_length_read_failed = true;
-                        break;
-                    }
-                    base_position = (uint64_t)existing_len;
-                    if (direct_io && base_position % page_size != 0) {
-                        AWS_LOGF_WARN(
-                            AWS_LS_S3_META_REQUEST,
-                            "id=%p: O_DIRECT requested with CREATE_OR_APPEND but existing file size %" PRId64
-                            " is not page-aligned (page size %zu). Falling back to buffered I/O.",
-                            (void *)meta_request,
-                            existing_len,
-                            page_size);
-                        direct_io = false;
-                        ++direct_io_fallback_count;
-                    }
-                }
-                break;
-
-            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
-                if (!aws_path_exists(meta_request->recv_filepath)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p Cannot receive file via WRITE_TO_POSITION: file not found.",
-                        (void *)meta_request);
-                    aws_raise_error(AWS_ERROR_S3_RECV_FILE_NOT_FOUND);
-                    goto error;
-                }
-                init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_update_mode);
-                /* For WRITE_TO_POSITION, the base offset is set by the user. It also has to be
-                 * page-aligned for O_DIRECT writes. No seek: every write carries its own offset. */
-                base_position = options->recv_file_position;
-                if (direct_io && base_position % page_size != 0) {
-                    AWS_LOGF_WARN(
-                        AWS_LS_S3_META_REQUEST,
-                        "id=%p: O_DIRECT requested with WRITE_TO_POSITION but recv_file_position %" PRIu64
-                        " is not page-aligned (page size %zu). Falling back to buffered I/O.",
-                        (void *)meta_request,
-                        options->recv_file_position,
-                        page_size);
-                    direct_io = false;
-                    ++direct_io_fallback_count;
-                }
-                break;
-
-            default:
-                AWS_ASSERT(false);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                goto error;
-        }
-
-        bool file_opened = init_file != NULL;
-        if (file_opened) {
-            fclose(init_file);
-            init_file = NULL;
-        }
-
-        if (!file_opened || file_length_read_failed) {
-            goto error;
-        }
-
-        /* Armed only now that this meta request has opened -- and so possibly created or truncated --
-         * the file. Arming it earlier would let an init failure that never touched the file, such as
-         * CREATE_NEW finding one already there, delete a file this transfer does not own. */
-        meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
-
-        /* Additional init-time fallback checks for O_DIRECT */
-        if (direct_io && !aws_file_direct_io_is_supported()) {
-            /* Platform doesn't support O_DIRECT. Fall back proactively at init rather than
-             * waiting for the first write to fail. */
-            AWS_LOGF_WARN(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT is not supported on this platform. Falling back to buffered I/O.",
-                (void *)meta_request);
-            direct_io = false;
-            ++direct_io_fallback_count;
-        }
-
-        if (direct_io && part_size % page_size != 0) {
-            AWS_LOGF_WARN(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: O_DIRECT requires part_size to be page-aligned, but part_size is %zu and "
-                "page size is %zu. Falling back to buffered I/O.",
-                (void *)meta_request,
-                part_size,
-                page_size);
-            direct_io = false;
-            ++direct_io_fallback_count;
-        }
-
-        if (direct_io) {
-            /* Some destinations satisfy every check above yet still reject O_DIRECT at open -- /dev/null
-             * is the usual one. Probing here keeps that decision with the other init-time fallbacks, so
-             * `recv_file_direct_io` describes what the writers will really do and each of them is spared
-             * repeating the same failing open. The probe neither creates nor truncates: the descriptor
-             * API opens O_WRONLY only, and the file already exists by this point. */
-            int probe_fd = AWS_FILE_INVALID_FD;
-            if (aws_file_open_direct_io_for_write(meta_request->recv_filepath, &probe_fd) != AWS_OP_SUCCESS) {
-                AWS_LOGF_WARN(
-                    AWS_LS_S3_META_REQUEST,
-                    "id=%p: Could not open %s with O_DIRECT. aws-error:%s. Falling back to buffered I/O.",
-                    (void *)meta_request,
-                    aws_string_c_str(meta_request->recv_filepath),
-                    aws_error_name(aws_last_error()));
-                aws_reset_error();
-                direct_io = false;
-                ++direct_io_fallback_count;
-            } else {
-                aws_file_close_fd(probe_fd);
-            }
-        }
-
-        meta_request->recv_file_direct_io = direct_io;
-        meta_request->recv_file_base_position = base_position;
-        aws_atomic_init_int(&meta_request->recv_file_direct_io_fallback_count, direct_io_fallback_count);
-
-        /* One descriptor slot per file I/O loop, so a write worker never shares a descriptor.
-         * Only a client gives us that loop group; without one no body is delivered at all (body
-         * delivery asserts on the client), so the ordered path's own descriptor covers that case.
-         * Skipped when out-of-order delivery has been ruled out, since nothing would use them.
-         *
-         * Asks the same decision function the delivery-order latch uses, so the two cannot disagree
-         * about which preference wins. The checksum's ordering demand is not known this early, and
-         * passing false for it is what we want anyway: a constraint discovered later just leaves these
-         * descriptors unused, whereas skipping them here would leave a request that turns out to be
-         * eligible with nothing to write through. */
-        bool out_of_order_allowed =
-            client != NULL &&
-            aws_s3_resolve_delivery_order(
-                true /*file_sink*/,
-                false /*callback_sink*/,
-                meta_request->out_of_order_delivery_override,
-                client->out_of_order_delivery,
-                false /*whole_object_checksum_needs_order, unknown this early*/) == AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
-        if (out_of_order_allowed) {
-            size_t loop_count = aws_event_loop_group_get_loop_count(client->file_io_elg);
-            AWS_FATAL_ASSERT(loop_count > 0);
-            meta_request->recv_file_write_fd_slots =
-                aws_mem_calloc(allocator, loop_count, sizeof(*meta_request->recv_file_write_fd_slots));
-            for (size_t i = 0; i < loop_count; ++i) {
-                meta_request->recv_file_write_fd_slots[i].fd = AWS_FILE_INVALID_FD;
-            }
-            meta_request->recv_file_write_fd_slot_count = loop_count;
-
-            AWS_LOGF_DEBUG(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p: Out-of-order delivery available for download. direct_io=%d workers=%zu base_position=%" PRIu64,
-                (void *)meta_request,
-                (int)direct_io,
-                loop_count,
-                base_position);
-        }
+    if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
+        goto error;
     }
 
     /* If the request's body is being passed in some other way, set that up.
@@ -914,11 +938,7 @@ static int s_s3_completed_delivery_pred(const void *a, const void *b) {
 
 /* Close every descriptor opened for writing parts. Idempotent. */
 static void s_s3_recv_file_fds_close(struct aws_s3_recv_file_fds *fds) {
-    if (fds->direct) {
-        aws_file_close_direct_io(fds->fd);
-    } else {
-        aws_file_close_fd(fds->fd);
-    }
+    aws_file_close_fd(fds->fd);
     fds->fd = AWS_FILE_INVALID_FD;
     fds->direct = false;
     fds->open_attempted = false;
@@ -2426,8 +2446,91 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
 
 static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status);
 
+struct aws_s3_body_write_task_args {
+    struct aws_allocator *allocator;
+
+    /* Owning ref. A pending write may be the last thing keeping the meta request alive. */
+    struct aws_s3_meta_request *meta_request;
+
+    /* Keeps `body`'s bytes alive when they came from the buffer pool, since
+     * aws_s3_buffer_ticket_claim() hands back a non-owning view of ticket-held memory.
+     * NULL when `body` was grown dynamically and owns its own allocation. */
+    struct aws_s3_buffer_ticket *ticket;
+
+    /* The bytes to write. */
+    struct aws_byte_buf body;
+
+    /* Moved off the request, because aws_s3_request_clean_up_send_data() asserts that a request
+     * being torn down no longer holds started metrics. Whoever completes the write is responsible
+     * for finishing these before destroying it. */
+    struct aws_s3_request_metrics *metrics;
+
+    /* The byte index of the object that this refers to. For example, for an HTTP message that has a range header, the
+       first chunk received will have a range_start that matches the range header's range-start.*/
+    uint64_t s3_object_range_start;
+
+    /* Part number the body came from. */
+    uint32_t part_number;
+
+    /* Which write worker owns this: an index into the client's file_io_elg, and equally the
+     * index of the meta request's descriptor slot this write uses. Assigned when the write is
+     * scheduled. */
+    size_t write_loop_index;
+
+    /* Scheduling state. */
+    struct aws_task task;
+};
+
+static struct aws_s3_body_write_task_args *s_s3_body_write_task_args_new_from_request(struct aws_s3_request *request) {
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(request->meta_request);
+
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+    struct aws_s3_body_write_task_args *body_write =
+        aws_mem_calloc(meta_request->allocator, 1, sizeof(struct aws_s3_body_write_task_args));
+
+    body_write->allocator = meta_request->allocator;
+
+    /* The request holds its own ref, which goes away when the caller releases it, so take one. */
+    body_write->meta_request = aws_s3_meta_request_acquire(meta_request);
+
+    /* Move rather than copy: the request must not clean up or release anything the write now owns.
+     * `body` may be a non-owning view of `ticket`'s memory, so the two have to travel together for
+     * the bytes to stay valid. */
+    body_write->ticket = request->ticket;
+    request->ticket = NULL;
+
+    body_write->body = request->send_data.response_body;
+    AWS_ZERO_STRUCT(request->send_data.response_body);
+
+    body_write->metrics = request->send_data.metrics;
+    request->send_data.metrics = NULL;
+
+    body_write->s3_object_range_start = request->part_range_start;
+    body_write->part_number = request->part_number;
+
+    return body_write;
+}
+
+static void s_s3_body_write_task_args_destroy(struct aws_s3_body_write_task_args *body_write) {
+    if (body_write == NULL) {
+        return;
+    }
+
+    /* Mirrors the invariant aws_s3_request_clean_up_send_data() enforces: metrics are finished where
+     * the work completes, not silently dropped during teardown. */
+    AWS_FATAL_ASSERT(body_write->metrics == NULL);
+
+    /* No-op when `body` is a view of pool memory; the ticket release below is what frees those. */
+    aws_byte_buf_clean_up(&body_write->body);
+    aws_s3_buffer_ticket_release(body_write->ticket);
+    aws_s3_meta_request_release(body_write->meta_request);
+
+    aws_mem_release(body_write->allocator, body_write);
+}
+
 /* Schedule `body_write` on one of the file I/O event loops. */
-static void s_s3_body_write_schedule(struct aws_s3_body_write *body_write) {
+static void s_s3_body_write_schedule(struct aws_s3_body_write_task_args *body_write) {
     struct aws_s3_meta_request *meta_request = body_write->meta_request;
     struct aws_s3_client *client = meta_request->client;
 
@@ -2454,28 +2557,33 @@ static bool s_s3_meta_request_needs_ordered_body(const struct aws_s3_meta_reques
 
 /* Resolve whether this transfer delivers bodies out of object order.
  *
- * Reads the four inputs off the meta request and hands them to aws_s3_resolve_delivery_order(), which
- * holds the policy. Called once, on the first body: every input is settled by then -- the destination
- * and the preference at init, the checksum's demand while processing the first response's headers. */
+ * Reads the sink shape and the preference off the meta request and hands them to
+ * aws_s3_allow_out_of_order_delivery(), then applies the one constraint that outranks a preference.
+ * Called once, on the first body: every input is settled by then -- the destination and the preference
+ * at init, the checksum's demand while processing the first response's headers. */
 static bool s_s3_meta_request_resolve_out_of_order_delivery(const struct aws_s3_meta_request *meta_request) {
-    enum aws_s3_delivery_order order = aws_s3_resolve_delivery_order(
+    bool out_of_order = aws_s3_allow_out_of_order_delivery(
         /* A file sink needs the per-worker descriptors, which init only allocates given a client that
          * had not already ruled out-of-order delivery out. */
         meta_request->recv_filepath != NULL && meta_request->recv_file_write_fd_slots != NULL,
         meta_request->recv_filepath == NULL && meta_request->client != NULL,
         meta_request->out_of_order_delivery_override,
-        meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET,
-        s_s3_meta_request_needs_ordered_body(meta_request));
+        meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET);
 
-    if (order == AWS_S3_DELIVERY_ORDER_IN_ORDER_FOR_CHECKSUM) {
+    /* A whole-object checksum that cannot be folded per part has to be hashed in object order, which the
+     * parallel path cannot do. A correctness constraint, so it overrides the preference -- and worth
+     * saying out loud, since it is the one case where the caller asked for out-of-order delivery and did
+     * not get it. */
+    if (out_of_order && s_s3_meta_request_needs_ordered_body(meta_request)) {
         AWS_LOGF_WARN(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Delivering in object order despite out-of-order delivery being available: this "
             "response's whole-object checksum can only be verified by hashing the body in order.",
             (void *)meta_request);
+        return false;
     }
 
-    return order == AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
+    return out_of_order;
 }
 
 void aws_s3_meta_request_stream_response_body_synced(
@@ -2504,7 +2612,7 @@ void aws_s3_meta_request_stream_response_body_synced(
         if (meta_request->recv_filepath != NULL) {
             /* Hand the body off to a write worker. The request owns nothing the write still needs, so
              * the caller's release can destroy it now instead of the pending write pinning it alive. */
-            struct aws_s3_body_write *body_write = aws_s3_body_write_new_from_request(request);
+            struct aws_s3_body_write_task_args *body_write = s_s3_body_write_task_args_new_from_request(request);
 
             aws_atomic_fetch_add(&meta_request->client->num_pending_writes, 1);
             s_s3_body_write_schedule(body_write);
@@ -2758,11 +2866,8 @@ static int s_s3_recv_file_write(
     return s_s3_recv_file_write_once(meta_request, file_offset, body);
 }
 
-/* Deliver response body to the appropriate sink: file or user callback. */
-/* Hand one part's body to whichever sink this download has: the receive file, or a body callback.
- *
- * Returns AWS_OP_SUCCESS, or AWS_OP_ERR with the reason raised. The caller reads the reason via
- * aws_last_error_or_unknown() -- so read it immediately, before anything else can overwrite it. */
+/* Deliver response body to the appropriate sink: file or user callback.
+ * Hand one part's body to whichever sink this download has: the receive file, or a body callback. */
 static int s_deliver_body_to_sink(
     struct aws_s3_meta_request *meta_request,
     const struct aws_byte_cursor *body,
@@ -2865,26 +2970,30 @@ static void s_s3_meta_request_record_delivered_part_synced(
  * parts' writes and with the ordered event delivery task. */
 static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
     (void)task;
-    struct aws_s3_body_write *body_write = arg;
+    struct aws_s3_body_write_task_args *body_write = arg;
     struct aws_s3_meta_request *meta_request = body_write->meta_request;
 
     int error_code = AWS_ERROR_SUCCESS;
 
     if (task_status == AWS_TASK_STATUS_RUN_READY) {
+        struct aws_byte_cursor body = aws_byte_cursor_from_buf(&body_write->body);
+        uint64_t file_offset = s_s3_recv_file_offset(meta_request, body_write->s3_object_range_start);
+
         AWS_LOGF_TRACE(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Writing part %" PRIu32 ", %zu bytes at object offset %" PRIu64 ".",
+            "id=%p: Writer %zu writing part %" PRIu32 ", %zu bytes, object range start %" PRIu64
+            " -> file offset %" PRIu64 ".",
             (void *)meta_request,
+            body_write->write_loop_index,
             body_write->part_number,
-            body_write->body.len,
-            body_write->range_start);
+            body.len,
+            body_write->s3_object_range_start,
+            file_offset);
 
         if (body_write->metrics != NULL) {
             aws_high_res_clock_get_ticks((uint64_t *)&body_write->metrics->time_metrics.deliver_start_timestamp_ns);
         }
 
-        struct aws_byte_cursor body = aws_byte_cursor_from_buf(&body_write->body);
-        uint64_t file_offset = s_s3_recv_file_offset(meta_request, body_write->range_start);
         if (s_s3_recv_file_write(
                 meta_request,
                 &meta_request->recv_file_write_fd_slots[body_write->write_loop_index],
@@ -2952,7 +3061,7 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
     aws_s3_client_schedule_process_work(meta_request->client);
 
     /* Releases the buffer ticket, which is what frees this part's pool memory. */
-    aws_s3_body_write_destroy(body_write);
+    s_s3_body_write_task_args_destroy(body_write);
 }
 
 /* Deliver events in event_delivery_array.

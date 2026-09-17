@@ -757,12 +757,11 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     return AWS_OP_SUCCESS;
 }
 
-enum aws_s3_delivery_order aws_s3_resolve_delivery_order(
+bool aws_s3_allow_out_of_order_delivery(
     bool file_sink,
     bool callback_sink,
     enum aws_tribool request_override,
-    enum aws_tribool client_setting,
-    bool whole_object_checksum_needs_order) {
+    enum aws_tribool client_setting) {
 
     bool out_of_order;
     if (file_sink) {
@@ -770,8 +769,11 @@ enum aws_s3_delivery_order aws_s3_resolve_delivery_order(
     } else if (callback_sink) {
         out_of_order = false;
     } else {
-        /* No sink that could take parts out of order. */
-        return AWS_S3_DELIVERY_ORDER_IN_ORDER;
+        /* Either no sink at all (no client, so nothing is ever delivered), or a file sink whose
+         * per-worker descriptors were never allocated -- init skips them when the client or request
+         * ruled out-of-order delivery out. The latter must stay ordered: the parallel path indexes
+         * recv_file_write_fd_slots unconditionally, and the ordered path has its own descriptor. */
+        return false;
     }
 
     /* A request override wins over the client setting. */
@@ -780,13 +782,7 @@ enum aws_s3_delivery_order aws_s3_resolve_delivery_order(
         out_of_order = preference == AWS_TRIBOOL_TRUE;
     }
 
-    if (!out_of_order) {
-        return AWS_S3_DELIVERY_ORDER_IN_ORDER;
-    }
-    if (whole_object_checksum_needs_order) {
-        return AWS_S3_DELIVERY_ORDER_IN_ORDER_FOR_CHECKSUM;
-    }
-    return AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER;
+    return out_of_order;
 }
 
 int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string) {

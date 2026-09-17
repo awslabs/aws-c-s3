@@ -813,67 +813,6 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
-    /* Set up body streaming ELG */
-    {
-        uint16_t num_event_loops =
-            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
-        uint16_t num_streaming_threads = num_event_loops;
-
-        if (num_streaming_threads < 1) {
-            num_streaming_threads = 1;
-        }
-
-        struct aws_shutdown_callback_options body_streaming_elg_shutdown_options = {
-            .shutdown_callback_fn = s_s3_client_body_streaming_elg_shutdown,
-            .shutdown_callback_user_data = client,
-        };
-
-        client->body_streaming_elg = aws_event_loop_group_new_default(
-            client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
-
-        if (!client->body_streaming_elg) {
-            /* Fail to create elg, we should fail the call */
-            goto on_error;
-        }
-        client->synced_data.body_streaming_elg_allocated = true;
-    }
-
-    /* Set up file I/O ELG */
-    {
-        uint16_t num_file_io_threads = client_config->num_file_io_threads;
-
-        if (num_file_io_threads == 0) {
-            /* Default to one thread per bootstrap event loop, matching the body streaming ELG. */
-            num_file_io_threads =
-                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
-        }
-        if (num_file_io_threads < 1) {
-            num_file_io_threads = 1;
-        }
-
-        struct aws_shutdown_callback_options file_io_elg_shutdown_options = {
-            .shutdown_callback_fn = s_s3_client_file_io_elg_shutdown,
-            .shutdown_callback_user_data = client,
-        };
-
-        client->file_io_elg =
-            aws_event_loop_group_new_default(client->allocator, num_file_io_threads, &file_io_elg_shutdown_options);
-
-        if (!client->file_io_elg) {
-            /* Fail to create elg, we should fail the call.
-             * Note: this leaks the body streaming ELG created just above. on_error frees the client,
-             * and an ELG release runs its shutdown callback asynchronously against that same client,
-             * so releasing it here would be a use-after-free. Reaching this point means the process
-             * cannot start threads at all. */
-            goto on_error;
-        }
-        client->synced_data.file_io_elg_allocated = true;
-
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT, "id=%p File I/O ELG created with %u threads.", (void *)client, num_file_io_threads);
-    }
-    /* Setup cannot fail after this point. */
-
     client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
     if (client_config->enable_s3express) {
         if (client_config->s3express_provider_override_factory) {
@@ -918,6 +857,60 @@ struct aws_s3_client *aws_s3_client_new(
             goto on_error;
         }
     }
+
+    /* Set up body streaming ELG */
+    {
+        uint16_t num_event_loops =
+            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+        uint16_t num_streaming_threads = num_event_loops;
+
+        if (num_streaming_threads < 1) {
+            num_streaming_threads = 1;
+        }
+
+        struct aws_shutdown_callback_options body_streaming_elg_shutdown_options = {
+            .shutdown_callback_fn = s_s3_client_body_streaming_elg_shutdown,
+            .shutdown_callback_user_data = client,
+        };
+
+        client->body_streaming_elg = aws_event_loop_group_new_default(
+            client->allocator, num_streaming_threads, &body_streaming_elg_shutdown_options);
+
+        if (!client->body_streaming_elg) {
+            /* Fail to create elg, we should fail the call */
+            goto on_error;
+        }
+        client->synced_data.body_streaming_elg_allocated = true;
+    }
+
+    /* Set up file I/O ELG */
+    {
+        uint16_t num_file_io_threads = client_config->num_file_io_threads;
+
+        if (num_file_io_threads == 0) {
+            /* Default to one thread per bootstrap event loop, matching the body streaming ELG. */
+            num_file_io_threads =
+                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+        }
+
+        struct aws_shutdown_callback_options file_io_elg_shutdown_options = {
+            .shutdown_callback_fn = s_s3_client_file_io_elg_shutdown,
+            .shutdown_callback_user_data = client,
+        };
+
+        client->file_io_elg =
+            aws_event_loop_group_new_default(client->allocator, num_file_io_threads, &file_io_elg_shutdown_options);
+
+        if (!client->file_io_elg) {
+            goto on_error;
+        }
+        client->synced_data.file_io_elg_allocated = true;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p File I/O ELG created with %u threads.", (void *)client, num_file_io_threads);
+    }
+
+    /***************** Setup cannot fail after this point. *************************/
 
     aws_hash_table_init(
         &client->synced_data.endpoints,
@@ -1110,8 +1103,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
-    /* A meta request cannot finish while any of its writes are outstanding, and the last one to
-     * finish is what releases us, so every write has completed by now. */
+    /* A meta request cannot finish while any of its writes are outstanding. */
     AWS_ASSERT(aws_atomic_load_int(&client->num_pending_writes) == 0);
 
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
@@ -2131,6 +2123,15 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         uint32_t num_requests_streaming_response =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_response);
 
+        /* The file-sink counterpart of num_requests_streaming_response: a download writing to
+         * recv_filepath out of order counts its bodies here instead, so without this a parallel-write
+         * download shows zero for both streaming counters and its write backlog is invisible.
+         *
+         * Deliberately not folded into total_approx_requests. A body write detaches from its request so
+         * the request can be released right away, which already decremented the exact in-flight count,
+         * so counting it on the approx side would make approx exceed exact for the whole download. */
+        uint32_t num_pending_writes = (uint32_t)aws_atomic_load_int(&client->num_pending_writes);
+
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
                                          num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
@@ -2139,7 +2140,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             AWS_LS_S3_CLIENT_STATS,
             "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
             "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  "
-            "Requests-streaming-response:%d "
+            "Requests-streaming-response:%d  Writes-pending:%d"
             " Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
@@ -2152,6 +2153,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             num_requests_network_io,
             num_requests_stream_queued_waiting,
             num_requests_streaming_response,
+            num_pending_writes,
             num_endpoints_in_table,
             num_endpoints_allocated);
     }

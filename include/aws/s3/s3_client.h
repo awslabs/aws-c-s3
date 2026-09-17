@@ -958,12 +958,10 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Overrides the client config if set.
      * If set, this controls how the meta request interact with file I/O.
-     * Read `aws_s3_file_io_options` for details.
-     *  Notes: Only applies when `send_filepath` is set.
-     *  TODO: adapt it to `recv_filepath`.
      *
-     * Note: if both client and meta request don't set this, for objects larger than 2TiB, this will be set to a default
-     * options with `should_stream` to be True and others follow the default to avoid memory issues.
+     * Note: if both client and meta request don't set this, for objects larger than g_streaming_object_size_threshold,
+     * this will be set to a default options with `should_stream` to be True and others follow the default to avoid
+     * memory issues.
      *
      * eg:
      * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in

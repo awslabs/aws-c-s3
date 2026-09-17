@@ -325,43 +325,29 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     size_t *out_part_size,
     uint32_t *out_num_parts);
 
-/* Outcome of deciding whether a download delivers response bodies out of object order. */
-enum aws_s3_delivery_order {
-    /* Parts reach the sink as they arrive. */
-    AWS_S3_DELIVERY_ORDER_OUT_OF_ORDER,
-
-    /* Parts reach the sink in object order, because that is what the destination defaults to or what
-     * the caller asked for. */
-    AWS_S3_DELIVERY_ORDER_IN_ORDER,
-
-    /* Out-of-order delivery was available and wanted, but a whole-object checksum can only be verified
-     * by hashing the body in object order. Kept distinct from IN_ORDER so the caller can say so, since
-     * this is the one case where the caller asked for something it did not get. */
-    AWS_S3_DELIVERY_ORDER_IN_ORDER_FOR_CHECKSUM,
-};
-
 /**
- * Decide whether a download delivers bodies out of object order.
+ * Whether a download may deliver bodies out of object order.
  *
- * Three inputs, each overriding the one before it:
+ * Two inputs, the second overriding the first:
  *
  *  1. What the destination defaults to. A file absorbs arrival order completely, since every part is
  *     written at its own absolute offset, so it defaults to out of order. A body callback surfaces the
  *     order to the caller through `range_start`, so it defaults to in order. Neither sink means there
  *     is nothing that could deliver out of order.
  *  2. An explicit preference, from the request or the client. Either direction, either sink.
- *  3. Whether a whole-object checksum can only be built by hashing the body in order. A correctness
- *     constraint, so it wins over any preference.
+ *
+ * A whole-object checksum that can only be built by hashing the body in object order is a correctness
+ * constraint that outranks the answer here. It is applied by the caller rather than passed in, because
+ * the constraint is not known at every call site -- see s_s3_meta_request_resolve_out_of_order_delivery.
  *
  * Pure, so the policy can be exercised directly rather than inferred from a download's behaviour.
  */
 AWS_S3_API
-enum aws_s3_delivery_order aws_s3_resolve_delivery_order(
+bool aws_s3_allow_out_of_order_delivery(
     bool file_sink,
     bool callback_sink,
     enum aws_tribool request_override,
-    enum aws_tribool client_setting,
-    bool whole_object_checksum_needs_order);
+    enum aws_tribool client_setting);
 
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
  * numbers begin at one. Intended to be used in conjunction
