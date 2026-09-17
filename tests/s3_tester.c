@@ -1693,7 +1693,6 @@ int aws_s3_tester_send_meta_request_with_options(
                     filepath_str = aws_s3_tester_create_file(allocator, options->get_options.object_path, NULL);
                 }
                 meta_request_options.recv_filepath = aws_byte_cursor_from_string(filepath_str);
-                printf("##### %s\n", aws_string_c_str(filepath_str));
                 meta_request_options.recv_file_option = options->get_options.recv_file_option;
                 meta_request_options.recv_file_position = options->get_options.recv_file_position;
                 meta_request_options.recv_file_delete_on_failure = options->get_options.recv_file_delete_on_failure;
