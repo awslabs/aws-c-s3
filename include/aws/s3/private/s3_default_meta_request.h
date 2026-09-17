@@ -31,6 +31,11 @@ struct aws_s3_meta_request_default {
         uint32_t request_sent : 1;
         uint32_t request_completed : 1;
 
+        /* Whether the response body was checked against a checksum the response itself carried, and with which
+         * algorithm. Recorded when the single request finishes, reported once the meta request succeeds. */
+        bool did_validate;
+        enum aws_s3_checksum_algorithm validation_algorithm;
+
     } synced_data;
 };
 

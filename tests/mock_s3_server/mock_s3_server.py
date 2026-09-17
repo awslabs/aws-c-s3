@@ -425,6 +425,12 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         # Don't generate the body for those requests
         return response_config
 
+    if parsed_path.path == "/get_object_checksum_suffix_range" and head_request:
+        # The HEAD copies the original request's headers, so it carries the suffix range
+        # ("bytes=-1024") that the range parsing below cannot make sense of. Answer it first,
+        # from a response file that spells its Content-Range out.
+        return ResponseConfig("/get_object_checksum_suffix_range_head", request=request)
+
     body_range_value = get_request_header_value(request, "range")
 
     if body_range_value:
@@ -450,6 +456,29 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         if head_request:
             return ResponseConfig("/get_object_checksum_single_part_head", request=request)
         response_config = ResponseConfig("/get_object_checksum_single_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_per_part_header":
+        # 256 KiB object of repeated 'a' where every part response carries the CRC32 of its own
+        # 64 KiB of body, the way S3 answers a range that lines up with an uploaded part. No
+        # single response here describes the whole object.
+        response_config = ResponseConfig("/get_object_checksum_per_part_header", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_mp_parts_count":
+        # 64 KiB object stored as a multipart upload with a full object checksum: a plain GET returns the
+        # whole object, its CRC32, and x-amz-mp-parts-count. The checksum covers exactly the bytes returned,
+        # even though the parts count says the object was assembled from several parts.
+        response_config = ResponseConfig("/get_object_checksum_mp_parts_count", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_suffix_range":
+        # 64 KiB object whose whole-object CRC32 is advertised on the HEAD response (see above).
+        # The part responses carry no checksum header, since they only cover the requested suffix.
+        response_config = ResponseConfig("/get_object_checksum_suffix_range_part", request=request)
         response_config.generate_body_size = data_length
         return response_config
 
