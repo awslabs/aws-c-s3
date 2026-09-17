@@ -1974,7 +1974,7 @@ static int s_test_get_object_expected_checksum(
     struct aws_allocator *allocator,
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_cursor expected_checksum,
-    struct aws_byte_cursor object_range,
+    const char *object_range,
     uint64_t expected_body_size,
     int expected_error_code) {
 
@@ -1999,12 +1999,14 @@ static int s_test_get_object_expected_checksum(
         .get_options =
             {
                 .object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag"),
-                .object_range = object_range,
             },
         .mock_server = true,
         .validate_type = expected_error_code == AWS_ERROR_SUCCESS ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS
                                                                   : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
     };
+    if (object_range != NULL) {
+        get_options.get_options.object_range = aws_byte_cursor_from_c_str(object_range);
+    }
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
 
@@ -2033,7 +2035,7 @@ TEST_CASE(get_object_expected_checksum_crc32_mock_server) {
         allocator,
         AWS_SCA_CRC32,
         aws_byte_cursor_from_c_str("uo2NxA=="),
-        (struct aws_byte_cursor){0} /*object_range*/,
+        NULL /*object_range*/,
         262144 /*expected_body_size*/,
         AWS_ERROR_SUCCESS);
 }
@@ -2046,7 +2048,7 @@ TEST_CASE(get_object_expected_checksum_sha256_mock_server) {
         allocator,
         AWS_SCA_SHA256,
         aws_byte_cursor_from_c_str("3T3eh2I9mms1TGjJQ9GJyJxjZS2UXnu98JhsrpGklSE="),
-        (struct aws_byte_cursor){0} /*object_range*/,
+        NULL /*object_range*/,
         262144 /*expected_body_size*/,
         AWS_ERROR_SUCCESS);
 }
@@ -2059,7 +2061,7 @@ TEST_CASE(get_object_expected_checksum_range_mock_server) {
         allocator,
         AWS_SCA_CRC32,
         aws_byte_cursor_from_c_str("ypdRMA=="),
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=65536-196607"),
+        "bytes=65536-196607" /*object_range*/,
         131072 /*expected_body_size*/,
         AWS_ERROR_SUCCESS);
 }
@@ -2071,7 +2073,7 @@ TEST_CASE(get_object_expected_checksum_mismatch_mock_server) {
         allocator,
         AWS_SCA_CRC32,
         aws_byte_cursor_from_c_str("wyCR/w=="),
-        (struct aws_byte_cursor){0} /*object_range*/,
+        NULL /*object_range*/,
         262144 /*expected_body_size*/,
         AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
 }
