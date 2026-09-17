@@ -137,9 +137,6 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
 
 AWS_S3_API
-extern const struct aws_byte_cursor g_mp_parts_count_header_name;
-
-AWS_S3_API
 extern const struct aws_byte_cursor g_post_method;
 
 AWS_S3_API
@@ -347,14 +344,14 @@ AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
 /* Check the response headers for checksum to verify, return a running checksum based on the algorithm found. If no
- * checksum found from header, return null. */
+ * checksum found from header, return null. The caller is responsible for deciding whether the value describes the
+ * bytes it intends to compare it against; this only reports what the headers carry. */
 AWS_S3_API
 int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     struct aws_s3_checksum **out_checksum,
-    struct aws_byte_buf *out_checksum_buffer,
-    bool meta_request_level);
+    struct aws_byte_buf *out_checksum_buffer);
 
 /**
  * Calculate client-level optimal range size based on memory and connection constraints.
