@@ -502,7 +502,7 @@ static void s_s3_meta_request_default_request_finished(
                 if (aws_s3_parse_content_range_response_header(
                         request->send_data.response_headers, &response_range_start, NULL, NULL) == AWS_OP_SUCCESS) {
                     request->part_range_start = response_range_start;
-                    meta_request->recv_file_object_offset_origin = response_range_start;
+                    meta_request->recv_file_object_range_origin = response_range_start;
                 } else {
                     aws_reset_error();
                 }

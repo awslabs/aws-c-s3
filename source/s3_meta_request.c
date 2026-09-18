@@ -2736,17 +2736,43 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
     return false;
 }
 
-/* Where a part's bytes belong in the file. A part's delivery offset is its absolute object offset, so
- * a ranged download has to subtract the range's origin for its first byte to land at the base
- * position rather than that many bytes into the file. */
-static uint64_t s_s3_recv_file_offset(const struct aws_s3_meta_request *meta_request, uint64_t object_offset) {
+/* Where a part's bytes belong in the file. A part is delivered at its absolute position in the object,
+ * so a ranged download has to subtract the range's origin for its first byte to land at the base offset
+ * rather than that many bytes into the file. */
+static int s_s3_recv_file_offset(
+    struct aws_s3_meta_request *meta_request,
+    uint64_t object_range_start,
+    uint64_t *out_file_offset) {
+
     /* The mapping is only meaningful once the origin it subtracts is known, and the origin cannot say so
      * for itself: 0 is what it holds before anything resolves it and also what a whole-object download
-     * resolves it to. Reaching here first would place the body at its absolute object offset rather than
-     * the base position, with nothing about the outcome looking wrong. */
-    AWS_ASSERT(meta_request->recv_file_object_range_origin_resolved);
-    AWS_ASSERT(object_offset >= meta_request->recv_file_object_range_origin);
-    return meta_request->recv_file_base_offset + (object_offset - meta_request->recv_file_object_range_origin);
+     * resolves it to. Mapping before then would place the body at its absolute position in the object
+     * rather than at the base offset, with nothing about the outcome looking wrong. */
+    if (!meta_request->recv_file_object_range_origin_resolved) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Cannot place object range start %" PRIu64 " in the file before the object range is resolved.",
+            (void *)meta_request,
+            object_range_start);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    /* Ahead of the origin there is no file to map onto: the subtraction would wrap and the write would
+     * land somewhere far past the end of the file. */
+    if (object_range_start < meta_request->recv_file_object_range_origin) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Object range start %" PRIu64 " precedes the range origin %" PRIu64 ", so it has no place in the "
+            "file.",
+            (void *)meta_request,
+            object_range_start,
+            meta_request->recv_file_object_range_origin);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    *out_file_offset =
+        meta_request->recv_file_base_offset + (object_range_start - meta_request->recv_file_object_range_origin);
+    return AWS_OP_SUCCESS;
 }
 
 /* Write one body buffered through a descriptor opened and closed just for it.
@@ -2854,11 +2880,12 @@ static int s_deliver_body_to_sink(
     struct aws_s3_request *request) {
 
     if (meta_request->recv_filepath != NULL) {
-        if (s_s3_recv_file_write(
-                meta_request,
-                &meta_request->recv_file_ordered_fds,
-                s_s3_recv_file_offset(meta_request, delivery_range_start),
-                body) != AWS_OP_SUCCESS) {
+        uint64_t file_offset = 0;
+        if (s_s3_recv_file_offset(meta_request, delivery_range_start, &file_offset) != AWS_OP_SUCCESS) {
+            return AWS_OP_ERR;
+        }
+        if (s_s3_recv_file_write(meta_request, &meta_request->recv_file_ordered_fds, file_offset, body) !=
+            AWS_OP_SUCCESS) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p Failed writing body to file. aws-error:%s",
@@ -3025,42 +3052,47 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
 
     if (task_status == AWS_TASK_STATUS_RUN_READY) {
         struct aws_byte_cursor body = aws_byte_cursor_from_buf(&body_write->body);
-        uint64_t file_offset = s_s3_recv_file_offset(meta_request, body_write->s3_object_range_start);
-
-        AWS_LOGF_TRACE(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p: Writer %zu writing part %" PRIu32 ", %zu bytes, object range start %" PRIu64
-            " -> file offset %" PRIu64 ".",
-            (void *)meta_request,
-            body_write->write_loop_index,
-            body_write->part_number,
-            body.len,
-            body_write->s3_object_range_start,
-            file_offset);
-
-        if (body_write->metrics != NULL) {
-            aws_high_res_clock_get_ticks((uint64_t *)&body_write->metrics->time_metrics.deliver_start_timestamp_ns);
-        }
-
-        if (s_s3_recv_file_write(
-                meta_request,
-                &meta_request->recv_file_write_fd_slots[body_write->write_loop_index],
-                file_offset,
-                &body) != AWS_OP_SUCCESS) {
+        uint64_t file_offset = 0;
+        if (s_s3_recv_file_offset(meta_request, body_write->s3_object_range_start, &file_offset) != AWS_OP_SUCCESS) {
+            /* Nowhere to put the bytes, so the write never starts and its timing is never bracketed. */
             error_code = aws_last_error_or_unknown();
-            AWS_LOGF_ERROR(
+        } else {
+            /* Success */
+            AWS_LOGF_TRACE(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p Failed writing part %" PRIu32 " to file. aws-error:%s",
+                "id=%p: Writer %zu writing part %" PRIu32 ", %zu bytes, object range start %" PRIu64
+                " -> file offset %" PRIu64 ".",
                 (void *)meta_request,
+                body_write->write_loop_index,
                 body_write->part_number,
-                aws_error_name(error_code));
-        }
+                body.len,
+                body_write->s3_object_range_start,
+                file_offset);
 
-        if (body_write->metrics != NULL) {
-            struct aws_s3_request_metrics *metrics = body_write->metrics;
-            aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.deliver_end_timestamp_ns);
-            metrics->time_metrics.deliver_duration_ns =
-                metrics->time_metrics.deliver_end_timestamp_ns - metrics->time_metrics.deliver_start_timestamp_ns;
+            if (body_write->metrics != NULL) {
+                aws_high_res_clock_get_ticks((uint64_t *)&body_write->metrics->time_metrics.deliver_start_timestamp_ns);
+            }
+
+            if (s_s3_recv_file_write(
+                    meta_request,
+                    &meta_request->recv_file_write_fd_slots[body_write->write_loop_index],
+                    file_offset,
+                    &body) != AWS_OP_SUCCESS) {
+                error_code = aws_last_error_or_unknown();
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Failed writing part %" PRIu32 " to file. aws-error:%s",
+                    (void *)meta_request,
+                    body_write->part_number,
+                    aws_error_name(error_code));
+            }
+
+            if (body_write->metrics != NULL) {
+                struct aws_s3_request_metrics *metrics = body_write->metrics;
+                aws_high_res_clock_get_ticks((uint64_t *)&metrics->time_metrics.deliver_end_timestamp_ns);
+                metrics->time_metrics.deliver_duration_ns =
+                    metrics->time_metrics.deliver_end_timestamp_ns - metrics->time_metrics.deliver_start_timestamp_ns;
+            }
         }
 
         if (error_code == AWS_ERROR_SUCCESS && client->enable_read_backpressure) {
