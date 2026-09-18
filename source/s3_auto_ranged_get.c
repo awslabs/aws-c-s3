@@ -1124,6 +1124,7 @@ update_synced_data:
             /* A part is delivered at its absolute position in the object, so the file sink needs the
              * range's origin to map the range's first byte to the file's base offset. Set before any
              * body is delivered, since the range is resolved from the first response's headers. */
+            meta_request->recv_file_object_range_origin_resolved = true;
             meta_request->recv_file_object_range_origin = object_range_start;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
