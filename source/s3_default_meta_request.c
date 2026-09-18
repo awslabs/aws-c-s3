@@ -508,7 +508,7 @@ static void s_s3_meta_request_default_request_finished(
                 }
                 /* Resolved either way: a response with no Content-Range is not ranged, so the origin's
                  * initial 0 is its answer rather than the absence of one. */
-                meta_request->recv_file_object_offset_origin_resolved = true;
+                meta_request->recv_file_object_range_origin_resolved = true;
             }
 
             aws_s3_meta_request_stream_response_body_synced(meta_request, request);
