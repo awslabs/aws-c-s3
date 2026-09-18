@@ -131,6 +131,7 @@ static int s_s3_test_meta_request_body_callback(
         meta_request_test_results->first_body_range_start = range_start;
         meta_request_test_results->first_body_range_start_captured = true;
     }
+    ++meta_request_test_results->body_chunk_count;
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
     AWS_LOGF_DEBUG(
@@ -186,7 +187,10 @@ static int s_s3_test_meta_request_body_callback(
             meta_request_test_results->highest_body_range_end = range_start + body->len;
         }
     } else {
-        ASSERT_TRUE((object_range_start + meta_request_test_results->expected_range_start) == range_start);
+        uint64_t expected_base = meta_request_test_results->validate_body_range_start_base
+                                     ? meta_request_test_results->body_range_start_base
+                                     : object_range_start;
+        ASSERT_TRUE((expected_base + meta_request_test_results->expected_range_start) == range_start);
         meta_request_test_results->expected_range_start += body->len;
     }
 

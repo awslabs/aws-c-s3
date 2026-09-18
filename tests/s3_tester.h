@@ -335,6 +335,19 @@ struct aws_s3_meta_request_test_results {
     uint64_t first_body_range_start;
     bool first_body_range_start_captured;
 
+    /* Number of body chunks the callback received. A test that means to cover multi-chunk delivery has
+     * to check this: a range that happens to fit inside one part would validate only the first chunk
+     * and still pass. */
+    size_t body_chunk_count;
+
+    /* When set, the body callback validates every chunk's range_start against `body_range_start_base`
+     * plus the bytes delivered so far, rather than against the range start the implementation computed
+     * for itself. The default comparison is circular -- it checks the reported offset against the same
+     * internal number that produced it, so a wrong computation agrees with itself -- and a base the
+     * test supplies is what makes the assertion independent of the code under test. */
+    bool validate_body_range_start_base;
+    uint64_t body_range_start_base;
+
     /* Highest object offset reached by any delivered body, used to detect the above. */
     uint64_t highest_body_range_end;
 

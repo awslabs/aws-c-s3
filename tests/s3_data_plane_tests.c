@@ -2039,7 +2039,11 @@ static int s_first_body_range_start_for_type(
     struct aws_s3_client *client,
     enum aws_s3_meta_request_type type,
     struct aws_byte_cursor range_header_value,
-    uint64_t *out_first_range_start) {
+    uint64_t expected_range_start,
+    bool validate_every_chunk,
+    uint64_t *out_first_range_start,
+    size_t *out_chunk_count,
+    uint64_t *out_received_body_size) {
 
     struct aws_string *host_name =
         aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
@@ -2064,6 +2068,12 @@ static int s_first_body_range_start_for_type(
     aws_s3_meta_request_test_results_init(&results, allocator);
     /* Binding a body callback is what makes this a callback-sink download, which is the only sink the
      * range_start contract is about: a file sink never sees the value. */
+    if (validate_every_chunk) {
+        /* Check every chunk, not just the first, and check it against the range start this test wrote
+         * down rather than the one the implementation derived. */
+        results.validate_body_range_start_base = true;
+        results.body_range_start_base = expected_range_start;
+    }
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &options, &results));
 
     struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
@@ -2075,6 +2085,8 @@ static int s_first_body_range_start_for_type(
     ASSERT_TRUE(results.first_body_range_start_captured);
 
     *out_first_range_start = results.first_body_range_start;
+    *out_chunk_count = results.body_chunk_count;
+    *out_received_body_size = results.received_body_size;
 
     aws_s3_meta_request_release(meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(tester);
@@ -2097,8 +2109,13 @@ AWS_TEST_CASE(test_s3_get_object_range_body_callback_range_start, s_test_s3_get_
 static int s_test_s3_get_object_range_body_callback_range_start(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    const uint64_t expected_range_start = 1048576;
-    struct aws_byte_cursor range_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=1048576-1052671");
+    /* An initial range that starts partway into the object at an offset no part boundary lands on, and
+     * spans 1 MiB so that 256 KiB parts break it into several chunks. Both properties matter: a
+     * part-aligned start would let an off-by-a-part mapping still look right, and a range small enough
+     * to fit in one part would only ever exercise the first chunk. */
+    const uint64_t expected_range_start = 1048677;
+    const uint64_t expected_range_length = MB_TO_BYTES(1);
+    struct aws_byte_cursor range_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=1048677-2097252");
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -2112,19 +2129,43 @@ static int s_test_s3_get_object_range_body_callback_range_start(struct aws_alloc
     /* The auto-ranged GET, as a control: it establishes that the harness reads the value correctly and
      * that the contract is satisfiable for this request. */
     uint64_t auto_ranged_get_range_start = 0;
+    size_t auto_ranged_get_chunk_count = 0;
+    uint64_t auto_ranged_get_body_size = 0;
     ASSERT_SUCCESS(s_first_body_range_start_for_type(
         allocator,
         &tester,
         client,
         AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
         range_header_value,
-        &auto_ranged_get_range_start));
+        expected_range_start,
+        true /*validate_every_chunk*/,
+        &auto_ranged_get_range_start,
+        &auto_ranged_get_chunk_count,
+        &auto_ranged_get_body_size));
     ASSERT_UINT_EQUALS(expected_range_start, auto_ranged_get_range_start);
+    /* More than one chunk is what makes the per-chunk validation above mean anything, and the full
+     * range length is what proves the validation covered all of it rather than stopping early. */
+    ASSERT_TRUE(auto_ranged_get_chunk_count > 1);
+    ASSERT_UINT_EQUALS(expected_range_length, auto_ranged_get_body_size);
 
     /* The same request through the default implementation. */
     uint64_t default_range_start = 0;
+    size_t default_chunk_count = 0;
+    uint64_t default_body_size = 0;
+    /* Only the first chunk is checked here, so the failure reports the reported offset against the
+     * expected one directly instead of surfacing as a failed meta request from inside the callback. */
     ASSERT_SUCCESS(s_first_body_range_start_for_type(
-        allocator, &tester, client, AWS_S3_META_REQUEST_TYPE_DEFAULT, range_header_value, &default_range_start));
+        allocator,
+        &tester,
+        client,
+        AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        range_header_value,
+        expected_range_start,
+        false /*validate_every_chunk*/,
+        &default_range_start,
+        &default_chunk_count,
+        &default_body_size));
+    ASSERT_UINT_EQUALS(expected_range_length, default_body_size);
     ASSERT_UINT_EQUALS(expected_range_start, default_range_start);
 
     aws_s3_client_release(client);
