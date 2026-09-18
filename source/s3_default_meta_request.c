@@ -490,25 +490,13 @@ static void s_s3_meta_request_default_request_finished(
                 aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
             }
 
-            /* A ranged response reports the absolute object offset of its first byte in Content-Range,
-             * and that offset is what the body callback's range_start is documented to carry. Nothing
-             * else on this path knows it: a default meta request is a single HTTP request whose range
-             * start is never assigned, so without this the callback receives a cursor relative to the
-             * range rather than an offset into the object.
+            /* Content-Range carries the absolute object offset of the response's first byte, which is
+             * what the body callback's range_start must report and what nothing else on this path
+             * assigns. Shifting the receive-file origin by the same amount keeps the file offset put,
+             * since s_s3_recv_file_offset subtracts the origin back out.
              *
-             * Moving the receive-file origin by the same amount is what keeps the file offset put.
-             * s_s3_recv_file_offset subtracts the origin from the delivery offset, so shifting both
-             * equally cancels and the range's first byte still lands at the base position instead of
-             * that many bytes into the file.
-             *
-             * An absent or unparseable Content-Range means the response is not ranged -- a 200, or a
-             * non-GET operation -- for which 0 is already correct, so this is not a failure. The error
-             * the parse raised is cleared rather than left on the thread for an unrelated caller to
-             * mistake for its own.
-             *
-             * part_range_end is deliberately left alone. It is what marks a request as a ranged part for
-             * the response validation and buffer sizing in s3_meta_request.c, neither of which a default
-             * meta request takes part in. */
+             * No parseable Content-Range means the response is not ranged, where 0 is already right, so
+             * clear the error the parse raised instead of leaving it on the thread. */
             if (request->send_data.response_headers != NULL) {
                 uint64_t response_range_start = 0;
                 if (aws_s3_parse_content_range_response_header(
