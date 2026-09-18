@@ -2554,7 +2554,7 @@ TEST_CASE(parallel_write_empty_part_mock_server) {
  * The pre-existing file is deliberately LONGER than the object (384 KiB vs 256 KiB), so a path that
  * wrote the parts without truncating would leave the tail of the old file in place and be caught by
  * the size assertion. The pre-existing length is page-aligned so it cannot be the reason O_DIRECT
- * falls back; CREATE_OR_REPLACE truncates to empty anyway, leaving base_position 0. */
+ * falls back; CREATE_OR_REPLACE truncates to empty anyway, leaving base_offset 0. */
 TEST_CASE(parallel_write_create_or_replace_existing_mock_server) {
     (void)ctx;
 
@@ -2607,7 +2607,7 @@ TEST_CASE(parallel_write_create_or_replace_existing_mock_server) {
 }
 
 /* Test that appending to an existing file writes every part past the existing bytes without disturbing
- * them, which is the `recv_file_base_position` half of the file offset calculation.
+ * them, which is the `recv_file_base_offset` half of the file offset calculation.
  *
  * The pre-existing length is page-aligned on purpose: an unaligned one makes the init-time check give
  * up on O_DIRECT and fall back to buffered, so the test would still pass while covering neither the
@@ -2670,7 +2670,7 @@ TEST_CASE(parallel_write_create_or_append_mock_server) {
 }
 
 /* Test that WRITE_TO_POSITION shifts every part by exactly the requested offset, which is the other
- * caller-supplied half of `recv_file_base_position`.
+ * caller-supplied half of `recv_file_base_offset`.
  *
  * The offset is page-aligned so O_DIRECT survives, and is deliberately NOT a multiple of the part size:
  * with a part-size offset, a part written at the wrong multiple of the part size could still land on a

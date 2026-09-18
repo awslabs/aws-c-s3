@@ -43,7 +43,7 @@ AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_append_mode, "a+b");
 AWS_STATIC_STRING_FROM_LITERAL(s_recv_file_update_mode, "r+");
 
 static int s_s3_request_priority_queue_pred(const void *a, const void *b);
-static int s_s3_completed_delivery_pred(const void *a, const void *b);
+static int s_s3_delivery_tracking_record_pred(const void *a, const void *b);
 static void s_s3_meta_request_close_write_fds(struct aws_s3_meta_request *meta_request);
 static int s_s3_pending_prepare_entry_pred(const void *a, const void *b);
 static bool s_s3_meta_request_fold_combine_slots(struct aws_s3_meta_request *meta_request);
@@ -214,7 +214,7 @@ static int s_s3_meta_request_init_recv_file(
     size_t direct_io_fallback_count = 0;
     /* Where this transfer's byte 0 lands in the file. Needed for every write, not just O_DIRECT
      * ones, because pwrite() takes an absolute offset rather than following a stream position. */
-    uint64_t base_position = 0;
+    uint64_t base_offset = 0;
 
     /* Bring the file into existence per the requested recv_file_option, and read whatever the mode
      * needs from it. This handle is init-only: nothing writes received bytes through it, so it is
@@ -241,7 +241,7 @@ static int s_s3_meta_request_init_recv_file(
 
         case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
             init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_append_mode);
-            /* For APPEND, the base position is the existing file size. It also has to be
+            /* For APPEND, the base offset is the existing file size. It also has to be
              * page-aligned for O_DIRECT writes to land at correct offsets. */
             if (init_file != NULL) {
                 int64_t existing_len = 0;
@@ -250,8 +250,8 @@ static int s_s3_meta_request_init_recv_file(
                     file_length_read_failed = true;
                     break;
                 }
-                base_position = (uint64_t)existing_len;
-                if (direct_io && base_position % page_size != 0) {
+                base_offset = (uint64_t)existing_len;
+                if (direct_io && base_offset % page_size != 0) {
                     AWS_LOGF_WARN(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p: O_DIRECT requested with CREATE_OR_APPEND but existing file size %" PRId64
@@ -277,8 +277,8 @@ static int s_s3_meta_request_init_recv_file(
             init_file = aws_fopen_safe(meta_request->recv_filepath, s_recv_file_update_mode);
             /* For WRITE_TO_POSITION, the base offset is set by the user. It also has to be
              * page-aligned for O_DIRECT writes. No seek: every write carries its own offset. */
-            base_position = options->recv_file_position;
-            if (direct_io && base_position % page_size != 0) {
+            base_offset = options->recv_file_position;
+            if (direct_io && base_offset % page_size != 0) {
                 AWS_LOGF_WARN(
                     AWS_LS_S3_META_REQUEST,
                     "id=%p: O_DIRECT requested with WRITE_TO_POSITION but recv_file_position %" PRIu64
@@ -359,7 +359,7 @@ static int s_s3_meta_request_init_recv_file(
     }
 
     meta_request->recv_file_direct_io = direct_io;
-    meta_request->recv_file_base_position = base_position;
+    meta_request->recv_file_base_offset = base_offset;
     aws_atomic_init_int(&meta_request->recv_file_direct_io_fallback_count, direct_io_fallback_count);
 
     /* One descriptor slot per file I/O loop, so a write worker never shares a descriptor.
@@ -398,11 +398,11 @@ static int s_s3_meta_request_init_recv_file(
 
         AWS_LOGF_DEBUG(
             AWS_LS_S3_META_REQUEST,
-            "id=%p: Out-of-order delivery available for download. direct_io=%d workers=%zu base_position=%" PRIu64,
+            "id=%p: Out-of-order delivery available for download. direct_io=%d workers=%zu base_offset=%" PRIu64,
             (void *)meta_request,
             (int)direct_io,
             loop_count,
-            base_position);
+            base_offset);
     }
 
     return AWS_OP_SUCCESS;
@@ -514,8 +514,8 @@ int aws_s3_meta_request_init_base(
             &meta_request->synced_data.completed_deliveries_tracker,
             meta_request->allocator,
             s_default_body_streaming_priority_queue_size,
-            sizeof(struct aws_s3_completed_delivery),
-            s_s3_completed_delivery_pred)) {
+            sizeof(struct aws_s3_delivery_tracking_record),
+            s_s3_delivery_tracking_record_pred)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not initialize completed-write queue for meta request",
@@ -938,9 +938,9 @@ static int s_s3_request_priority_queue_pred(const void *a, const void *b) {
     return (*request_a)->part_number > (*request_b)->part_number;
 }
 
-static int s_s3_completed_delivery_pred(const void *a, const void *b) {
-    const struct aws_s3_completed_delivery *delivery_a = a;
-    const struct aws_s3_completed_delivery *delivery_b = b;
+static int s_s3_delivery_tracking_record_pred(const void *a, const void *b) {
+    const struct aws_s3_delivery_tracking_record *delivery_a = a;
+    const struct aws_s3_delivery_tracking_record *delivery_b = b;
     AWS_PRECONDITION(delivery_a);
     AWS_PRECONDITION(delivery_b);
 
@@ -2731,12 +2731,12 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
     return false;
 }
 
-/* Where a part's bytes belong in the file. A part's delivery offset is its absolute object offset, so
- * a ranged download has to subtract the range's origin for its first byte to land at the base
- * position rather than that many bytes into the file. */
-static uint64_t s_s3_recv_file_offset(const struct aws_s3_meta_request *meta_request, uint64_t object_offset) {
-    AWS_ASSERT(object_offset >= meta_request->recv_file_object_offset_origin);
-    return meta_request->recv_file_base_position + (object_offset - meta_request->recv_file_object_offset_origin);
+/* Where a part's bytes belong in the file. A part is delivered at its absolute position in the object,
+ * so a ranged download has to subtract the range's origin for its first byte to land at the base
+ * offset rather than that many bytes into the file. */
+static uint64_t s_s3_recv_file_offset(const struct aws_s3_meta_request *meta_request, uint64_t object_range_start) {
+    AWS_ASSERT(object_range_start >= meta_request->recv_file_object_range_origin);
+    return meta_request->recv_file_base_offset + (object_range_start - meta_request->recv_file_object_range_origin);
 }
 
 /* Write one body buffered through a descriptor opened and closed just for it.
@@ -2896,6 +2896,32 @@ static int s_deliver_body_to_sink(
     return AWS_OP_SUCCESS;
 }
 
+/* Fold one part into the contiguous delivered prefix.
+ *
+ * The prefix is only as meaningful as its contiguity: `num_bytes_delivered` is reported as the resume
+ * token's continuously-downloaded length, which claims every byte from the start of the range is present.
+ * A part beginning anywhere other than where the prefix ended means the parts either skipped bytes or
+ * covered the same ones twice, and in both cases that claim is wrong while the byte count still looks
+ * plausible. */
+static void s_s3_meta_request_extend_delivered_prefix_synced(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_delivery_tracking_record *record) {
+
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    /* Part 1 decides where the prefix starts. For a ranged download that is the range's start rather
+     * than 0, and this accounting has no other way to learn it. */
+    if (meta_request->synced_data.next_contiguous_delivered_part == 1) {
+        meta_request->synced_data.next_contiguous_delivered_range_start = record->range_start;
+    }
+
+    AWS_FATAL_ASSERT(record->range_start == meta_request->synced_data.next_contiguous_delivered_range_start);
+
+    meta_request->synced_data.num_bytes_delivered += record->bytes;
+    meta_request->synced_data.next_contiguous_delivered_range_start += record->bytes;
+    ++meta_request->synced_data.next_contiguous_delivered_part;
+}
+
 /* Advance the contiguous delivered prefix by `bytes` for `part_number`, draining any later parts that
  * finished first. Only the prefix feeds `num_bytes_delivered`, because that is what the download
  * resume token reports as continuously downloaded -- counting an out-of-order part would claim bytes
@@ -2907,6 +2933,7 @@ static int s_deliver_body_to_sink(
 static void s_s3_meta_request_record_delivered_part_synced(
     struct aws_s3_meta_request *meta_request,
     uint32_t part_number,
+    uint64_t range_start,
     uint64_t bytes) {
 
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
@@ -2915,23 +2942,30 @@ static void s_s3_meta_request_record_delivered_part_synced(
     meta_request->synced_data.num_bytes_delivered_total += bytes;
 
     if (part_number != meta_request->synced_data.next_contiguous_delivered_part) {
-        struct aws_s3_completed_delivery entry = {.part_number = part_number, .bytes = bytes};
+        struct aws_s3_delivery_tracking_record entry = {
+            .part_number = part_number,
+            .range_start = range_start,
+            .bytes = bytes,
+        };
         aws_priority_queue_push(&meta_request->synced_data.completed_deliveries_tracker, &entry);
         return;
     }
 
-    meta_request->synced_data.num_bytes_delivered += bytes;
-    ++meta_request->synced_data.next_contiguous_delivered_part;
+    struct aws_s3_delivery_tracking_record current = {
+        .part_number = part_number,
+        .range_start = range_start,
+        .bytes = bytes,
+    };
+    s_s3_meta_request_extend_delivered_prefix_synced(meta_request, &current);
 
-    struct aws_s3_completed_delivery *top = NULL;
+    struct aws_s3_delivery_tracking_record *top = NULL;
     while (aws_priority_queue_top(&meta_request->synced_data.completed_deliveries_tracker, (void **)&top) ==
                AWS_OP_SUCCESS &&
            top->part_number == meta_request->synced_data.next_contiguous_delivered_part) {
 
-        struct aws_s3_completed_delivery entry;
+        struct aws_s3_delivery_tracking_record entry;
         aws_priority_queue_pop(&meta_request->synced_data.completed_deliveries_tracker, &entry);
-        meta_request->synced_data.num_bytes_delivered += entry.bytes;
-        ++meta_request->synced_data.next_contiguous_delivered_part;
+        s_s3_meta_request_extend_delivered_prefix_synced(meta_request, &entry);
     }
 }
 
@@ -3001,7 +3035,8 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
         ++meta_request->synced_data.num_parts_delivery_completed;
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            s_s3_meta_request_record_delivered_part_synced(meta_request, body_write->part_number, body_write->body.len);
+            s_s3_meta_request_record_delivered_part_synced(
+                meta_request, body_write->part_number, body_write->s3_object_range_start, body_write->body.len);
         } else {
             /* A body that never reached the file must fail the meta request, otherwise the caller is
              * handed a silently truncated file. */
@@ -3067,7 +3102,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
      * the ordered path, where the prefix and the total simply advance together. */
     struct aws_array_list completed_deliveries;
     aws_array_list_init_dynamic(
-        &completed_deliveries, meta_request->allocator, 1, sizeof(struct aws_s3_completed_delivery));
+        &completed_deliveries, meta_request->allocator, 1, sizeof(struct aws_s3_delivery_tracking_record));
 
     /* BEGIN CRITICAL SECTION */
     {
@@ -3114,7 +3149,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     if (out_of_order_delivery && error_code == AWS_ERROR_SUCCESS) {
                         /* Still has to close its slot in the prefix, or every later part parks behind
                          * a part that was never going to contribute any bytes. */
-                        struct aws_s3_completed_delivery completed = {.part_number = request->part_number, .bytes = 0};
+                        struct aws_s3_delivery_tracking_record completed = {
+                            .part_number = request->part_number, .range_start = request->part_range_start, .bytes = 0};
                         aws_array_list_push_back(&completed_deliveries, &completed);
                     }
                     request->send_data.metrics =
@@ -3218,8 +3254,9 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         /* The part is done, so it can take its place in the prefix. Its byte count is
                          * everything handed over across every tick, not just this one, which is why this
                          * waits for the part to finish rather than counting each chunk. */
-                        struct aws_s3_completed_delivery completed = {
+                        struct aws_s3_delivery_tracking_record completed = {
                             .part_number = request->part_number,
+                            .range_start = request->part_range_start,
                             .bytes = event.u.response_body.bytes_delivered,
                         };
                         aws_array_list_push_back(&completed_deliveries, &completed);
@@ -3311,9 +3348,10 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
             /* The prefix stops at the first part still missing, so it advances per completed part rather
              * than by this tick's byte count. Each recorded part adds its own bytes to the total. */
             for (size_t i = 0; i < aws_array_list_length(&completed_deliveries); ++i) {
-                struct aws_s3_completed_delivery completed;
+                struct aws_s3_delivery_tracking_record completed;
                 aws_array_list_get_at(&completed_deliveries, &completed, i);
-                s_s3_meta_request_record_delivered_part_synced(meta_request, completed.part_number, completed.bytes);
+                s_s3_meta_request_record_delivered_part_synced(
+                    meta_request, completed.part_number, completed.range_start, completed.bytes);
             }
         } else {
             /* This path delivers in object order, so the prefix and the total advance together. */

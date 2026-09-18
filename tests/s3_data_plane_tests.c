@@ -1992,7 +1992,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_
 }
 
 /* O_DIRECT with WRITE_TO_POSITION at a page-aligned position should successfully use O_DIRECT.
- * On Linux: count == 0 (all writes go through O_DIRECT, no fallback). The base_position is
+ * On Linux: count == 0 (all writes go through O_DIRECT, no fallback). The base_offset is
  * applied to delivery write_offset. */
 AWS_TEST_CASE(
     test_s3_get_object_file_path_direct_io_write_to_position_aligned,
