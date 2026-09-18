@@ -328,6 +328,13 @@ struct aws_s3_meta_request_test_results {
      * out-of-order test could just as well have delivered everything in order. */
     bool body_arrived_out_of_order;
 
+    /* The range_start reported for the very first body chunk that arrived, and whether one arrived at
+     * all. The documented contract on aws_s3_meta_request_receive_body_callback_fn is that this equals
+     * the request's Range header start. Only meaningful under ordered delivery, where the first chunk
+     * is also the lowest-offset one. */
+    uint64_t first_body_range_start;
+    bool first_body_range_start_captured;
+
     /* Highest object offset reached by any delivered body, used to detect the above. */
     uint64_t highest_body_range_end;
 

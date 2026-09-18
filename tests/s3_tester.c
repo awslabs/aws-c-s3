@@ -127,6 +127,10 @@ static int s_s3_test_meta_request_body_callback(
     AWS_PRECONDITION(body);
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+    if (!meta_request_test_results->first_body_range_start_captured) {
+        meta_request_test_results->first_body_range_start = range_start;
+        meta_request_test_results->first_body_range_start_captured = true;
+    }
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
     AWS_LOGF_DEBUG(
