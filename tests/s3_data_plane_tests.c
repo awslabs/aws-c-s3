@@ -7627,6 +7627,132 @@ static int s_test_s3_request_body_zero_length_fail_with_send_filepath(struct aws
     return 0;
 }
 
+/* An expected checksum the client cannot make sense of has to be rejected up front, rather than downloading the
+ * object and reporting a mismatch that says nothing about the data. */
+AWS_TEST_CASE(test_s3_expected_checksum_invalid_options, s_test_s3_expected_checksum_invalid_options)
+static int s_test_s3_expected_checksum_invalid_options(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, host_name, g_pre_existing_object_1MB);
+    ASSERT_NOT_NULL(message);
+
+    /* The value without the algorithm to interpret it with. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    /* The algorithm without a value. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum_algorithm = AWS_SCA_CRC32,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    /* A CRC32 value given as SHA256: not the length one digest of that algorithm encodes to. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+            .expected_checksum_algorithm = AWS_SCA_SHA256,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    /* A composite checksum, whose "-N" suffix describes an object's parts and not any span of bytes. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w==-4"),
+            .expected_checksum_algorithm = AWS_SCA_CRC32,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    /* Only a GET has downloaded data for the value to cover. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+            .expected_checksum_algorithm = AWS_SCA_CRC32,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+            .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    /* AWS_SCVM_PART_ONLY asks for the whole download not to be validated, which is the opposite of supplying a
+     * checksum that covers it. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+            .expected_checksum_algorithm = AWS_SCA_CRC32,
+            .response_checksum_validation_mode = AWS_SCVM_PART_ONLY,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    aws_http_message_release(message);
+    return 0;
+}
+
+/* A validation mode this version of the client knows nothing about cannot be honored, and silently downloading
+ * unvalidated data would be worse than saying so. */
+AWS_TEST_CASE(test_s3_checksum_validation_mode_invalid_options, s_test_s3_checksum_validation_mode_invalid_options)
+static int s_test_s3_checksum_validation_mode_invalid_options(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, host_name, g_pre_existing_object_1MB);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_checksum_config checksum_config = {
+        .validate_response_checksum = true,
+        .response_checksum_validation_mode = (enum aws_s3_checksum_validation_mode)(AWS_SCVM_FULL_OBJECT + 1),
+    };
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .checksum_config = &checksum_config,
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    aws_http_message_release(message);
+    return 0;
+}
+
 /* Test that the parallel read stream failed to send read the second part. */
 AWS_TEST_CASE(test_s3_put_fail_object_bad_parallel_read_stream, s_test_s3_put_fail_object_bad_parallel_read_stream)
 static int s_test_s3_put_fail_object_bad_parallel_read_stream(struct aws_allocator *allocator, void *ctx) {

@@ -317,6 +317,43 @@ enum aws_s3_checksum_location {
     AWS_SCL_TRAILER,
 };
 
+/**
+ * Which checksums a download is validated against.
+ *
+ * A download is made of one or more part responses, each of which may carry a checksum of its own body, and the
+ * whole download may also be covered by a single checksum (the object's, or one the caller supplies). These modes
+ * pick which of the two the client checks.
+ *
+ * Only applies to AWS_S3_META_REQUEST_TYPE_GET_OBJECT; ignored by other meta request types.
+ */
+enum aws_s3_checksum_validation_mode {
+    /**
+     * Default behavior, currently the same as AWS_SCVM_FULL_OBJECT.
+     */
+    AWS_SCVM_DEFAULT = 0,
+
+    /**
+     * Validate each part response against the checksum that response reports, and nothing else.
+     *
+     * The client never looks for a checksum covering the whole download, so it does not make the HeadObject
+     * request it would otherwise make to learn one, and `expected_checksum` cannot be used with this mode
+     * (setting both raises AWS_ERROR_INVALID_ARGUMENT).
+     *
+     * A part response the service reports no checksum for is not validated, so did_validate may end up false.
+     */
+    AWS_SCVM_PART_ONLY,
+
+    /**
+     * Validate the whole download against a single checksum covering it, on top of validating each part
+     * response against the checksum that response reports.
+     *
+     * The client uses `expected_checksum` if given, and otherwise discovers a checksum from the service
+     * (which may cost a HeadObject request). This is best effort: when the service has no checksum covering
+     * the requested bytes to report, the download still succeeds, finishing with did_validate false.
+     */
+    AWS_SCVM_FULL_OBJECT,
+};
+
 enum aws_s3_recv_file_options {
     /**
      * Create a new file if it doesn't exist, otherwise replace the existing file.
@@ -787,6 +824,8 @@ struct aws_s3_checksum_config {
      * A checksum is only used when it describes the bytes being downloaded. For a ranged GET the object's own
      * checksum covers bytes the caller did not ask for, so only the checksums of individual part responses can be
      * validated. See the did_validate field of aws_s3_meta_request_result for what ends up being reported.
+     *
+     * Which checksums are checked is controlled by `response_checksum_validation_mode`.
      */
     bool validate_response_checksum;
 
@@ -804,6 +843,51 @@ struct aws_s3_checksum_config {
      * If the response checksum was validated by client, the result will indicate which algorithm was picked.
      */
     const struct aws_array_list *validate_checksum_algorithms;
+
+    /**
+     * Optional.
+     * The checksum the caller expects of the data this request returns, base64-encoded as S3
+     * reports checksums (e.g. "NSRBwg==").
+     *
+     * It covers exactly the bytes the request asks for: the whole object for a plain GetObject,
+     * or just the requested bytes if the message carries a Range header or a partNumber. It is
+     * not the object's checksum unless the request happens to return the whole object.
+     *
+     * When set, the client validates what it downloads against this value instead of against a
+     * checksum reported by the service, so it does not need to learn one. That lets the client
+     * skip the HeadObject request `validate_response_checksum` would otherwise make, and covers
+     * the cases where the service has no checksum for the requested bytes to report: a ranged
+     * download, or an object uploaded as a multipart upload with a composite checksum.
+     *
+     * Setting this is by itself a request to validate: the data is validated against it whether
+     * or not `validate_response_checksum` is set. The meta request finishes with did_validate
+     * set, and with the error code AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH if the checksum
+     * computed over the response bodies does not match this value.
+     *
+     * `expected_checksum_algorithm` must be set to the algorithm of this value.
+     *
+     * NOTE: Only applies to AWS_S3_META_REQUEST_TYPE_GET_OBJECT. Setting it on any other type
+     * raises AWS_ERROR_INVALID_ARGUMENT, as does setting it together with
+     * `response_checksum_validation_mode` AWS_SCVM_PART_ONLY, which asks for the opposite.
+     */
+    struct aws_byte_cursor expected_checksum;
+
+    /**
+     * The algorithm of `expected_checksum`.
+     * Must be set if `expected_checksum` is set, and vice versa.
+     */
+    enum aws_s3_checksum_algorithm expected_checksum_algorithm;
+
+    /**
+     * Optional.
+     * Which checksums the download is validated against. See enum aws_s3_checksum_validation_mode.
+     *
+     * This only refines validation that was already asked for, through `validate_response_checksum` or
+     * `expected_checksum`. It does not turn validation on by itself.
+     *
+     * NOTE: Only applies to AWS_S3_META_REQUEST_TYPE_GET_OBJECT. Other meta request types ignore it.
+     */
+    enum aws_s3_checksum_validation_mode response_checksum_validation_mode;
 };
 
 /**

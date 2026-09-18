@@ -170,6 +170,81 @@ static void s_validate_meta_request_checksum_on_finish(
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
+/* The caller can tell us the checksum of the data being downloaded instead of having the client learn it from the
+ * service. Seed the meta-request-level checksum with that value here, at creation, so that from this point on
+ * nothing downstream can tell a caller-supplied checksum from one a discovery response reported: the same running
+ * sum is fed over the same bytes and compared at finish by the same code.
+ *
+ * Supplying the value is by itself a request to validate, which internally is what validate_response_checksum
+ * means, so turn it on. */
+static int s_meta_request_init_expected_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_options *options) {
+
+    if (options->checksum_config == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+    struct aws_byte_cursor expected_checksum = options->checksum_config->expected_checksum;
+    enum aws_s3_checksum_algorithm algorithm = options->checksum_config->expected_checksum_algorithm;
+
+    if (expected_checksum.len == 0 && algorithm == AWS_SCA_NONE) {
+        return AWS_OP_SUCCESS;
+    }
+
+    if (expected_checksum.len == 0 || algorithm < AWS_SCA_INIT || algorithm > AWS_SCA_END) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum and expected_checksum_algorithm must both be set, "
+            "to a known algorithm.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    if (options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum is only supported for "
+            "AWS_S3_META_REQUEST_TYPE_GET_OBJECT.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* The value covers the whole download, and AWS_SCVM_PART_ONLY asks for the whole download not to be validated. */
+    if (options->checksum_config->response_checksum_validation_mode == AWS_SCVM_PART_ONLY) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum cannot be used with "
+            "response_checksum_validation_mode AWS_SCVM_PART_ONLY.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* The value has to be one digest of this algorithm, base64-encoded. Among other things this rejects a
+     * composite checksum, whose trailing "-N" describes an object's parts rather than any span of bytes. */
+    size_t encoded_len = 0;
+    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len) ||
+        expected_checksum.len != encoded_len) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum is not a base64-encoded checksum of the algorithm "
+            "it was given with.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    meta_request->meta_request_level_running_response_sum = aws_checksum_new(meta_request->allocator, algorithm);
+    if (meta_request->meta_request_level_running_response_sum == NULL) {
+        return AWS_OP_ERR;
+    }
+    if (aws_byte_buf_init_copy_from_cursor(
+            &meta_request->meta_request_level_response_header_checksum, meta_request->allocator, expected_checksum)) {
+        return AWS_OP_ERR;
+    }
+    meta_request->checksum_config.validate_response_checksum = true;
+
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -293,6 +368,10 @@ int aws_s3_meta_request_init_base(
             options->checksum_config,
             options->message,
             (void *)meta_request)) {
+        goto error;
+    }
+
+    if (s_meta_request_init_expected_checksum(meta_request, options)) {
         goto error;
     }
 
@@ -487,7 +566,6 @@ int aws_s3_meta_request_init_base(
 
     meta_request->synced_data.next_streaming_part = 1;
 
-    meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
     meta_request->progress_callback = options->progress_callback;
     meta_request->telemetry_callback = options->telemetry_callback;
@@ -758,6 +836,12 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_mem_release(meta_request->allocator, meta_request->combine_slots);
     meta_request->combine_slots = NULL;
     meta_request->combine_slot_count = 0;
+
+    /* Normally the finish call tears the meta-request-level checksum down. A meta request that was seeded with a
+     * caller-supplied checksum and then failed mid-creation never gets that far, so clean up here too. */
+    aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
+    meta_request->meta_request_level_running_response_sum = NULL;
+    aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 
     AWS_ASSERT(aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->synced_data.event_delivery_array);
