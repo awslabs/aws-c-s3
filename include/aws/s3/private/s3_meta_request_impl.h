@@ -72,8 +72,7 @@ struct aws_s3_combine_slot {
 
 /* Wrapper of a file descriptors */
 struct aws_s3_recv_file_fds {
-    /* The owner's descriptor: O_DIRECT when direct I/O is on for this transfer, buffered otherwise or
-     * when the O_DIRECT open failed. AWS_FILE_INVALID_FD until opened. */
+    /* The owner's descriptor. AWS_FILE_INVALID_FD until opened. */
     int fd;
 
     /* Whether `fd` is an O_DIRECT descriptor, which decides both how a body is written through it and
@@ -84,12 +83,15 @@ struct aws_s3_recv_file_fds {
     bool open_attempted;
 };
 
-/* One part that reached its sink ahead of an earlier part, parked in
- * `synced_data.completed_deliveries_tracker` until the gap before it closes.
+/* Bookkeeping for one part that reached its sink ahead of an earlier part, parked in
+ * `synced_data.completed_deliveries_tracker` until the gap before it closes. Carries no payload and
+ * nothing reads it back out except the contiguous-length accounting the download resume token reports.
  *
- * Used for tracking the contiguous downloaded length, which is what the download resume token reports. */
-struct aws_s3_completed_delivery {
+ * `range_start` plus `bytes` is the object range the part covered, which is what lets the prefix check
+ * that each part it folds in begins exactly where the previous one ended. */
+struct aws_s3_delivery_tracking_record {
     uint32_t part_number;
+    uint64_t range_start;
     uint64_t bytes;
 };
 
@@ -251,6 +253,8 @@ struct aws_s3_meta_request {
     struct aws_string *s3express_session_host;
     /* Is the meta request made to s3express bucket or not. */
     bool is_express;
+    /* Is the meta request made over TLS (https) or plaintext (http). */
+    bool is_https;
     /* If the buffer pool optimized for the specific size or not. */
     bool buffer_pool_optimized;
 
@@ -302,8 +306,13 @@ struct aws_s3_meta_request {
         /* Next part number that would extend the contiguous delivered prefix. */
         uint32_t next_contiguous_delivered_part;
 
+        /* Object range start the next contiguous part must begin at, which is where the prefix
+         * currently ends. Seeded from part 1's own range start, since for a ranged download the prefix
+         * begins at the range rather than at 0. */
+        uint64_t next_contiguous_delivered_range_start;
+
         /* Min-heap by part number of parts that reached their sink ahead of an earlier part, holding
-         * `struct aws_s3_completed_delivery`. Drained into `num_bytes_delivered` as the gap closes. */
+         * `struct aws_s3_delivery_tracking_record`. Drained into `num_bytes_delivered` as the gap closes. */
         struct aws_priority_queue completed_deliveries_tracker;
 
         /* Task for delivering events on the meta-request's io_event_loop thread.
@@ -493,16 +502,16 @@ struct aws_s3_meta_request {
      * so it is never shared with a worker. */
     struct aws_s3_recv_file_fds recv_file_ordered_fds;
 
-    /* Base file offset for writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
+    /* Base file offset for writes. 0 for CREATE_*, `recv_file_position` for WRITE_TO_POSITION,
      * existing file size for CREATE_OR_APPEND. */
-    uint64_t recv_file_base_position;
+    uint64_t recv_file_base_offset;
 
-    /* The object offset that maps to `recv_file_base_position` in the file. Zero for a whole-object
-     * download; for a ranged one it is the range's start, because a part's delivery offset is its
-     * absolute object offset and the caller expects the range's first byte at the base position
-     * rather than that many bytes into the file. Set by the derived meta request when it resolves
-     * the object range, which happens before any body is delivered. */
-    uint64_t recv_file_object_offset_origin;
+    /* The object range start that maps to `recv_file_base_offset` in the file. Zero for a
+     * whole-object download; for a ranged one it is the range's start, because a part is delivered at
+     * its absolute position in the object and the caller expects the range's first byte at the base
+     * offset rather than that many bytes into the file. Set by the derived meta request when it
+     * resolves the object range, which happens before any body is delivered. */
+    uint64_t recv_file_object_range_origin;
 
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
      * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)
