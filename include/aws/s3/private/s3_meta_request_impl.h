@@ -496,6 +496,18 @@ struct aws_s3_meta_request {
      * the object range, which happens before any body is delivered. */
     uint64_t recv_file_object_offset_origin;
 
+    /* Whether the origin above has been resolved. Zero is both the value the origin holds before
+     * anything resolves it and a legitimate resolved value -- for a whole-object download, or a range
+     * starting at byte 0 -- so the value alone cannot say which of the two it is. A body mapped to a
+     * file offset before its range resolved would be written at its absolute object offset instead of
+     * the base position, and silently: nothing about the result looks like an error. This flag is what
+     * lets that be caught.
+     *
+     * Written by the derived meta request while it holds the lock, and read unsynchronized by the
+     * writers, on the same terms as the origin it describes: both are settled before the body whose
+     * offset needs them is queued for delivery. */
+    bool recv_file_object_offset_origin_resolved;
+
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
      * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)
      * also increment this counter. The warning is only logged when this transitions from 0,

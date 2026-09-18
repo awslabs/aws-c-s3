@@ -1125,6 +1125,7 @@ update_synced_data:
              * range's origin to map the range's first byte to the file's base position. Set before any
              * body is delivered, since the range is resolved from the first response's headers. */
             meta_request->recv_file_object_offset_origin = object_range_start;
+            meta_request->recv_file_object_offset_origin_resolved = true;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so

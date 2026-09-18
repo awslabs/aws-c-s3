@@ -2735,6 +2735,11 @@ static bool s_should_apply_backpressure(struct aws_s3_request *request) {
  * a ranged download has to subtract the range's origin for its first byte to land at the base
  * position rather than that many bytes into the file. */
 static uint64_t s_s3_recv_file_offset(const struct aws_s3_meta_request *meta_request, uint64_t object_offset) {
+    /* The mapping is only meaningful once the origin it subtracts is known, and the origin cannot say so
+     * for itself: 0 is what it holds before anything resolves it and also what a whole-object download
+     * resolves it to. Reaching here first would place the body at its absolute object offset rather than
+     * the base position, with nothing about the outcome looking wrong. */
+    AWS_ASSERT(meta_request->recv_file_object_offset_origin_resolved);
     AWS_ASSERT(object_offset >= meta_request->recv_file_object_offset_origin);
     return meta_request->recv_file_base_position + (object_offset - meta_request->recv_file_object_offset_origin);
 }
