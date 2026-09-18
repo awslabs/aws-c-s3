@@ -186,6 +186,9 @@ struct aws_s3_tester_meta_request_options {
      * Passed through to the meta request's checksum_config. */
     struct aws_byte_cursor expected_checksum;
     enum aws_s3_checksum_algorithm expected_checksum_algorithm;
+    /* Optional. Which checksums the download is validated against. Passed through to the meta request's
+     * checksum_config. */
+    enum aws_s3_checksum_validation_mode response_checksum_validation_mode;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;

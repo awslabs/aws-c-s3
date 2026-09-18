@@ -666,9 +666,21 @@ int aws_s3_meta_request_checksum_config_storage_init(
         return AWS_OP_ERR;
     }
 
+    if (config->response_checksum_validation_mode < AWS_SCVM_DEFAULT ||
+        config->response_checksum_validation_mode > AWS_SCVM_FULL_OBJECT) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta s3 request; unknown response_checksum_validation_mode: %d.",
+            (void *)log_id,
+            config->response_checksum_validation_mode);
+        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        return AWS_OP_ERR;
+    }
+
     internal_config->checksum_algorithm = config->checksum_algorithm;
     internal_config->location = config->location;
     internal_config->validate_response_checksum = config->validate_response_checksum;
+    internal_config->response_checksum_validation_mode = config->response_checksum_validation_mode;
 
     internal_config->full_object_checksum_callback = config->full_object_checksum_callback;
     internal_config->user_data = config->user_data;

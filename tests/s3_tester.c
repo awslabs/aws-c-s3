@@ -1555,6 +1555,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .validate_checksum_algorithms = options->validate_checksum_algorithms,
         .expected_checksum = options->expected_checksum,
         .expected_checksum_algorithm = options->expected_checksum_algorithm,
+        .response_checksum_validation_mode = options->response_checksum_validation_mode,
     };
     if (!disable_trailing_checksum) {
         checksum_config.location = options->checksum_via_header ? AWS_SCL_HEADER : AWS_SCL_TRAILER;

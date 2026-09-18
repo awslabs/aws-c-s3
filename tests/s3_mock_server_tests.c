@@ -2127,6 +2127,92 @@ TEST_CASE(get_object_expected_checksum_takes_precedence_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* response_checksum_validation_mode picks which checksums a download is checked against. The downloads below use the
+ * same objects as the tests above, so what changes with the mode is visible in the result: whether the whole download
+ * was validated against a single checksum on top of each part being validated against its own. */
+static int s_test_get_object_checksum_validation_mode(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor object_path,
+    enum aws_s3_checksum_validation_mode mode,
+    bool expected_did_validate) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .validate_get_response_checksum = true,
+        .response_checksum_validation_mode = mode,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+    ASSERT_UINT_EQUALS(expected_did_validate, out_results.did_validate);
+    if (expected_did_validate) {
+        ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Every part response of this object carries the CRC32 of its own body and nothing describes the whole object, so
+ * part-only validation is all these headers can support, and it still reports the download as validated. */
+TEST_CASE(get_object_checksum_validation_part_only_mock_server) {
+    (void)ctx;
+    return s_test_get_object_checksum_validation_mode(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_per_part_header"),
+        AWS_SCVM_PART_ONLY,
+        true /*expected_did_validate*/);
+}
+
+/* Here the object's CRC32 is only advertised on the HEAD response and the part responses carry no checksum of their
+ * own, so validation is only possible by combining the parts against the discovered value. Part-only validation
+ * neither makes that HEAD request nor uses its checksum, leaving nothing to validate: the same download that
+ * multipart_download_checksum_combine_mock_server reports as validated finishes unvalidated here. */
+TEST_CASE(get_object_checksum_validation_part_only_skips_whole_object_mock_server) {
+    (void)ctx;
+    return s_test_get_object_checksum_validation_mode(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_combine"),
+        AWS_SCVM_PART_ONLY,
+        false /*expected_did_validate*/);
+}
+
+/* AWS_SCVM_FULL_OBJECT asks for the whole download to be validated, discovering the checksum since the caller
+ * supplied none: the same result the default mode gives. */
+TEST_CASE(get_object_checksum_validation_full_object_mock_server) {
+    (void)ctx;
+    return s_test_get_object_checksum_validation_mode(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_combine"),
+        AWS_SCVM_FULL_OBJECT,
+        true /*expected_did_validate*/);
+}
+
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.
  * We trigger this by having the mock server delay 60 seconds before sending the response. */
 TEST_CASE(get_object_throughput_failure_mock_server) {

@@ -147,6 +147,24 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 }
 
 /*
+ * Whether the download should be validated against a single checksum covering all of it, on top of validating each
+ * part response against the checksum that response reports. A caller who only wants the part checksums
+ * (AWS_SCVM_PART_ONLY) also saves the HeadObject request the client makes to learn a whole-object one.
+ */
+static bool s_should_validate_whole_download(const struct aws_s3_meta_request *meta_request) {
+    if (!meta_request->checksum_config.validate_response_checksum) {
+        return false;
+    }
+    switch (meta_request->checksum_config.response_checksum_validation_mode) {
+        case AWS_SCVM_DEFAULT:
+        case AWS_SCVM_FULL_OBJECT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/*
  * This function returns the type of first request which we will also use to discover overall object size.
  */
 static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discovering_object_size(
@@ -188,10 +206,10 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 
-    /* If we don't need checksum validation, then discover the size of the object while trying to get the first part.
-     * Same when we already have the checksum to validate against, which at this point means the caller supplied it:
-     * the HeadObject below exists only to learn a checksum from the service. */
-    if (!meta_request->checksum_config.validate_response_checksum ||
+    /* If we don't need a whole-download checksum, then discover the size of the object while trying to get the first
+     * part. Same when we already have the checksum to validate against, which at this point means the caller supplied
+     * it: the HeadObject below exists only to learn a checksum from the service. */
+    if (!s_should_validate_whole_download(meta_request) ||
         meta_request->meta_request_level_running_response_sum != NULL) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE;
     }
@@ -971,7 +989,7 @@ static void s_s3_auto_ranged_get_request_finished(
 
         /* Check for checksums if requested to, unless we already have one covering the download: the caller
          * supplied it, so there is nothing to discover and the discovery response's own value must not replace it. */
-        if (meta_request->checksum_config.validate_response_checksum &&
+        if (s_should_validate_whole_download(meta_request) &&
             meta_request->meta_request_level_running_response_sum == NULL) {
             if (!s_discovery_checksum_covers_download(
                     request, object_range_start, object_range_end, object_size, first_part_size)) {
@@ -1103,7 +1121,7 @@ update_synced_data:
 
             /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding
              * here also means every part dispatched afterwards sees the decision already made. */
-            if (meta_request->checksum_config.validate_response_checksum && error_code == AWS_ERROR_SUCCESS) {
+            if (s_should_validate_whole_download(meta_request) && error_code == AWS_ERROR_SUCCESS) {
                 if (aws_s3_meta_request_setup_checksum_combine_synced(
                         meta_request, request, auto_ranged_get->synced_data.total_num_parts) != AWS_OP_SUCCESS) {
                     error_code = aws_last_error_or_unknown();

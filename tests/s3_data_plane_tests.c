@@ -7707,6 +7707,48 @@ static int s_test_s3_expected_checksum_invalid_options(struct aws_allocator *all
         ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
     }
 
+    /* AWS_SCVM_PART_ONLY asks for the whole download not to be validated, which is the opposite of supplying a
+     * checksum that covers it. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+            .expected_checksum_algorithm = AWS_SCA_CRC32,
+            .response_checksum_validation_mode = AWS_SCVM_PART_ONLY,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    aws_http_message_release(message);
+    return 0;
+}
+
+/* A validation mode this version of the client knows nothing about cannot be honored, and silently downloading
+ * unvalidated data would be worse than saying so. */
+AWS_TEST_CASE(test_s3_checksum_validation_mode_invalid_options, s_test_s3_checksum_validation_mode_invalid_options)
+static int s_test_s3_checksum_validation_mode_invalid_options(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_http_message *message =
+        aws_s3_test_get_object_request_new(allocator, host_name, g_pre_existing_object_1MB);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_checksum_config checksum_config = {
+        .validate_response_checksum = true,
+        .response_checksum_validation_mode = (enum aws_s3_checksum_validation_mode)(AWS_SCVM_FULL_OBJECT + 1),
+    };
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .checksum_config = &checksum_config,
+    };
+    ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+
     aws_http_message_release(message);
     return 0;
 }

@@ -209,6 +209,16 @@ static int s_meta_request_init_expected_checksum(
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
+    /* The value covers the whole download, and AWS_SCVM_PART_ONLY asks for the whole download not to be validated. */
+    if (options->checksum_config->response_checksum_validation_mode == AWS_SCVM_PART_ONLY) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum cannot be used with "
+            "response_checksum_validation_mode AWS_SCVM_PART_ONLY.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
     /* The value has to be one digest of this algorithm, base64-encoded. Among other things this rejects a
      * composite checksum, whose trailing "-N" describes an object's parts rather than any span of bytes. */
     size_t encoded_len = 0;
