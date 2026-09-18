@@ -2485,6 +2485,11 @@ struct aws_s3_body_write_task_args {
        first chunk received will have a range_start that matches the range header's range-start.*/
     uint64_t s3_object_range_start;
 
+    /* Inclusive end of the object range the part was asked for. Paired with `s3_object_range_start`
+     * rather than derived from `body.len`, because a short body must not shrink the range the part
+     * covered. */
+    uint64_t s3_object_range_end;
+
     /* Part number the body came from. */
     uint32_t part_number;
 
@@ -2518,6 +2523,8 @@ static struct aws_s3_body_write_task_args *s_s3_body_write_task_args_new_from_re
 
     body_write->body = request->send_data.response_body;
     AWS_ZERO_STRUCT(request->send_data.response_body);
+
+    body_write->s3_object_range_end = request->part_range_end;
 
     body_write->metrics = request->send_data.metrics;
     request->send_data.metrics = NULL;
@@ -2903,7 +2910,7 @@ static int s_deliver_body_to_sink(
  * A part beginning anywhere other than where the prefix ended means the parts either skipped bytes or
  * covered the same ones twice, and in both cases that claim is wrong while the byte count still looks
  * plausible. */
-static void s_s3_meta_request_extend_delivered_prefix_synced(
+static int s_s3_meta_request_extend_delivered_prefix_synced(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_delivery_tracking_record *record) {
 
@@ -2911,15 +2918,30 @@ static void s_s3_meta_request_extend_delivered_prefix_synced(
 
     /* Part 1 decides where the prefix starts. For a ranged download that is the range's start rather
      * than 0, and this accounting has no other way to learn it. */
-    if (meta_request->synced_data.next_contiguous_delivered_part == 1) {
-        meta_request->synced_data.next_contiguous_delivered_range_start = record->range_start;
+    uint64_t expected_range_start = meta_request->synced_data.next_contiguous_delivered_part == 1
+                                        ? record->range_start
+                                        : meta_request->synced_data.next_contiguous_delivered_range_start;
+
+    if (record->range_start != expected_range_start) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Part %u covers the object range starting at %" PRIu64 ", but the delivered prefix ends at %" PRIu64
+            ". The parts either skipped a range or covered one twice, so the continuous downloaded length cannot be "
+            "trusted.",
+            (void *)meta_request,
+            record->part_number,
+            record->range_start,
+            expected_range_start);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    AWS_FATAL_ASSERT(record->range_start == meta_request->synced_data.next_contiguous_delivered_range_start);
-
     meta_request->synced_data.num_bytes_delivered += record->bytes;
-    meta_request->synced_data.next_contiguous_delivered_range_start += record->bytes;
+    /* Advance by the range the part covered, not by the bytes it delivered. A part answered with a
+     * short body still accounts for its whole range, so the next part's range start is where the
+     * prefix continues. */
+    meta_request->synced_data.next_contiguous_delivered_range_start = record->range_end + 1;
     ++meta_request->synced_data.next_contiguous_delivered_part;
+    return AWS_OP_SUCCESS;
 }
 
 /* Advance the contiguous delivered prefix by `bytes` for `part_number`, draining any later parts that
@@ -2930,10 +2952,11 @@ static void s_s3_meta_request_extend_delivered_prefix_synced(
  * Call this once per part, once that part is entirely delivered. Both out-of-order sinks use it: a
  * write worker after its part reaches the file, and the event delivery task after a part's last
  * chunk reaches the body callback. */
-static void s_s3_meta_request_record_delivered_part_synced(
+static int s_s3_meta_request_record_delivered_part_synced(
     struct aws_s3_meta_request *meta_request,
     uint32_t part_number,
     uint64_t range_start,
+    uint64_t range_end,
     uint64_t bytes) {
 
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
@@ -2945,18 +2968,33 @@ static void s_s3_meta_request_record_delivered_part_synced(
         struct aws_s3_delivery_tracking_record entry = {
             .part_number = part_number,
             .range_start = range_start,
+            .range_end = range_end,
             .bytes = bytes,
         };
-        aws_priority_queue_push(&meta_request->synced_data.completed_deliveries_tracker, &entry);
-        return;
+        if (aws_priority_queue_push(&meta_request->synced_data.completed_deliveries_tracker, &entry) !=
+            AWS_OP_SUCCESS) {
+            /* Dropping it would strand every later part behind a gap that can never close, so this has to
+             * fail the meta request rather than be ignored. The queue already raised the reason. */
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Could not park part %u for the delivered prefix. aws-error:%s",
+                (void *)meta_request,
+                part_number,
+                aws_error_name(aws_last_error()));
+            return AWS_OP_ERR;
+        }
+        return AWS_OP_SUCCESS;
     }
 
     struct aws_s3_delivery_tracking_record current = {
         .part_number = part_number,
         .range_start = range_start,
+        .range_end = range_end,
         .bytes = bytes,
     };
-    s_s3_meta_request_extend_delivered_prefix_synced(meta_request, &current);
+    if (s_s3_meta_request_extend_delivered_prefix_synced(meta_request, &current) != AWS_OP_SUCCESS) {
+        return AWS_OP_ERR;
+    }
 
     struct aws_s3_delivery_tracking_record *top = NULL;
     while (aws_priority_queue_top(&meta_request->synced_data.completed_deliveries_tracker, (void **)&top) ==
@@ -2965,8 +3003,11 @@ static void s_s3_meta_request_record_delivered_part_synced(
 
         struct aws_s3_delivery_tracking_record entry;
         aws_priority_queue_pop(&meta_request->synced_data.completed_deliveries_tracker, &entry);
-        s_s3_meta_request_extend_delivered_prefix_synced(meta_request, &entry);
+        if (s_s3_meta_request_extend_delivered_prefix_synced(meta_request, &entry) != AWS_OP_SUCCESS) {
+            return AWS_OP_ERR;
+        }
     }
+    return AWS_OP_SUCCESS;
 }
 
 /* Write one part's body to the file. Runs on a body-streaming event loop, concurrently with other
@@ -3035,8 +3076,14 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
         ++meta_request->synced_data.num_parts_delivery_completed;
 
         if (error_code == AWS_ERROR_SUCCESS) {
-            s_s3_meta_request_record_delivered_part_synced(
-                meta_request, body_write->part_number, body_write->s3_object_range_start, body_write->body.len);
+            if (s_s3_meta_request_record_delivered_part_synced(
+                    meta_request,
+                    body_write->part_number,
+                    body_write->s3_object_range_start,
+                    body_write->s3_object_range_end,
+                    body_write->body.len) != AWS_OP_SUCCESS) {
+                aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
+            }
         } else {
             /* A body that never reached the file must fail the meta request, otherwise the caller is
              * handed a silently truncated file. */
@@ -3150,7 +3197,10 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         /* Still has to close its slot in the prefix, or every later part parks behind
                          * a part that was never going to contribute any bytes. */
                         struct aws_s3_delivery_tracking_record completed = {
-                            .part_number = request->part_number, .range_start = request->part_range_start, .bytes = 0};
+                            .part_number = request->part_number,
+                            .range_start = request->part_range_start,
+                            .range_end = request->part_range_end,
+                            .bytes = 0};
                         aws_array_list_push_back(&completed_deliveries, &completed);
                     }
                     request->send_data.metrics =
@@ -3257,6 +3307,7 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                         struct aws_s3_delivery_tracking_record completed = {
                             .part_number = request->part_number,
                             .range_start = request->part_range_start,
+                            .range_end = request->part_range_end,
                             .bytes = event.u.response_body.bytes_delivered,
                         };
                         aws_array_list_push_back(&completed_deliveries, &completed);
@@ -3350,8 +3401,17 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
             for (size_t i = 0; i < aws_array_list_length(&completed_deliveries); ++i) {
                 struct aws_s3_delivery_tracking_record completed;
                 aws_array_list_get_at(&completed_deliveries, &completed, i);
-                s_s3_meta_request_record_delivered_part_synced(
-                    meta_request, completed.part_number, completed.range_start, completed.bytes);
+                if (s_s3_meta_request_record_delivered_part_synced(
+                        meta_request,
+                        completed.part_number,
+                        completed.range_start,
+                        completed.range_end,
+                        completed.bytes) != AWS_OP_SUCCESS) {
+                    /* The prefix is already inconsistent, so recording the rest of this tick would only
+                     * build on it. */
+                    aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error_or_unknown());
+                    break;
+                }
             }
         } else {
             /* This path delivers in object order, so the prefix and the total advance together. */

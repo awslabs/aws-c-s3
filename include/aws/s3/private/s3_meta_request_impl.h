@@ -87,11 +87,16 @@ struct aws_s3_recv_file_fds {
  * `synced_data.completed_deliveries_tracker` until the gap before it closes. Carries no payload and
  * nothing reads it back out except the contiguous-length accounting the download resume token reports.
  *
- * `range_start` plus `bytes` is the object range the part covered, which is what lets the prefix check
- * that each part it folds in begins exactly where the previous one ended. */
+ * `range_start`/`range_end` is the object range the part was ASKED for, which is what lets the prefix
+ * check that each part it folds in begins exactly where the previous one ended. `bytes` is what the
+ * sink actually accepted, and can fall short of that range: a server may answer a part with a body
+ * shorter than the Content-Range it claims, and the download steps over the shortfall rather than
+ * stalling on a gap that will never close. So the two serve different purposes and neither is derivable
+ * from the other -- coverage is checked from the range, delivered volume is summed from `bytes`. */
 struct aws_s3_delivery_tracking_record {
     uint32_t part_number;
     uint64_t range_start;
+    uint64_t range_end; /* inclusive */
     uint64_t bytes;
 };
 
@@ -298,8 +303,8 @@ struct aws_s3_meta_request {
         /* Next part number that would extend the contiguous delivered prefix. */
         uint32_t next_contiguous_delivered_part;
 
-        /* Object range start the next contiguous part must begin at, which is where the prefix
-         * currently ends. Seeded from part 1's own range start, since for a ranged download the prefix
+        /* Object range start the next contiguous part must begin at, which is where the previous part's
+         * range ended. Seeded from part 1's own range start, since for a ranged download the prefix
          * begins at the range rather than at 0. */
         uint64_t next_contiguous_delivered_range_start;
 
