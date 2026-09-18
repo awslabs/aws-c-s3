@@ -86,10 +86,6 @@ struct aws_s3_auto_ranged_get {
         uint32_t spread_first_part;
         uint32_t spread_parts_handed_out;
 
-        /* One byte per part (1-indexed, so element 0 is part 1). Set when a part number is handed out
-         * by `update`. Checked when the last part is requested: every byte must be 1.
-         * Allocated when spreading is set up; parts already requested before that point (discovery) are
-         * pre-marked. */
         uint32_t object_range_known : 1;
 
         /* True if object_range_known, and it's found to be empty.

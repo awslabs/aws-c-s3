@@ -394,9 +394,6 @@ static bool s_s3_auto_ranged_get_update(
                     &request->part_range_end);
 
                 ++auto_ranged_get->synced_data.num_parts_requested;
-
-                /* Validate: mark this part in the mask. Catches duplicates immediately and gaps at the
-                 * end. Runs for both spread and non-spread paths. */
                 goto has_work_remaining;
             }
 
