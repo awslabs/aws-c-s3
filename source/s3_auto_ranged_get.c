@@ -808,6 +808,45 @@ static bool s_request_body_is_entire_download(
     }
 }
 
+/* True when the whole-object checksum can only be assembled by feeding bytes in object order, which the
+ * parallel-write path cannot do. Combinable algorithms fold each part's own digest in at finish, so they
+ * place no ordering demand. Both fields are settled by the end of discovery: the checksum is read from the
+ * discovery response's headers, and whether it can be folded is decided from the part count. */
+static bool s_response_needs_ordered_body(const struct aws_s3_meta_request *meta_request) {
+    return meta_request->meta_request_level_running_response_sum != NULL &&
+           !meta_request->meta_request_level_checksum_combinable;
+}
+
+/* Resolve, once, whether this download delivers bodies out of object order, and record it on the meta
+ * request. Static here because discovery is the only place the question is ever asked: no other meta
+ * request implementation splits a download into parts, so no other one has an order to deliver out of,
+ * and every one of them leaves the flag at the false it was initialized to. */
+static void s_resolve_out_of_order_delivery(struct aws_s3_meta_request *meta_request) {
+    bool out_of_order = aws_s3_allow_out_of_order_delivery(
+        /* A file sink needs the per-worker descriptors, which init only allocates given a client that
+         * had not already ruled out-of-order delivery out. */
+        meta_request->recv_filepath != NULL && meta_request->recv_file_write_fd_slots != NULL,
+        meta_request->recv_filepath == NULL && meta_request->client != NULL,
+        meta_request->out_of_order_delivery_override,
+        meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET,
+        meta_request->client != NULL ? meta_request->client->out_of_order_delivery_env : AWS_TRIBOOL_UNSET);
+
+    /* A whole-object checksum that cannot be folded per part has to be hashed in object order, which the
+     * parallel path cannot do. A correctness constraint, so it overrides the preference -- and worth
+     * saying out loud, since it is the one case where the caller asked for out-of-order delivery and did
+     * not get it. */
+    if (out_of_order && s_response_needs_ordered_body(meta_request)) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Delivering in object order despite out-of-order delivery being available: this "
+            "response's whole-object checksum can only be verified by hashing the body in order.",
+            (void *)meta_request);
+        out_of_order = false;
+    }
+
+    aws_atomic_store_int(&meta_request->out_of_order_delivery, out_of_order ? 1 : 0);
+}
+
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -1082,6 +1121,10 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
             auto_ranged_get->synced_data.object_size = object_size;
+            /* A part is delivered at its absolute position in the object, so the file sink needs the
+             * range's origin to map the range's first byte to the file's base offset. Set before any
+             * body is delivered, since the range is resolved from the first response's headers. */
+            meta_request->recv_file_object_range_origin = object_range_start;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so
@@ -1104,6 +1147,12 @@ update_synced_data:
                     error_code = aws_last_error_or_unknown();
                 }
             }
+
+            /* And only now is the last input to the delivery order known: the line above is what decides
+             * whether a whole-object checksum can be folded per part or has to see the body in object
+             * order. Resolved here rather than on the first body so that the discovery response's own body,
+             * delivered further down this same function, is already governed by it. */
+            s_resolve_out_of_order_delivery(meta_request);
         }
 
         switch (request->request_tag) {
@@ -1234,11 +1283,11 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
             aws_string_new_from_string(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
-    /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
-     * prefix and the total. A parallel-write delivery path will need to track the two
-     * separately, diverging total (may have gaps) from continues (gap-free prefix). */
+    /* These diverge once parts are written out of order: the prefix stops at the first gap, while the
+     * total counts every part that landed. A caller resuming must re-fetch from the prefix, since
+     * anything past the gap is not contiguous with what is already on disk. */
     token->continuous_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
-    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered_total;
 
     return token;
 }
