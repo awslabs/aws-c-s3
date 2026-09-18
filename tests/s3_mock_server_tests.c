@@ -958,6 +958,80 @@ TEST_CASE(single_upload_unsigned_with_trailer_checksum_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* http_manager_metrics is a snapshot of the endpoint's connection manager taken right before this request
+ * asks for a connection - it must reflect state from *other* requests, never this request's own acquire.
+ *
+ * Force the client down to a single connection, so a 2-part multipart upload's later requests
+ * (UploadPart #2, CompleteMultipartUpload) can only proceed once the sole connection has been released back
+ * to the idle pool by whichever request held it before - never by acquiring a second connection. */
+TEST_CASE(request_metrics_http_manager_metrics_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        /* g_s3_min_upload_part_size clamps any smaller override up to 5MiB, so use that as the part size. */
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .max_active_connections_override = 1,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 10, /* 2 parts of 5 MiB. */
+                .object_path_override = object_path,
+            },
+        .mock_server = true,
+    };
+
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &results));
+
+    /* CreateMultipartUpload, UploadPart x2, CompleteMultipartUpload */
+    size_t num_requests = aws_array_list_length(&results.synced_data.metrics);
+    ASSERT_UINT_EQUALS(4, num_requests);
+
+    /* CreateMultipartUpload: the very first request ever made on this client, so the connection manager has
+     * never leased or idled a connection yet. If the snapshot were (incorrectly) taken after this request's
+     * own connection was acquired instead of before, leased_concurrency would be 1 here instead of 0. */
+    struct aws_s3_request_metrics *first_metrics = NULL;
+    aws_array_list_get_at(&results.synced_data.metrics, &first_metrics, 0);
+
+    struct aws_http_manager_metrics first_manager_metrics;
+    aws_s3_request_metrics_get_http_manager_metrics(first_metrics, &first_manager_metrics);
+    ASSERT_UINT_EQUALS(0, first_manager_metrics.leased_concurrency);
+    ASSERT_UINT_EQUALS(0, first_manager_metrics.available_concurrency);
+    ASSERT_UINT_EQUALS(0, first_manager_metrics.pending_concurrency_acquires);
+
+    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: with only 1 connection allowed, each of these
+     * had to wait for the prior request's connection to be released back to the idle pool before it could
+     * proceed, so each should see that single connection sitting idle and available, not leased. */
+    for (size_t i = 1; i < num_requests; i++) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        aws_array_list_get_at(&results.synced_data.metrics, &metrics, i);
+
+        struct aws_http_manager_metrics manager_metrics;
+        aws_s3_request_metrics_get_http_manager_metrics(metrics, &manager_metrics);
+        ASSERT_UINT_EQUALS(0, manager_metrics.leased_concurrency);
+        ASSERT_UINT_EQUALS(1, manager_metrics.available_concurrency);
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Tracks what a `request_body` test observed about the request body as it was being sent. */
 struct request_body_tester {
     /* The caller-owned memory that was passed via `request_body`. */

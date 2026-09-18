@@ -9,6 +9,7 @@
 #include <aws/auth/signing_config.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/tribool.h>
+#include <aws/http/connection_manager.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
 #include <aws/s3/s3_buffer_pool.h>
@@ -1272,6 +1273,11 @@ AWS_S3_API
 struct aws_s3_client *aws_s3_client_release(struct aws_s3_client *client);
 
 AWS_S3_API
+uint32_t aws_s3_client_get_max_active_connections(
+    struct aws_s3_client *client,
+    struct aws_s3_meta_request *meta_request);
+
+AWS_S3_API
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
     const struct aws_s3_meta_request_options *options);
@@ -1898,6 +1904,22 @@ AWS_S3_API
 void aws_s3_request_metrics_get_host_address(
     const struct aws_s3_request_metrics *metrics,
     const struct aws_string **out_host_address);
+
+/**
+ * Get whether the request was made over TLS (https) or plaintext (http). This will always be available.
+ */
+AWS_S3_API
+bool aws_s3_request_metrics_get_is_https(const struct aws_s3_request_metrics *metrics);
+
+/**
+ * Get a snapshot of the endpoint's HTTP connection manager metrics, taken right before this request
+ * asks for a connection. This reflects the manager's overall state at that instant, not just this
+ * request. This will always be available.
+ */
+AWS_S3_API
+void aws_s3_request_metrics_get_http_manager_metrics(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_manager_metrics *out_metrics);
 
 /**
  * Get the IP address of the request connected to.
