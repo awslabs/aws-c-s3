@@ -70,6 +70,31 @@ struct aws_s3_combine_slot {
     size_t digest_len;
 };
 
+/* Wrapper of a file descriptors */
+struct aws_s3_recv_file_fds {
+    /* The owner's descriptor. AWS_FILE_INVALID_FD until opened. */
+    int fd;
+
+    /* Whether `fd` is an O_DIRECT descriptor, which decides both how a body is written through it and
+     * how it is closed. */
+    bool direct;
+
+    /* Set once the open has been attempted, so a failure is not retried per body. */
+    bool open_attempted;
+};
+
+/* Bookkeeping for one part that reached its sink ahead of an earlier part, parked in
+ * `synced_data.completed_deliveries_tracker` until the gap before it closes. Carries no payload and
+ * nothing reads it back out except the contiguous-length accounting the download resume token reports.
+ *
+ * `range_start` plus `bytes` is the object range the part covered, which is what lets the prefix check
+ * that each part it folds in begins exactly where the previous one ended. */
+struct aws_s3_delivery_tracking_record {
+    uint32_t part_number;
+    uint64_t range_start;
+    uint64_t bytes;
+};
+
 /* An event to be delivered on the meta-request's io_event_loop thread. */
 struct aws_s3_meta_request_event {
     enum aws_s3_meta_request_event_type {
@@ -149,6 +174,18 @@ struct aws_s3_meta_request_vtable {
     /********************* TEST ONLY STUB **************************/
     /* A stub to the update implementation from meta request with the lock held. Only for tests. */
     bool (*synced_update_stub)(struct aws_s3_meta_request *meta_request);
+
+    /* Stands in for the positional write to the receive file when set, so a test can make a write fail
+     * without arranging a real I/O error. Return AWS_OP_SUCCESS to stand in for a completed write, or
+     * aws_raise_error(...) and AWS_OP_ERR to fail one. Sits ahead of the descriptor open, so a stub
+     * that never returns success means no descriptor is ever opened.
+     *
+     * Covers both write paths, since they funnel through the same function: a parallel worker writing
+     * out of order, and the ordered delivery thread. Only for tests. */
+    int (*recv_file_write_stub)(
+        struct aws_s3_meta_request *meta_request,
+        uint64_t file_offset,
+        const struct aws_byte_cursor *body);
 #endif
 };
 
@@ -248,12 +285,27 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
-        /* Total number of response-body bytes successfully delivered to the caller's sink
-         * (file or body callback), in order with no gaps. Used to build the download resume
-         * token on pause/error.
-         * TODO: delivery is strictly sequential today, so this is both the contiguous prefix and the total; a future
-         * parallel-write delivery path will need to track the two separately. */
+        /* Bytes delivered contiguously from the start of the range, with no gaps. This is what the
+         * download resume token reports as `continuous_downloaded_bytes`, so it may only count a part
+         * once every earlier part has also landed. `next_contiguous_delivered_part` and
+         * `completed_deliveries_tracker` track that for out-of-order delivery. */
         uint64_t num_bytes_delivered;
+
+        /* Every byte delivered, including parts that landed past a gap. Reported as the token's
+         * `total_downloaded_bytes`. Equal to `num_bytes_delivered` when delivery was in order. */
+        uint64_t num_bytes_delivered_total;
+
+        /* Next part number that would extend the contiguous delivered prefix. */
+        uint32_t next_contiguous_delivered_part;
+
+        /* Object range start the next contiguous part must begin at, which is where the prefix
+         * currently ends. Seeded from part 1's own range start, since for a ranged download the prefix
+         * begins at the range rather than at 0. */
+        uint64_t next_contiguous_delivered_range_start;
+
+        /* Min-heap by part number of parts that reached their sink ahead of an earlier part, holding
+         * `struct aws_s3_delivery_tracking_record`. Drained into `num_bytes_delivered` as the gap closes. */
+        struct aws_priority_queue completed_deliveries_tracker;
 
         /* Task for delivering events on the meta-request's io_event_loop thread.
          * We do this to ensure a meta-request's callbacks are fired sequentially and non-overlapping.
@@ -392,21 +444,72 @@ struct aws_s3_meta_request {
      * aws_s3_meta_request_options at creation time. Immutable after init. */
     uint32_t feature_ids;
 
-    /* The receiving file handler */
-    FILE *recv_file;
+    /* Destination path for a download. The file itself is created or truncated once at init through a
+     * short-lived stdio handle; received bytes are written only through the descriptors in
+     * `recv_file_write_fd_slots` and `recv_file_ordered_fds`. */
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
-    /* When true, use O_DIRECT for writing received data to file */
+    /* When true, attempt O_DIRECT for writes. Only read when a writer opens its descriptor. */
     bool recv_file_direct_io;
-    /* Base file offset for O_DIRECT writes. 0 for CREATE_*, recv_file_position for WRITE_TO_POSITION,
-     * existing file size for CREATE_OR_APPEND. The actual write offset for each part is
-     * base_position + delivery_range_start. Only meaningful when recv_file_direct_io is true. */
-    uint64_t recv_file_direct_io_base_position;
+
+    /* This request's override of the client's `out_of_order_delivery`, from the creation options.
+     * AWS_TRIBOOL_UNSET means defer to the client. Immutable after init. */
+    enum aws_tribool out_of_order_delivery_override;
+
+    /* Whether bodies reach their sink out of object order: to a file through the descriptor of whichever
+     * worker takes the part, or to the body callback without waiting on the part ahead of it. Nonzero
+     * for yes.
+     *
+     * Written once, by the auto-ranged GET implementation as it finishes discovery. That is the earliest
+     * point the answer is knowable -- a whole-object checksum's ordering demand arrives with the discovery
+     * response's headers -- and the last point at which no part but discovery's own exists, so nothing has
+     * been delivered under one answer and then finds another. Read-only from then on.
+     *
+     * Stays false under every other implementation. Out-of-order delivery is a statement about the order of
+     * a download's parts, and an implementation that does not split a download into parts has no such
+     * order. Note that this is about the implementation and not `type`: a GET whose query already names a
+     * partNumber carries type GET_OBJECT but runs as a default meta request, and so leaves this false.
+     *
+     * Atomic because a retried discovery resolves this while the event delivery task may be draining a
+     * telemetry or progress event from the attempt that failed. */
+    struct aws_atomic_var out_of_order_delivery;
+
+    /* One descriptor pair per write worker, indexed by the worker's file_io_elg loop index.
+     * Length is recv_file_write_fd_slot_count.
+     *
+     * Giving each worker its own pair keeps every write single-writer: two workers never share a
+     * struct file, so they never contend on its reference count, and a slot needs no lock because
+     * only its own worker thread ever touches it.
+     *
+     * Opened lazily by the owning worker, since a meta request that only ever lands on a few workers
+     * should not pay for descriptors it never uses.
+     *
+     * No lock: the array is allocated before any part is dispatched and never resized, and each
+     * element is owned exclusively by one worker thread. Same argument as combine_slots. */
+    struct aws_s3_recv_file_fds *recv_file_write_fd_slots;
+    size_t recv_file_write_fd_slot_count;
+
+    /* Descriptor for the ordered delivery path, which has no worker slot of its own. Owned by the meta
+     * request's io_event_loop thread, the only thread that writes when `out_of_order_delivery` is false,
+     * so it is never shared with a worker. */
+    struct aws_s3_recv_file_fds recv_file_ordered_fds;
+
+    /* Base file offset for writes. 0 for CREATE_*, `recv_file_position` for WRITE_TO_POSITION,
+     * existing file size for CREATE_OR_APPEND. */
+    uint64_t recv_file_base_offset;
+
+    /* The object range start that maps to `recv_file_base_offset` in the file. Zero for a
+     * whole-object download; for a ranged one it is the range's start, because a part is delivered at
+     * its absolute position in the object and the caller expects the range's first byte at the base
+     * offset rather than that many bytes into the file. Set by the derived meta request when it
+     * resolves the object range, which happens before any body is delivered. */
+    uint64_t recv_file_object_range_origin;
+
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
      * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)
      * also increment this counter. The warning is only logged when this transitions from 0,
      * to avoid log spam. */
-    size_t recv_file_direct_io_fallback_count;
+    struct aws_atomic_var recv_file_direct_io_fallback_count;
 
     /* File I/O options. */
     struct aws_s3_file_io_options fio_opts;

@@ -9,6 +9,7 @@
 #include <aws/common/byte_buf.h>
 #include <aws/common/linked_list.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/task_scheduler.h>
 #include <aws/common/thread.h>
 #include <aws/http/connection_manager.h>
 #include <aws/s3/s3.h>

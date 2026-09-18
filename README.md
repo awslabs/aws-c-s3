@@ -73,7 +73,27 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    * The value is read once on first use and cached for the lifetime of the process.
    * If the network bandwidth of the device is too low, even a higher value of pending read might not be respected due to having maximum allowed requests in flight.
 
-3. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
+3. **Ordered Delivery - `AWS_CRT_S3_ORDERED_DELIVERY`**
+
+   Makes a download deliver its body in object order when it has not asked for a delivery order of its own.
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_ORDERED_DELIVERY=1
+   ```
+
+   **Default Behavior**:
+   When nothing is set, a download to a file delivers out of object order (each part is written at its own offset as it arrives) and a download through `body_callback` delivers in object order.
+
+   **Notes**:
+   * Any non-empty value turns it on; the value itself is not read.
+   * It changes the default, it does not overrule the caller. A `out_of_order_delivery` set on the meta request wins over one set on the client, and either wins over this variable. Only a download that expressed no preference is affected.
+   * It can only ask for ordered delivery. There is deliberately no way to turn *out-of-order* delivery on from the environment: for a `body_callback` sink that would change what the caller's own code sees, since `range_start` stops advancing contiguously.
+   * Setting it means an interrupted download to a file leaves a valid prefix rather than a file with gaps, at the cost of parts waiting on the part ahead of them.
+   * Read once per client, when the client is created.
+
+4. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
 
    The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 
