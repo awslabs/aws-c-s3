@@ -127,6 +127,11 @@ static int s_s3_test_meta_request_body_callback(
     AWS_PRECONDITION(body);
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+    if (!meta_request_test_results->first_body_range_start_captured) {
+        meta_request_test_results->first_body_range_start = range_start;
+        meta_request_test_results->first_body_range_start_captured = true;
+    }
+    ++meta_request_test_results->body_chunk_count;
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
     AWS_LOGF_DEBUG(
@@ -137,6 +142,7 @@ static int s_s3_test_meta_request_body_callback(
         meta_request_test_results->expected_range_start);
 
     uint64_t object_range_start = 0;
+    bool object_range_start_known = false;
 
     /* If this is an auto-ranged-get meta request, then grab the object range start so that the expected_range_start can
      * be properly offset.*/
@@ -153,6 +159,7 @@ static int s_s3_test_meta_request_body_callback(
         aws_s3_meta_request_unlock_synced_data(meta_request);
 
         ASSERT_TRUE(object_range_known);
+        object_range_start_known = true;
     }
 
     if (meta_request_test_results->allow_out_of_order_body) {
@@ -182,7 +189,21 @@ static int s_s3_test_meta_request_body_callback(
             meta_request_test_results->highest_body_range_end = range_start + body->len;
         }
     } else {
-        ASSERT_TRUE((object_range_start + meta_request_test_results->expected_range_start) == range_start);
+        /* Which absolute offset the first chunk should carry depends on what this harness can find out.
+         * A test that supplied a base has it pinned against that. An auto-ranged GET can be asked for
+         * the range it resolved. Any other implementation -- a default meta request, say -- keeps no
+         * such record reachable from here, so its first chunk defines the base and the assertion covers
+         * contiguity from there; a test wanting the absolute value pinned sets
+         * validate_body_range_start_base. */
+        uint64_t expected_base;
+        if (meta_request_test_results->validate_body_range_start_base) {
+            expected_base = meta_request_test_results->body_range_start_base;
+        } else if (object_range_start_known) {
+            expected_base = object_range_start;
+        } else {
+            expected_base = meta_request_test_results->first_body_range_start;
+        }
+        ASSERT_TRUE((expected_base + meta_request_test_results->expected_range_start) == range_start);
         meta_request_test_results->expected_range_start += body->len;
     }
 

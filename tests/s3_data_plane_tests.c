@@ -1804,6 +1804,375 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
     return 0;
 }
 
+AWS_TEST_CASE(
+    test_s3_get_object_range_parallel_write_content_verify,
+    s_test_s3_get_object_range_parallel_write_content_verify)
+static int s_test_s3_get_object_range_parallel_write_content_verify(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Range [100, 100 + 2 MiB) of a 4 MiB object, downloaded in 256 KiB parts. Sized to be the
+     * smallest shape that still exercises what this test is about: 8 parts means the client has
+     * several part requests in flight handing bodies to different writers, which one part would not.
+     *
+     * The unaligned start is deliberate: it makes the object-side range origin non-zero, so every
+     * part's file offset is the result of real arithmetic rather than an identity mapping. */
+    const uint64_t range_start = 100;
+    const size_t range_length = MB_TO_BYTES(2);
+    const uint64_t range_end_inclusive = range_start + range_length - 1;
+    const uint32_t object_size_mb = 4;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 256 * 1024,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    /* Verify what landed on disk, not what came off the wire. The tester uploads the repeating
+     * AWS_AUTOGEN_LOREM_IPSUM pattern, which is a pure function of absolute offset, so the expected
+     * bytes for the range are the same buffer indexed at range_start. */
+    struct aws_byte_buf expected_buf;
+    s_byte_buf_init_autogenned(&expected_buf, allocator, (size_t)range_start + range_length, AWS_AUTOGEN_LOREM_IPSUM);
+
+    /* Upload an object with non-zero content rather than reusing a pre-existing-* fixture. Those are
+     * all zero-filled, and a checksum over a zero-filled download cannot distinguish bytes that were
+     * written from a hole that was never written at all -- both read back as the same zeros. Out-of-
+     * order writes are exactly the case where a part can go missing while the file still looks the
+     * right length, so the fixture has to carry content for the assertion to mean anything. */
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/range_parallel_write_verify.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = object_size_mb,
+                .object_path_override = object_path,
+            },
+    };
+    /* Capture the upload's own result rather than discarding it. This helper waits for the meta
+     * request to finish and shut down, so asserting on its status makes "the object is fully written
+     * before the download starts" something the test checks rather than something it assumes. */
+    struct aws_s3_meta_request_test_results put_results;
+    aws_s3_meta_request_test_results_init(&put_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &put_results));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, put_results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, put_results.finished_response_status);
+    aws_s3_meta_request_test_results_clean_up(&put_results);
+
+    /* Ranged GET straight to disk. */
+    const char *local_file_path = "aws_s3_range_parallel_write_verify_test_file";
+    remove(local_file_path);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    char range_value[64];
+    snprintf(range_value, sizeof(range_value), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end_inclusive);
+    struct aws_http_header range_header = {
+        .name = g_range_header_name,
+        .value = aws_byte_cursor_from_c_str(range_value),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .recv_filepath = aws_byte_cursor_from_c_str(local_file_path),
+        /* Asked for explicitly rather than left UNSET: the request-level setting outranks
+         * AWS_CRT_S3_ORDERED_DELIVERY, so the parallel write path is exercised regardless of what the
+         * environment running the test has set. */
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+    };
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &meta_request_options, &test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, test_results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, test_results.finished_response_status);
+
+    /* Confirm the download actually took the parallel write path. The resolved flag is what the write
+     * dispatch reads to pick between the per-writer descriptors and the single ordered one, so this
+     * rules out the file having been filled sequentially -- which would make the content assertion
+     * below pass for the wrong reason. Read from the captured results rather than the meta request:
+     * the per-writer descriptors and their count are torn down at finish, so the meta request no
+     * longer reports them by the time the wait returns.
+     *
+     * The delivered-byte pair is the writers' own accounting. Equal to each other means the gap-free
+     * prefix reached the grand total, so no part was accounted for beyond a hole; equal to the range
+     * length means that prefix covers everything asked for. */
+    ASSERT_TRUE(test_results.out_of_order_delivery);
+    ASSERT_UINT_EQUALS(range_length, test_results.num_bytes_delivered);
+    ASSERT_UINT_EQUALS(range_length, test_results.num_bytes_delivered_total);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    ASSERT_UINT_EQUALS((size_t)range_start + range_length, expected_buf.len);
+    uint32_t expected_crc = aws_checksums_crc32(expected_buf.buffer + range_start, (int)range_length, 0);
+
+    FILE *verify_file = aws_fopen(local_file_path, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    struct aws_byte_buf file_buf;
+    /* One byte of slack so a file longer than the range shows up as a length mismatch rather than
+     * being silently truncated by the read. */
+    aws_byte_buf_init(&file_buf, allocator, range_length + 1);
+    file_buf.len = fread(file_buf.buffer, 1, range_length + 1, verify_file);
+    fclose(verify_file);
+
+    ASSERT_UINT_EQUALS(range_length, file_buf.len);
+    uint32_t actual_crc = aws_checksums_crc32(file_buf.buffer, (int)file_buf.len, 0);
+    ASSERT_UINT_EQUALS(expected_crc, actual_crc);
+
+    remove(local_file_path);
+    aws_byte_buf_clean_up(&file_buf);
+    /****************************************************************************************/
+    /* Second download of the same object, this time forced through the DEFAULT meta request
+     * implementation instead of the auto-ranged GET one, to check where a ranged body lands on disk
+     * when nothing in the pipeline knows the range's origin.
+     *
+     * The two implementations arrive at the same file offset by different routes. The auto-ranged GET
+     * records the range start as the object offset that maps to the base position and stamps each part
+     * with its absolute object offset, so the subtraction cancels. DEFAULT sets neither term: the
+     * request's range start stays 0 and no origin is ever recorded. A small range at a non-zero,
+     * non-aligned object offset is what separates the two: if the object offset leaked into the file
+     * offset, the file would come back `default_range_start` bytes longer with a hole at the front,
+     * which the exact-length assertion catches. */
+    const uint64_t default_range_start = 800;
+    const size_t default_range_length = 10;
+    const uint64_t default_range_end_inclusive = default_range_start + default_range_length - 1;
+
+    const char *default_local_file_path = "aws_s3_range_default_write_verify_test_file";
+    remove(default_local_file_path);
+
+    struct aws_http_message *default_message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    char default_range_value[64];
+    snprintf(
+        default_range_value,
+        sizeof(default_range_value),
+        "bytes=%" PRIu64 "-%" PRIu64,
+        default_range_start,
+        default_range_end_inclusive);
+    struct aws_http_header default_range_header = {
+        .name = g_range_header_name,
+        .value = aws_byte_cursor_from_c_str(default_range_value),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(default_message, default_range_header));
+
+    struct aws_s3_meta_request_options default_meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+        .message = default_message,
+        .recv_filepath = aws_byte_cursor_from_c_str(default_local_file_path),
+    };
+
+    struct aws_s3_meta_request_test_results default_test_results;
+    aws_s3_meta_request_test_results_init(&default_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &default_meta_request_options, &default_test_results));
+
+    struct aws_s3_meta_request *default_meta_request =
+        aws_s3_client_make_meta_request(client, &default_meta_request_options);
+    ASSERT_NOT_NULL(default_meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, default_test_results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, default_test_results.finished_response_status);
+    /* DEFAULT is not the implementation that resolves delivery order, so it stays ordered and writes
+     * through the single descriptor no matter what the request asked for. */
+    ASSERT_FALSE(default_test_results.out_of_order_delivery);
+
+    aws_s3_meta_request_release(default_meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    uint32_t default_expected_crc =
+        aws_checksums_crc32(expected_buf.buffer + default_range_start, (int)default_range_length, 0);
+
+    FILE *default_verify_file = aws_fopen(default_local_file_path, "rb");
+    ASSERT_NOT_NULL(default_verify_file);
+    struct aws_byte_buf default_file_buf;
+    aws_byte_buf_init(&default_file_buf, allocator, default_range_length + 1);
+    default_file_buf.len = fread(default_file_buf.buffer, 1, default_range_length + 1, default_verify_file);
+    fclose(default_verify_file);
+
+    /* Exactly the range length: the bytes start at the front of the file, with nothing skipped ahead of
+     * them and nothing written past them. */
+    ASSERT_UINT_EQUALS(default_range_length, default_file_buf.len);
+    uint32_t default_actual_crc = aws_checksums_crc32(default_file_buf.buffer, (int)default_file_buf.len, 0);
+    ASSERT_UINT_EQUALS(default_expected_crc, default_actual_crc);
+
+    remove(default_local_file_path);
+    aws_byte_buf_clean_up(&default_file_buf);
+    aws_s3_meta_request_test_results_clean_up(&default_test_results);
+    aws_http_message_release(default_message);
+
+    aws_byte_buf_clean_up(&expected_buf);
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+/* Runs one ranged GET with a body callback and reports the range_start the callback saw for the first
+ * chunk. The implementation is chosen by `type`: GET_OBJECT reaches the auto-ranged GET, DEFAULT
+ * reaches the default implementation. Everything else about the two requests is identical, so the
+ * range_start each reports is attributable to the implementation and nothing else. */
+static int s_first_body_range_start_for_type(
+    struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *client,
+    enum aws_s3_meta_request_type type,
+    struct aws_byte_cursor range_header_value,
+    uint64_t expected_range_start,
+    bool validate_every_chunk,
+    uint64_t *out_first_range_start,
+    size_t *out_chunk_count,
+    uint64_t *out_received_body_size) {
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_10MB);
+
+    struct aws_http_header range_header = {
+        .name = g_range_header_name,
+        .value = range_header_value,
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
+
+    struct aws_s3_meta_request_options options = {
+        .type = type,
+        .message = message,
+    };
+    if (type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        options.operation_name = aws_byte_cursor_from_c_str("GetObject");
+    }
+
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+    /* Binding a body callback is what makes this a callback-sink download, which is the only sink the
+     * range_start contract is about: a file sink never sees the value. */
+    if (validate_every_chunk) {
+        /* Check every chunk, not just the first, and check it against the range start this test wrote
+         * down rather than the one the implementation derived. */
+        results.validate_body_range_start_base = true;
+        results.body_range_start_base = expected_range_start;
+    }
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &options, &results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, results.finished_response_status);
+    ASSERT_TRUE(results.first_body_range_start_captured);
+
+    *out_first_range_start = results.first_body_range_start;
+    *out_chunk_count = results.body_chunk_count;
+    *out_received_body_size = results.received_body_size;
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(tester);
+
+    aws_s3_meta_request_test_results_clean_up(&results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    return 0;
+}
+
+/* aws_s3_meta_request_receive_body_callback_fn documents range_start as "the byte index of the object
+ * that this refers to", and says that for a request carrying a range header the first chunk's
+ * range_start matches the range header's range-start. This checks that both download implementations
+ * honour that for the same request.
+ *
+ * The auto-ranged GET does: it records the range start as each part's absolute object offset. The
+ * default implementation does not: it never assigns the request's range start, so the value stays 0
+ * and the callback is handed a cursor relative to the range instead of an offset into the object. */
+AWS_TEST_CASE(test_s3_get_object_range_body_callback_range_start, s_test_s3_get_object_range_body_callback_range_start)
+static int s_test_s3_get_object_range_body_callback_range_start(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* An initial range that starts partway into the object at an offset no part boundary lands on, and
+     * spans 1 MiB so that 256 KiB parts break it into several chunks. Both properties matter: a
+     * part-aligned start would let an off-by-a-part mapping still look right, and a range small enough
+     * to fit in one part would only ever exercise the first chunk. */
+    const uint64_t expected_range_start = 1048677;
+    const uint64_t expected_range_length = MB_TO_BYTES(1);
+    struct aws_byte_cursor range_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=1048677-2097252");
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 256 * 1024,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* The auto-ranged GET, as a control: it establishes that the harness reads the value correctly and
+     * that the contract is satisfiable for this request. */
+    uint64_t auto_ranged_get_range_start = 0;
+    size_t auto_ranged_get_chunk_count = 0;
+    uint64_t auto_ranged_get_body_size = 0;
+    ASSERT_SUCCESS(s_first_body_range_start_for_type(
+        allocator,
+        &tester,
+        client,
+        AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        range_header_value,
+        expected_range_start,
+        true /*validate_every_chunk*/,
+        &auto_ranged_get_range_start,
+        &auto_ranged_get_chunk_count,
+        &auto_ranged_get_body_size));
+    ASSERT_UINT_EQUALS(expected_range_start, auto_ranged_get_range_start);
+    /* More than one chunk is what makes the per-chunk validation above mean anything, and the full
+     * range length is what proves the validation covered all of it rather than stopping early. */
+    ASSERT_TRUE(auto_ranged_get_chunk_count > 1);
+    ASSERT_UINT_EQUALS(expected_range_length, auto_ranged_get_body_size);
+
+    /* The same request through the default implementation. */
+    uint64_t default_range_start = 0;
+    size_t default_chunk_count = 0;
+    uint64_t default_body_size = 0;
+    /* Only the first chunk is checked here, so the failure reports the reported offset against the
+     * expected one directly instead of surfacing as a failed meta request from inside the callback. */
+    ASSERT_SUCCESS(s_first_body_range_start_for_type(
+        allocator,
+        &tester,
+        client,
+        AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        range_header_value,
+        expected_range_start,
+        false /*validate_every_chunk*/,
+        &default_range_start,
+        &default_chunk_count,
+        &default_body_size));
+    ASSERT_UINT_EQUALS(expected_range_length, default_body_size);
+    ASSERT_UINT_EQUALS(expected_range_start, default_range_start);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_get_object_file_path_direct_io_dev_null, s_test_s3_get_object_file_path_direct_io_dev_null)
 static int s_test_s3_get_object_file_path_direct_io_dev_null(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

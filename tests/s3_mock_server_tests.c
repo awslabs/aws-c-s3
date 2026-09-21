@@ -3025,7 +3025,7 @@ TEST_CASE(parallel_write_write_to_position_mock_server) {
 /* Shared body for the two ranged-GET tests: download `range` of the object to a fresh file and assert
  * the file holds exactly that range starting at file offset 0.
  *
- * This is the `recv_file_object_offset_origin` half of the file offset calculation. Getting it wrong
+ * This is the `recv_file_object_range_origin` half of the file offset calculation. Getting it wrong
  * writes part 1 at the range start instead of at 0 -- the exact bug this path carried before the origin
  * was introduced -- which leaves a hole at the front of the file and shows up as both a wrong length
  * and a wrong first byte. */
