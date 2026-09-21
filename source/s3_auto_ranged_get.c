@@ -829,7 +829,7 @@ static void s_init_spread_synced(struct aws_s3_meta_request *meta_request) {
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
     /* Reset from any previous attempt (a retry can throw away a discovered range). */
-    auto_ranged_get->synced_data.spread_count = 0;
+    auto_ranged_get->synced_data.spread_num_regions = 0;
 
     if (meta_request->client == NULL || meta_request->client->force_sequential_requests) {
         return;
@@ -847,26 +847,17 @@ static void s_init_spread_synced(struct aws_s3_meta_request *meta_request) {
     }
 
     const uint32_t parts_remaining = total_num_parts - first_part + 1;
-    const uint32_t K =
+    const uint32_t num_regions =
         aws_min_u32(aws_s3_client_get_max_active_connections(meta_request->client, meta_request), parts_remaining);
-    if (K <= 1) {
+    if (num_regions <= 1) {
         return;
     }
 
-    /* Block-cyclic distribution: the first (N % K) regions get ceil(N/K) parts, the rest get
-     * floor(N/K).
-     *
-     * Example: 10 parts (2-11) across 3 connections.  stride = 10/3 = 3, large_lanes = 10%3 = 1.
-     *
-     *   Region 0 (large):  parts 2  3  4  5   (stride+1 = 4 parts)
-     *   Region 1:          parts 6  7  8       (stride   = 3 parts)
-     *   Region 2:          parts 9  10 11      (stride   = 3 parts)
-     *
-     * s_next_part_number_synced then rotates: 2, 6, 9, 3, 7, 10, 4, 8, 11, 5 -- so the 3 requests
-     * in flight at any moment are in 3 far-apart regions of the object. */
-    auto_ranged_get->synced_data.spread_count = K;
-    auto_ranged_get->synced_data.spread_stride = parts_remaining / K;
-    auto_ranged_get->synced_data.spread_large_lanes = parts_remaining % K;
+    /* The leftover of an uneven division goes to the first few regions, one part each. See the spread
+     * fields in s3_auto_ranged_get.h for what each of these means, and a worked example. */
+    auto_ranged_get->synced_data.spread_num_regions = num_regions;
+    auto_ranged_get->synced_data.spread_region_size = parts_remaining / num_regions;
+    auto_ranged_get->synced_data.spread_num_large_regions = parts_remaining % num_regions;
     auto_ranged_get->synced_data.spread_first_part = first_part;
     auto_ranged_get->synced_data.spread_parts_handed_out = 0;
 
@@ -876,44 +867,34 @@ static void s_init_spread_synced(struct aws_s3_meta_request *meta_request) {
         (void *)meta_request,
         first_part,
         total_num_parts,
-        K);
+        num_regions);
 }
 
 /* The 1-based part number to hand out next. When spreading is off, parts go out in object order. When on,
- * parts rotate across K regions via block-cyclic distribution.
- *
- * Continuing the example from s_init_spread_synced (10 parts, K=3, stride=3, large_lanes=1, first=2):
- *
- *   i=0: lane=0 step=0 -> region_start = 2               -> part 2
- *   i=1: lane=1 step=0 -> region_start = 2 + 1*(3+1)   = 6  -> part 6
- *   i=2: lane=2 step=0 -> region_start = 2 + 1*4 + 1*3 = 9  -> part 9
- *   i=3: lane=0 step=1 -> region_start = 2               -> part 3
- *   i=4: lane=1 step=1 -> region_start = 6               -> part 7
- *   ...
- *   i=9: lane=0 step=3 -> region_start = 2               -> part 5   (only the large lane has a step 3)
- */
+ * parts rotate across the spread's regions. See the spread fields in s3_auto_ranged_get.h for what each
+ * one means, and a worked example of the rotation this produces. */
 static uint32_t s_next_part_number_synced(struct aws_s3_meta_request *meta_request) {
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
-    const uint32_t K = auto_ranged_get->synced_data.spread_count;
-    if (K == 0) {
+    const uint32_t num_regions = auto_ranged_get->synced_data.spread_num_regions;
+    if (num_regions == 0) {
         return auto_ranged_get->synced_data.num_parts_requested + 1;
     }
 
     const uint32_t i = auto_ranged_get->synced_data.spread_parts_handed_out++;
-    const uint32_t lane = i % K;
-    const uint32_t step = i / K;
-    const uint32_t stride = auto_ranged_get->synced_data.spread_stride;
-    const uint32_t large_lanes = auto_ranged_get->synced_data.spread_large_lanes;
+    const uint32_t region = i % num_regions;
+    const uint32_t step = i / num_regions;
+    const uint32_t region_size = auto_ranged_get->synced_data.spread_region_size;
+    const uint32_t num_large_regions = auto_ranged_get->synced_data.spread_num_large_regions;
     const uint32_t first = auto_ranged_get->synced_data.spread_first_part;
 
-    /* Region offset: each of the first `large_lanes` regions is one part wider. */
+    /* Where this region begins: each of the first `num_large_regions` regions is one part wider. */
     uint32_t region_start;
-    if (lane < large_lanes) {
-        region_start = first + lane * (stride + 1);
+    if (region < num_large_regions) {
+        region_start = first + region * (region_size + 1);
     } else {
-        region_start = first + large_lanes * (stride + 1) + (lane - large_lanes) * stride;
+        region_start = first + num_large_regions * (region_size + 1) + (region - num_large_regions) * region_size;
     }
 
     return region_start + step;

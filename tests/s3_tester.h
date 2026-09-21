@@ -312,7 +312,7 @@ struct aws_s3_meta_request_test_results {
     bool out_of_order_delivery;
 
     /* How many regions a download spread its range requests across. 0 = object order. */
-    uint32_t spread_count;
+    uint32_t spread_num_regions;
 
     /* The downloaded file's bytes, when get_options.capture_file_content was set. Read after the
      * meta request finished and before the tester deletes the file. */

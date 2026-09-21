@@ -2393,7 +2393,7 @@ TEST_CASE(spread_requests_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
     ASSERT_TRUE(out_results.out_of_order_delivery);
-    ASSERT_TRUE(out_results.spread_count > 1);
+    ASSERT_TRUE(out_results.spread_num_regions > 1);
     ASSERT_UINT_EQUALS(S_PART_COUNT, aws_array_list_length(&out_results.synced_data.succeed_metrics));
     size_t expected_size = (size_t)S_PART_COUNT * S_PART_SIZE;
     ASSERT_UINT_EQUALS(expected_size, out_results.received_file_size);
@@ -2439,7 +2439,7 @@ TEST_CASE(spread_requests_declined_when_delivery_ordered_mock_server) {
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
     ASSERT_FALSE(out_results.out_of_order_delivery);
-    ASSERT_UINT_EQUALS(0, out_results.spread_count);
+    ASSERT_UINT_EQUALS(0, out_results.spread_num_regions);
     ASSERT_UINT_EQUALS((size_t)S_PART_COUNT * S_PART_SIZE, out_results.received_file_size);
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -2478,7 +2478,7 @@ TEST_CASE(spread_requests_forced_sequential_mock_server) {
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
-    ASSERT_UINT_EQUALS(0, out_results.spread_count);
+    ASSERT_UINT_EQUALS(0, out_results.spread_num_regions);
     ASSERT_TRUE(out_results.out_of_order_delivery);
     ASSERT_UINT_EQUALS((size_t)S_PART_COUNT * S_PART_SIZE, out_results.received_file_size);
     aws_s3_meta_request_test_results_clean_up(&out_results);
