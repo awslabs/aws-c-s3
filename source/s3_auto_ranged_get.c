@@ -872,16 +872,24 @@ static void s_init_spread_synced(struct aws_s3_meta_request *meta_request) {
 
 /* The 1-based part number to hand out next. When spreading is off, parts go out in object order. When on,
  * parts rotate across the spread's regions. See the spread fields in s3_auto_ranged_get.h for what each
- * one means, and a worked example of the rotation this produces. */
+ * one means. */
 static uint32_t s_next_part_number_synced(struct aws_s3_meta_request *meta_request) {
     struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
     ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
 
+    /* 0 means spreading is off. 1 would mean a single region, which is a contiguous sweep of the object
+     * and so is object order as well -- the arithmetic below would return the same numbers for it, but
+     * sweeping says it more directly. */
     const uint32_t num_regions = auto_ranged_get->synced_data.spread_num_regions;
-    if (num_regions == 0) {
+    if (num_regions < 2) {
         return auto_ranged_get->synced_data.num_parts_requested + 1;
     }
 
+    /* Split the handout index in two: `region` is which region this part comes from and `step` is how far
+     * into that region it sits. Taking the region from the remainder is what makes the handout visit every
+     * region before it comes back to any of them. Using the header's example -- 10 parts from part 2
+     * across 3 regions, cut as [2 3 4 5] [6 7 8] [9 10 11] -- an index of 4 is region 1, step 1, which is
+     * the second part of [6 7 8]: part 7. */
     const uint32_t i = auto_ranged_get->synced_data.spread_parts_handed_out++;
     const uint32_t region = i % num_regions;
     const uint32_t step = i / num_regions;

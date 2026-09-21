@@ -95,8 +95,7 @@ struct aws_s3_auto_ranged_get {
          * constants, so no per-region cursor is kept. */
 
         /* Number of regions the parts are spread across, and the on/off switch for the whole feature:
-         * 0 means hand parts out in object order and ignore every field below. Never 1, because one
-         * region is a contiguous sweep, which is what 0 already means. 3 in the example above. */
+         * 0 means hand parts out in object order and ignore every field below. 3 in the example above. */
         uint32_t spread_num_regions;
 
         /* How many parts a region holds, floor(parts_to_spread / spread_num_regions) -- 3 in the
