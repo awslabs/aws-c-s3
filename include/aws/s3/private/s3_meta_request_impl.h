@@ -503,12 +503,15 @@ struct aws_s3_meta_request {
      * existing file size for CREATE_OR_APPEND. */
     uint64_t recv_file_base_offset;
 
-    /* The object range start that maps to `recv_file_base_offset` in the file. Zero for a
+    /* The object range from s3 start that maps to `recv_file_base_offset` in the file. Zero for a
      * whole-object download; for a ranged one it is the range's start, because a part is delivered at
      * its absolute position in the object and the caller expects the range's first byte at the base
      * offset rather than that many bytes into the file. Set by the derived meta request when it
      * resolves the object range, which happens before any body is delivered. */
     uint64_t recv_file_object_range_origin;
+
+    /* Whether the origin above has been resolved. */
+    bool recv_file_object_range_origin_resolved;
 
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
      * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)

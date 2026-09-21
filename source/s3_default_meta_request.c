@@ -490,6 +490,27 @@ static void s_s3_meta_request_default_request_finished(
                 aws_s3_meta_request_add_event_for_delivery_synced(meta_request, &event);
             }
 
+            /* Content-Range carries the absolute object offset of the response's first byte, which is
+             * what the body callback's range_start must report and what nothing else on this path
+             * assigns. Shifting the receive-file origin by the same amount keeps the file offset put,
+             * since s_s3_recv_file_offset subtracts the origin back out.
+             *
+             * No parseable Content-Range means the response is not ranged, where 0 is already right, so
+             * clear the error the parse raised instead of leaving it on the thread. */
+            if (request->send_data.response_headers != NULL) {
+                uint64_t response_range_start = 0;
+                if (aws_s3_parse_content_range_response_header(
+                        request->send_data.response_headers, &response_range_start, NULL, NULL) == AWS_OP_SUCCESS) {
+                    request->part_range_start = response_range_start;
+                    meta_request->recv_file_object_range_origin = response_range_start;
+                } else {
+                    aws_reset_error();
+                }
+                /* Resolved either way: a response with no Content-Range is not ranged, so the origin's
+                 * initial 0 is its answer rather than the absence of one. */
+                meta_request->recv_file_object_range_origin_resolved = true;
+            }
+
             aws_s3_meta_request_stream_response_body_synced(meta_request, request);
             /* The body of the request is queued to be streamed, don't record the end timestamp for the request
              * yet. */
