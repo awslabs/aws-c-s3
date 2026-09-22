@@ -445,14 +445,15 @@ static bool s_s3_auto_ranged_get_update(
 
         if (!work_remaining) {
             if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
-                /* Success: every part must have been delivered. */
-                if (meta_request->synced_data.parts_delivered_mask != NULL) {
-                    for (uint32_t p = 0; p < meta_request->synced_data.parts_delivered_mask_count; ++p) {
-                        AWS_FATAL_ASSERT(meta_request->synced_data.parts_delivered_mask[p]);
-                    }
-                    aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
-                    meta_request->synced_data.parts_delivered_mask = NULL;
+                /* About to report success, so every part must have been delivered. A gap here means a part
+                 * was dropped somewhere in the delivery path, which would hand the caller a short or holed
+                 * file while reporting success -- fail instead. set_fail_synced wins over the
+                 * set_success_synced below, which becomes a no-op once a finish result is set. */
+                if (aws_s3_meta_request_validate_parts_delivered_synced(meta_request) != AWS_OP_SUCCESS) {
+                    aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
                 }
+                aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
+                meta_request->synced_data.parts_delivered_mask = NULL;
             }
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
             if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
@@ -1239,11 +1240,13 @@ update_synced_data:
                     object_range_start,
                     object_range_end);
 
-                /* Delivery validation mask: one byte per part, checked before success. */
+                /* Delivery validation mask: one bit per part, checked before success. */
                 aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
                 meta_request->synced_data.parts_delivered_mask = aws_mem_calloc(
-                    meta_request->allocator, auto_ranged_get->synced_data.total_num_parts, sizeof(uint8_t));
-                meta_request->synced_data.parts_delivered_mask_count = auto_ranged_get->synced_data.total_num_parts;
+                    meta_request->allocator,
+                    ((size_t)auto_ranged_get->synced_data.total_num_parts + 7) / 8,
+                    sizeof(uint8_t));
+                meta_request->synced_data.parts_delivered_mask_num_parts = auto_ranged_get->synced_data.total_num_parts;
             }
 
             /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding

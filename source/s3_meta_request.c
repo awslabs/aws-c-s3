@@ -2943,17 +2943,21 @@ static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint3
         return AWS_OP_SUCCESS;
     }
 
-    if (part_number < 1 || part_number > meta_request->synced_data.parts_delivered_mask_count) {
+    if (part_number < 1 || part_number > meta_request->synced_data.parts_delivered_mask_num_parts) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Part %" PRIu32 " is outside the valid range [1, %" PRIu32 "].",
             (void *)meta_request,
             part_number,
-            meta_request->synced_data.parts_delivered_mask_count);
+            meta_request->synced_data.parts_delivered_mask_num_parts);
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    if (meta_request->synced_data.parts_delivered_mask[part_number - 1]) {
+    const uint32_t bit_index = part_number - 1;
+    uint8_t *byte = &meta_request->synced_data.parts_delivered_mask[bit_index / 8];
+    const uint8_t bit = (uint8_t)(1u << (bit_index % 8));
+
+    if (*byte & bit) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Part %" PRIu32 " was delivered more than once.",
@@ -2962,7 +2966,44 @@ static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint3
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    meta_request->synced_data.parts_delivered_mask[part_number - 1] = 1;
+    *byte |= bit;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_meta_request_validate_parts_delivered_synced(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    const uint8_t *mask = meta_request->synced_data.parts_delivered_mask;
+    if (mask == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+
+    const uint32_t num_parts = meta_request->synced_data.parts_delivered_mask_num_parts;
+    const uint32_t num_full_bytes = num_parts / 8;
+    const uint32_t num_bytes = (num_parts + 7) / 8;
+
+    for (uint32_t byte = 0; byte < num_bytes; ++byte) {
+        /* A whole byte covers 8 parts, so all of its bits are required. A part count that is not a
+         * multiple of 8 leaves a partial byte at the end whose high bits stand for no part at all, so
+         * only its low bits are required. That byte exists only when there is a remainder, which is
+         * exactly when `num_bytes` reaches past `num_full_bytes`. */
+        const uint8_t required = (byte < num_full_bytes) ? 0xFF : (uint8_t)((1u << (num_parts % 8)) - 1);
+        if ((mask[byte] & required) == required) {
+            continue;
+        }
+
+        /* Name the first part that is missing rather than the byte it sits in. */
+        const uint32_t missing_part = byte * 8 + (uint32_t)aws_ctz_u32(required & (uint32_t)~mask[byte]) + 1;
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Download is finishing successfully but part %" PRIu32 " of %" PRIu32 " was never delivered.",
+            (void *)meta_request,
+            missing_part,
+            num_parts);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
     return AWS_OP_SUCCESS;
 }
 
