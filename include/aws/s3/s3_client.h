@@ -8,6 +8,7 @@
 
 #include <aws/auth/signing_config.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/tribool.h>
 #include <aws/http/connection_manager.h>
 #include <aws/io/retry_strategy.h>
 #include <aws/s3/s3.h>
@@ -736,6 +737,55 @@ struct aws_s3_client_config {
 
     /* User data that's passed into pool factory. */
     void *buffer_pool_user_data;
+
+    /**
+     * Whether a download may deliver received parts as they arrive rather than in object order.
+     *
+     * For a download given a `recv_filepath`, writing out of order lets several parts reach the disk at
+     * once, which is what allows a download to exceed the throughput of a single writer. This is on
+     * unless you turn it off: each part is written at its own absolute file offset, so arrival order is
+     * invisible in the finished file.
+     *
+     * For a download delivered through `body_callback`, out-of-order delivery stops a part from waiting
+     * on the part ahead of it, which frees its buffer sooner and removes the latency a single slow part
+     * adds to everything behind it. It does NOT make the callback concurrent: the callback still fires
+     * from one thread, one part at a time, exactly as it does today. Only the order changes, so
+     * `range_start` no longer advances contiguously and your sink must place each range by
+     * `range_start` rather than appending. Because that is visible in your own code, it requires
+     * AWS_TRIBOOL_TRUE -- AWS_TRIBOOL_UNSET leaves callback delivery in object order.
+     *
+     * The trade for a file destination is what a partial file contains. Ordered delivery leaves a valid
+     * prefix, so an interrupted download yields a file that is short but complete as far as it goes.
+     * Out-of-order delivery can leave gaps, so a partial file is only meaningful together with the
+     * download resume token, which reports how many bytes from the start are contiguous.
+     *
+     * Ignored when a response carries a whole-object checksum that can only be verified by hashing the
+     * body in order; such a request delivers in order and logs a warning.
+     *
+     * Leave AWS_TRIBOOL_UNSET to let the client decide, which currently means out of order for a file
+     * destination and in order for a body callback. The AWS_CRT_S3_ORDERED_DELIVERY environment variable
+     * changes that decision to in order for both; it applies only when neither this field nor the request
+     * asked for something, so setting either one keeps the answer yours.
+     *
+     * A single request can override this via `aws_s3_meta_request_options.out_of_order_delivery`.
+     */
+    enum aws_tribool out_of_order_delivery;
+
+    /**
+     * Optional.
+     * Number of threads the client dedicates to file I/O.
+     *
+     * These threads do nothing but read from and write to files, which keeps a blocking disk
+     * operation from delaying the response processing and user callbacks that share the client's
+     * other threads. The count is also the number of parts a download can have in flight to the
+     * disk at once, so it bounds how much of the disk's throughput a single client can use.
+     *
+     * Raising it past the point where the disk saturates buys nothing and costs threads. Lowering
+     * it below the disk's concurrency leaves throughput on the table.
+     *
+     * Defaults to the number of event loops in the client bootstrap's event loop group.
+     */
+    uint16_t num_file_io_threads;
 };
 
 struct aws_s3_checksum_config {
@@ -895,6 +945,16 @@ struct aws_s3_meta_request_options {
 
     /**
      * Optional.
+     * Per-request override of the client's `out_of_order_delivery`. See that field for what the setting
+     * means and what each sink defaults to.
+     *
+     * AWS_TRIBOOL_UNSET, the default, defers to the client. Anything else wins over the client, so a
+     * single request can opt in or out without a separate client.
+     */
+    enum aws_tribool out_of_order_delivery;
+
+    /**
+     * Optional.
      * If set, this file is sent as the request body.
      * This gives the best performance when sending data from a file.
      * Do not set if the body is being passed by other means (see note above).
@@ -905,12 +965,10 @@ struct aws_s3_meta_request_options {
      * Optional.
      * Overrides the client config if set.
      * If set, this controls how the meta request interact with file I/O.
-     * Read `aws_s3_file_io_options` for details.
-     *  Notes: Only applies when `send_filepath` is set.
-     *  TODO: adapt it to `recv_filepath`.
      *
-     * Note: if both client and meta request don't set this, for objects larger than 2TiB, this will be set to a default
-     * options with `should_stream` to be True and others follow the default to avoid memory issues.
+     * Note: if both client and meta request don't set this, for objects larger than g_streaming_object_size_threshold,
+     * this will be set to a default options with `should_stream` to be True and others follow the default to avoid
+     * memory issues.
      *
      * eg:
      * - When the file is too large to fit in the buffer, set `should_stream` to avoid buffering the whole parts in
