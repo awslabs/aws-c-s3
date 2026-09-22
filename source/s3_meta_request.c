@@ -2954,7 +2954,20 @@ static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint3
     }
 
     const uint32_t bit_index = part_number - 1;
-    uint8_t *byte = &meta_request->synced_data.parts_delivered_mask[bit_index / 8];
+    const uint32_t byte_index = bit_index / 8;
+    if (byte_index >= meta_request->synced_data.parts_delivered_mask_length) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Part %" PRIu32 " falls in byte %" PRIu32 " of a %" PRIu32
+            "-byte mask, so the mask length and its part count disagree.",
+            (void *)meta_request,
+            part_number,
+            byte_index,
+            meta_request->synced_data.parts_delivered_mask_length);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    uint8_t *byte = &meta_request->synced_data.parts_delivered_mask[byte_index];
     const uint8_t bit = (uint8_t)(1u << (bit_index % 8));
 
     if (*byte & bit) {
@@ -2981,7 +2994,23 @@ int aws_s3_meta_request_validate_parts_delivered_synced(struct aws_s3_meta_reque
 
     const uint32_t num_parts = meta_request->synced_data.parts_delivered_mask_num_parts;
     const uint32_t num_full_bytes = num_parts / 8;
-    const uint32_t num_bytes = (num_parts + 7) / 8;
+    const uint32_t num_bytes = meta_request->synced_data.parts_delivered_mask_length;
+
+    /* The walk below reads every byte of the mask and derives which bits of the last one stand for a real
+     * part from the part count, so the two have to agree before any of it is trusted. Checking once here
+     * is what keeps the loop from reading off the end, and keeps the partial-byte arithmetic from asking
+     * about bits in a byte that was never allocated. */
+    if (num_bytes != (num_parts + 7) / 8) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Delivery mask covers %" PRIu32 " parts, which needs %" PRIu32 " bytes, but it is %" PRIu32
+            " bytes long.",
+            (void *)meta_request,
+            num_parts,
+            (num_parts + 7) / 8,
+            num_bytes);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
 
     for (uint32_t byte = 0; byte < num_bytes; ++byte) {
         /* A whole byte covers 8 parts, so all of its bits are required. A part count that is not a

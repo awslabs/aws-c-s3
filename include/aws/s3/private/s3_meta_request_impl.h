@@ -297,6 +297,13 @@ struct aws_s3_meta_request {
          * known; NULL for meta request types that do not split a download into parts. */
         uint8_t *parts_delivered_mask;
 
+        /* How many bytes `parts_delivered_mask` actually points at, so every index into it is bounded by
+         * what was allocated rather than by a size recomputed at each use. An eighth of
+         * `parts_delivered_mask_num_parts`, rounded up; the two are cross-checked before the mask is
+         * walked, so a future allocation site that sets one without the other is caught rather than
+         * reading off the end. */
+        uint32_t parts_delivered_mask_length;
+
         /* How many parts the mask covers, so it occupies an eighth of this many bytes, rounded up. Also
          * the upper bound a part number is range-checked against before its bit is touched. */
         uint32_t parts_delivered_mask_num_parts;

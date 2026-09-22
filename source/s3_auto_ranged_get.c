@@ -454,6 +454,7 @@ static bool s_s3_auto_ranged_get_update(
                 }
                 aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
                 meta_request->synced_data.parts_delivered_mask = NULL;
+                meta_request->synced_data.parts_delivered_mask_length = 0;
             }
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
             if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
@@ -843,14 +844,22 @@ static void s_init_spread_synced(struct aws_s3_meta_request *meta_request) {
 
     const uint32_t first_part = auto_ranged_get->synced_data.num_parts_requested + 1;
     const uint32_t total_num_parts = auto_ranged_get->synced_data.total_num_parts;
+    /* If the first part completed the full download, stops here. */
     if (first_part > total_num_parts) {
         return;
     }
 
     const uint32_t parts_remaining = total_num_parts - first_part + 1;
-    const uint32_t num_regions =
-        aws_min_u32(aws_s3_client_get_max_active_connections(meta_request->client, meta_request), parts_remaining);
+    const uint32_t num_regions = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
     if (num_regions <= 1) {
+        return;
+    }
+
+    /* With a region per remaining part the rotation visits region 0, 1, 2 ... which is parts first,
+     * first + 1, first + 2 -- object order, exactly what handing them out with no spread already does.
+     * Declining here also keeps the region size below from dividing to zero when the connection count
+     * runs ahead of the part count. */
+    if (parts_remaining <= num_regions) {
         return;
     }
 
@@ -1242,10 +1251,10 @@ update_synced_data:
 
                 /* Delivery validation mask: one bit per part, checked before success. */
                 aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
-                meta_request->synced_data.parts_delivered_mask = aws_mem_calloc(
-                    meta_request->allocator,
-                    ((size_t)auto_ranged_get->synced_data.total_num_parts + 7) / 8,
-                    sizeof(uint8_t));
+                const uint32_t mask_length = (uint32_t)(((size_t)auto_ranged_get->synced_data.total_num_parts + 7) / 8);
+                meta_request->synced_data.parts_delivered_mask =
+                    aws_mem_calloc(meta_request->allocator, mask_length, sizeof(uint8_t));
+                meta_request->synced_data.parts_delivered_mask_length = mask_length;
                 meta_request->synced_data.parts_delivered_mask_num_parts = auto_ranged_get->synced_data.total_num_parts;
             }
 
