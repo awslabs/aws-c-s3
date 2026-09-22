@@ -2944,14 +2944,23 @@ static uint8_t s_byte_with_lowest_bits_set(uint32_t count) {
     return (uint8_t)((1u << count) - 1);
 }
 
-/* Part N occupies bit N-1 of the mask, which is bit (N-1) % 8 of byte (N-1) / 8. These two are the only
- * places that spell that out. The second returns that bit already shifted into place -- a byte with the
- * one bit set -- so callers test and set with & and |= rather than shifting again. */
+/* Part numbers are 1-based and bits are 0-based, so part N is bit N-1 of the mask. Dividing that bit
+ * index by 8 splits it in two: the quotient says which byte holds the bit, the remainder says where it
+ * sits inside that byte. Each helper below is one half of that split, and they are the only places that
+ * spell it out.
+ *
+ * Part 11, say. Its bit index is 10, and 10 / 8 is 1 with a remainder of 2, so part 11 is bit 2 of
+ * byte 1. */
 static uint32_t s_byte_index_holding_part(uint32_t part_number) {
     AWS_PRECONDITION(part_number >= 1);
     return (part_number - 1) / 8;
 }
 
+/* The remainder from above, turned into a byte with only that bit set -- position 2 becomes 00000100.
+ * Returning the bit already shifted into place is what lets callers test it with & and set it with |=
+ * instead of shifting at each use. The shift runs on 1u rather than on a byte because anything narrower
+ * promotes to int before shifting anyway, and a position of at most 7 leaves a result of at most
+ * 10000000, so narrowing back to a byte cannot drop the bit. */
 static uint8_t s_bit_mask_for_part(uint32_t part_number) {
     AWS_PRECONDITION(part_number >= 1);
     return (uint8_t)(1u << ((part_number - 1) % 8));
