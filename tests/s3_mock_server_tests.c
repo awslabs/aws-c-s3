@@ -2368,9 +2368,15 @@ TEST_CASE(spread_requests_mock_server) {
     (void)ctx;
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    /* Spreading is declined unless there are more parts left to request than there are regions, and the
+     * region count comes from the connection count -- which floors at g_min_num_connections (10), well
+     * above the three parts this object has left once discovery has taken part 1. Holding the client to
+     * two connections gives two regions over those three parts, so the spread engages: region 0 holds
+     * parts 2 and 3, region 1 holds part 4, and the rotation issues them 2, 4, 3. */
     struct aws_s3_tester_client_options client_options = {
         .part_size = S_PART_SIZE,
         .tls_usage = AWS_S3_TLS_DISABLED,
+        .max_active_connections_override = 2,
     };
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -2418,6 +2424,11 @@ TEST_CASE(spread_requests_declined_when_delivery_ordered_mock_server) {
         .part_size = S_PART_SIZE,
         .tls_usage = AWS_S3_TLS_DISABLED,
         .out_of_order_delivery = AWS_TRIBOOL_FALSE,
+        /* Two connections give two regions over the three parts left after discovery, which is what
+         * makes a spread possible here at all -- see spread_requests_mock_server. Without it the spread
+         * would be declined for want of parts, and the assertion below would hold even if the mechanism
+         * under test had stopped working. */
+        .max_active_connections_override = 2,
     };
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
@@ -2458,6 +2469,11 @@ TEST_CASE(spread_requests_forced_sequential_mock_server) {
     struct aws_s3_tester_client_options client_options = {
         .part_size = S_PART_SIZE,
         .tls_usage = AWS_S3_TLS_DISABLED,
+        /* Two connections give two regions over the three parts left after discovery, which is what
+         * makes a spread possible here at all -- see spread_requests_mock_server. Without it the spread
+         * would be declined for want of parts, and the assertion below would hold even if the mechanism
+         * under test had stopped working. */
+        .max_active_connections_override = 2,
     };
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
