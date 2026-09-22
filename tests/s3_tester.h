@@ -311,6 +311,9 @@ struct aws_s3_meta_request_test_results {
      * the ordered path and passed for the wrong reason. */
     bool out_of_order_delivery;
 
+    /* How many regions a download spread its range requests across. 0 = object order. */
+    uint32_t spread_num_regions;
+
     /* The downloaded file's bytes, when get_options.capture_file_content was set. Read after the
      * meta request finished and before the tester deletes the file. */
     struct aws_byte_buf received_file_content;

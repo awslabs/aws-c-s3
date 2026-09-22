@@ -93,7 +93,26 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    * Setting it means an interrupted download to a file leaves a valid prefix rather than a file with gaps, at the cost of parts waiting on the part ahead of them.
    * Read once per client, when the client is created.
 
-4. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
+4. **Sequential Requests - `AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS`**
+
+   Makes every download request its parts in object order instead of spreading them across several far-apart regions of the object at once.
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS=1
+   ```
+
+   **Default Behavior**:
+   When nothing is set, a download that delivers out of order also issues its range requests across as many far-apart regions of the object as it has connections, one region per connection. A download that delivers in object order already requests in object order and is unaffected.
+
+   **Notes**:
+   * Any non-empty value turns it on; the value itself is not read.
+   * It only changes what is requested, not how it is delivered. Parts can still be written to the file at their own offsets as they arrive, depending on the delivery order setting.
+   * Setting it makes an interrupted download's file size bound how many of its bytes are valid, and makes resuming cheaper, because there are no gaps for the download to be ahead of.
+   * Read once per client, when the client is created.
+
+5. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
 
    The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 

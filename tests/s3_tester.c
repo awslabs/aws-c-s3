@@ -257,6 +257,13 @@ static void s_s3_test_meta_request_finish(
     aws_s3_meta_request_lock_synced_data(meta_request);
     meta_request_test_results->num_bytes_delivered = meta_request->synced_data.num_bytes_delivered;
     meta_request_test_results->num_bytes_delivered_total = meta_request->synced_data.num_bytes_delivered_total;
+    /* Spread state is auto-ranged-GET-only. The type check is necessary: a GET whose query has
+     * partNumber carries type GET_OBJECT but a default-impl, so casting to auto_ranged_get would
+     * read unrelated struct memory. The vtable is the authoritative identity. */
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && meta_request->part_size != 0) {
+        struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+        meta_request_test_results->spread_num_regions = auto_ranged_get->synced_data.spread_num_regions;
+    }
     aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (meta_request_test_results->finish_callback != NULL) {

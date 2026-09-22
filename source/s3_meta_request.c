@@ -860,6 +860,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_string_destroy(meta_request->s3express_session_host);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
+    aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
     /* endpoint should have already been released and set NULL by the meta request finish call.
      * But call release() again, just in case we're tearing down a half-initialized meta request */
     aws_s3_endpoint_release(meta_request->endpoint);
@@ -2933,6 +2934,108 @@ static int s_deliver_body_to_sink(
     return AWS_OP_SUCCESS;
 }
 
+/* Mark part_number as delivered in the validation mask. Returns true on success, false if something is
+ * wrong (out of range or duplicate), in which case it logs the error. The caller should fail the meta
+ * request on false rather than aborting, since a double-delivery is a bug but not an unrecoverable one. */
+static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint32_t part_number) {
+
+    if (meta_request->synced_data.parts_delivered_mask == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+
+    if (part_number < 1 || part_number > meta_request->synced_data.parts_delivered_mask_num_parts) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Part %" PRIu32 " is outside the valid range [1, %" PRIu32 "].",
+            (void *)meta_request,
+            part_number,
+            meta_request->synced_data.parts_delivered_mask_num_parts);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    const uint32_t bit_index = part_number - 1;
+    const uint32_t byte_index = bit_index / 8;
+    if (byte_index >= meta_request->synced_data.parts_delivered_mask_length) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Part %" PRIu32 " falls in byte %" PRIu32 " of a %" PRIu32
+            "-byte mask, so the mask length and its part count disagree.",
+            (void *)meta_request,
+            part_number,
+            byte_index,
+            meta_request->synced_data.parts_delivered_mask_length);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    uint8_t *byte = &meta_request->synced_data.parts_delivered_mask[byte_index];
+    const uint8_t bit = (uint8_t)(1u << (bit_index % 8));
+
+    if (*byte & bit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Part %" PRIu32 " was delivered more than once.",
+            (void *)meta_request,
+            part_number);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    *byte |= bit;
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_meta_request_validate_parts_delivered_synced(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    const uint8_t *mask = meta_request->synced_data.parts_delivered_mask;
+    if (mask == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+
+    const uint32_t num_parts = meta_request->synced_data.parts_delivered_mask_num_parts;
+    const uint32_t num_full_bytes = num_parts / 8;
+    const uint32_t num_bytes = meta_request->synced_data.parts_delivered_mask_length;
+
+    /* The walk below reads every byte of the mask and derives which bits of the last one stand for a real
+     * part from the part count, so the two have to agree before any of it is trusted. Checking once here
+     * is what keeps the loop from reading off the end, and keeps the partial-byte arithmetic from asking
+     * about bits in a byte that was never allocated. */
+    if (num_bytes != (num_parts + 7) / 8) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Delivery mask covers %" PRIu32 " parts, which needs %" PRIu32 " bytes, but it is %" PRIu32
+            " bytes long.",
+            (void *)meta_request,
+            num_parts,
+            (num_parts + 7) / 8,
+            num_bytes);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    for (uint32_t byte = 0; byte < num_bytes; ++byte) {
+        /* A whole byte covers 8 parts, so all of its bits are required. A part count that is not a
+         * multiple of 8 leaves a partial byte at the end whose high bits stand for no part at all, so
+         * only its low bits are required. That byte exists only when there is a remainder, which is
+         * exactly when `num_bytes` reaches past `num_full_bytes`. */
+        const uint8_t required = (byte < num_full_bytes) ? 0xFF : (uint8_t)((1u << (num_parts % 8)) - 1);
+        if ((mask[byte] & required) == required) {
+            continue;
+        }
+
+        /* Name the first part that is missing rather than the byte it sits in. */
+        const uint32_t missing_part = byte * 8 + (uint32_t)aws_ctz_u32(required & (uint32_t)~mask[byte]) + 1;
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Download is finishing successfully but part %" PRIu32 " of %" PRIu32 " was never delivered.",
+            (void *)meta_request,
+            missing_part,
+            num_parts);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Fold one part into the contiguous delivered prefix.
  *
  * The prefix is only as meaningful as its contiguity: `num_bytes_delivered` is reported as the resume
@@ -3111,6 +3214,10 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
         ++meta_request->synced_data.num_parts_delivery_completed;
 
         if (error_code == AWS_ERROR_SUCCESS) {
+
+            if (s_mark_part_delivered(meta_request, body_write->part_number) != AWS_OP_SUCCESS) {
+                aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
+            }
             if (s_s3_meta_request_record_delivered_part_synced(
                     meta_request,
                     body_write->part_number,
@@ -3228,14 +3335,16 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 if (response_body.len == 0) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
-                    if (out_of_order_delivery && error_code == AWS_ERROR_SUCCESS) {
+
+                    if (error_code == AWS_ERROR_SUCCESS) {
                         /* Still has to close its slot in the prefix, or every later part parks behind
                          * a part that was never going to contribute any bytes. */
                         struct aws_s3_delivery_tracking_record completed = {
                             .part_number = request->part_number,
                             .range_start = request->part_range_start,
                             .range_end = request->part_range_end,
-                            .bytes = 0};
+                            .bytes = 0,
+                        };
                         aws_array_list_push_back(&completed_deliveries, &completed);
                     }
                     request->send_data.metrics =
@@ -3335,10 +3444,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                 if (!delivery_incomplete || error_code != AWS_ERROR_SUCCESS) {
                     aws_atomic_fetch_sub(&client->stats.num_requests_streaming_response, 1);
                     ++num_parts_delivered;
-                    if (out_of_order_delivery && error_code == AWS_ERROR_SUCCESS) {
-                        /* The part is done, so it can take its place in the prefix. Its byte count is
-                         * everything handed over across every tick, not just this one, which is why this
-                         * waits for the part to finish rather than counting each chunk. */
+
+                    if (error_code == AWS_ERROR_SUCCESS) {
                         struct aws_s3_delivery_tracking_record completed = {
                             .part_number = request->part_number,
                             .range_start = request->part_range_start,
@@ -3430,12 +3537,18 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
         }
 
         meta_request->synced_data.num_parts_delivery_completed += num_parts_delivered;
-        if (out_of_order_delivery) {
-            /* The prefix stops at the first part still missing, so it advances per completed part rather
-             * than by this tick's byte count. Each recorded part adds its own bytes to the total. */
-            for (size_t i = 0; i < aws_array_list_length(&completed_deliveries); ++i) {
-                struct aws_s3_delivery_tracking_record completed;
-                aws_array_list_get_at(&completed_deliveries, &completed, i);
+
+        /* Mark every delivered part in the validation mask and update byte accounting.
+         * completed_deliveries is populated by both the ordered and out-of-order paths now. */
+        for (size_t i = 0; i < aws_array_list_length(&completed_deliveries); ++i) {
+            struct aws_s3_delivery_tracking_record completed;
+            aws_array_list_get_at(&completed_deliveries, &completed, i);
+
+            if (s_mark_part_delivered(meta_request, completed.part_number) != AWS_OP_SUCCESS) {
+                aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
+            }
+
+            if (out_of_order_delivery) {
                 if (s_s3_meta_request_record_delivered_part_synced(
                         meta_request,
                         completed.part_number,
@@ -3448,7 +3561,8 @@ static void s_s3_meta_request_event_delivery_task(struct aws_task *task, void *a
                     break;
                 }
             }
-        } else {
+        }
+        if (!out_of_order_delivery) {
             /* This path delivers in object order, so the prefix and the total advance together. */
             meta_request->synced_data.num_bytes_delivered += num_bytes_delivered;
             meta_request->synced_data.num_bytes_delivered_total += num_bytes_delivered;

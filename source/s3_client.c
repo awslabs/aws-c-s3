@@ -104,6 +104,10 @@ static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
  * than overruling a caller. See `aws_s3_client.out_of_order_delivery_env`. */
 static const char *s_ordered_delivery_env_var = "AWS_CRT_S3_ORDERED_DELIVERY";
 
+/* Set to anything non-empty and every download requests its parts in object order instead of spreading
+ * them across far-apart regions of the object. See `aws_s3_client.force_sequential_requests`. */
+static const char *s_force_sequential_requests_env_var = "AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS";
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -947,6 +951,19 @@ struct aws_s3_client *aws_s3_client_new(
                 "its body in object order.",
                 (void *)client,
                 s_ordered_delivery_env_var);
+        }
+    }
+
+    {
+        struct aws_string *force_sequential = aws_get_env_nonempty(allocator, s_force_sequential_requests_env_var);
+        if (force_sequential != NULL) {
+            *((bool *)&client->force_sequential_requests) = true;
+            aws_string_destroy(force_sequential);
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "id=%p %s is set, so downloads request their parts in object order.",
+                (void *)client,
+                s_force_sequential_requests_env_var);
         }
     }
 

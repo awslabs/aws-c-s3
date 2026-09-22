@@ -290,6 +290,24 @@ struct aws_s3_meta_request {
          * failed.)*/
         uint32_t num_parts_delivery_completed;
 
+        /* One bit per part, bit (N-1) for part N, least significant bit first within each byte. Set when
+         * a part finishes sinking — written to the file or delivered through the body callback. Checked
+         * when the meta request is about to complete: every bit must be set. Catches any path that drops
+         * or duplicates a part. Allocated by the auto-ranged-get implementation once total_num_parts is
+         * known; NULL for meta request types that do not split a download into parts. */
+        uint8_t *parts_delivered_mask;
+
+        /* How many bytes `parts_delivered_mask` actually points at, so every index into it is bounded by
+         * what was allocated rather than by a size recomputed at each use. An eighth of
+         * `parts_delivered_mask_num_parts`, rounded up; the two are cross-checked before the mask is
+         * walked, so a future allocation site that sets one without the other is caught rather than
+         * reading off the end. */
+        uint32_t parts_delivered_mask_length;
+
+        /* How many parts the mask covers, so it occupies an eighth of this many bytes, rounded up. Also
+         * the upper bound a part number is range-checked against before its bit is touched. */
+        uint32_t parts_delivered_mask_num_parts;
+
         /* Bytes delivered contiguously from the start of the range, with no gaps. This is what the
          * download resume token reports as `continuous_downloaded_bytes`, so it may only count a part
          * once every earlier part has also landed. `next_contiguous_delivered_part` and
@@ -701,6 +719,15 @@ void aws_s3_meta_request_set_fail_synced(
  * overwrite the end result of the meta request. */
 AWS_S3_API
 void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status);
+
+/* Check that every part in `parts_delivered_mask` was marked, the last chance to catch a part that was
+ * never delivered before the meta request reports success. Raises AWS_ERROR_INVALID_STATE naming the first
+ * missing part when one is absent, so the caller can fail the meta request instead of claiming a complete
+ * download. Returns AWS_OP_SUCCESS when the mask is full, and when there is no mask at all -- meta request
+ * types that do not split a download into parts never allocate one. Leaves the mask in place; the caller
+ * owns releasing it. */
+AWS_S3_API
+int aws_s3_meta_request_validate_parts_delivered_synced(struct aws_s3_meta_request *meta_request);
 
 /* Returns true if the finish result has been set (ie: either aws_s3_meta_request_set_fail_synced or
  * aws_s3_meta_request_set_success_synced have been called.) */

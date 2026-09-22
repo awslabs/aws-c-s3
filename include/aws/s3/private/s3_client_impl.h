@@ -383,6 +383,10 @@ struct aws_s3_client {
      * both directions: it is what a caller who says nothing to a body callback already gets. */
     const enum aws_tribool out_of_order_delivery_env;
 
+    /* Whether every download must request its parts in object order instead of spreading them across
+     * far-apart regions of the object. Set from AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS. */
+    const bool force_sequential_requests;
+
     /**
      * Timeout in ms for upload request for request after sending to the response first byte received.
      */
