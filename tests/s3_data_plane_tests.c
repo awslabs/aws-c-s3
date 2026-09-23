@@ -11280,11 +11280,11 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
     ASSERT_UINT_EQUALS(MB_TO_BYTES(125), test_results.upload_review.part_sizes_array[3]);
     ASSERT_UINT_EQUALS(MB_TO_BYTES(40), test_results.upload_review.part_sizes_array[4]);
     ASSERT_INT_EQUALS(AWS_SCA_CRC32, test_results.upload_review.checksum_algorithm);
-    ASSERT_STR_EQUALS("RYd3Aw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
-    ASSERT_STR_EQUALS("v5Or2w==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
-    ASSERT_STR_EQUALS("9kntaA==", aws_string_c_str(test_results.upload_review.part_checksums_array[2]));
-    ASSERT_STR_EQUALS("w6wh3A==", aws_string_c_str(test_results.upload_review.part_checksums_array[3]));
-    ASSERT_STR_EQUALS("jwpwGA==", aws_string_c_str(test_results.upload_review.part_checksums_array[4]));
+    ASSERT_STR_EQUALS("E/DtDw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
+    ASSERT_STR_EQUALS("lRL/Yg==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
+    ASSERT_STR_EQUALS("1WXPAg==", aws_string_c_str(test_results.upload_review.part_checksums_array[2]));
+    ASSERT_STR_EQUALS("lsmwWw==", aws_string_c_str(test_results.upload_review.part_checksums_array[3]));
+    ASSERT_STR_EQUALS("KCT+7w==", aws_string_c_str(test_results.upload_review.part_checksums_array[4]));
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     return 0;
