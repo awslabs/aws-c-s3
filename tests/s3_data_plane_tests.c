@@ -11252,7 +11252,7 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     struct aws_s3_tester_client_options client_options = {
-        .part_size = MB_TO_BYTES(125), 
+        .part_size = MB_TO_BYTES(125),
         .memory_limit_in_bytes = MB_TO_BYTES(512),
     };
 
