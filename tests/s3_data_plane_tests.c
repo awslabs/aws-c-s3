@@ -11252,7 +11252,9 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
     struct aws_s3_tester_client_options client_options = {
-        .part_size = MB_TO_BYTES(250), .memory_limit_in_bytes = GB_TO_BYTES(1)};
+        .part_size = MB_TO_BYTES(125), 
+        .memory_limit_in_bytes = MB_TO_BYTES(512),
+    };
 
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
@@ -11261,8 +11263,8 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
         .client_options = &client_options,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_1040MB_CRC32.txt"),
-                .object_size_mb = 1040,
+                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_540MB_CRC32.txt"),
+                .object_size_mb = 540,
             },
     };
 
@@ -11272,10 +11274,10 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
      * Check that it got what we expect */
     ASSERT_UINT_EQUALS(1, test_results.upload_review.invoked_count);
     ASSERT_UINT_EQUALS(5, test_results.upload_review.part_count);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[0]);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[1]);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[2]);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(250), test_results.upload_review.part_sizes_array[3]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(125), test_results.upload_review.part_sizes_array[0]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(125), test_results.upload_review.part_sizes_array[1]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(125), test_results.upload_review.part_sizes_array[2]);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(125), test_results.upload_review.part_sizes_array[3]);
     ASSERT_UINT_EQUALS(MB_TO_BYTES(40), test_results.upload_review.part_sizes_array[4]);
     ASSERT_INT_EQUALS(AWS_SCA_CRC32, test_results.upload_review.checksum_algorithm);
     ASSERT_STR_EQUALS("RYd3Aw==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
