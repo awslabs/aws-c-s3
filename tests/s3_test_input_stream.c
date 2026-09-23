@@ -122,10 +122,7 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     test_input_stream->base.vtable = stream_value == TEST_STREAM_VALUE_1 ? &s_aws_s3_test_input_stream_vtable_1
                                                                          : &s_aws_s3_test_input_stream_vtable_2;
 
-    aws_ref_count_init(
-        &test_input_stream->base.ref_count,
-        test_input_stream,
-        s_aws_s3_test_input_stream_destroy_wrap);
+    aws_ref_count_init(&test_input_stream->base.ref_count, test_input_stream, s_aws_s3_test_input_stream_destroy_wrap);
 
     struct aws_input_stream *input_stream = &test_input_stream->base;
 

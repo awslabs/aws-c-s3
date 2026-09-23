@@ -984,12 +984,7 @@ struct aws_s3express_credentials_provider *aws_s3express_credentials_provider_ne
         NULL);
 
     impl->synced_data.cache = aws_cache_new_lru(
-        allocator,
-        aws_hash_string,
-        s_string_eq,
-        NULL,
-        s_s3express_session_destroy,
-        s_default_cache_capacity);
+        allocator, aws_hash_string, s_string_eq, NULL, s_s3express_session_destroy, s_default_cache_capacity);
     AWS_ASSERT(impl->synced_data.cache);
 
     /* Not keep the s3 client alive to avoid recursive reference */

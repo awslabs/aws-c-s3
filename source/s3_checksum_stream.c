@@ -132,8 +132,7 @@ static struct aws_checksum_stream *s_aws_checksum_input_checksum_stream_new(
     }
     aws_byte_buf_init(&impl->checksum_result, allocator, impl->checksum->digest_size);
     impl->old_stream = aws_input_stream_acquire(existing_stream);
-    aws_ref_count_init(
-        &impl->base.ref_count, impl, s_aws_input_checksum_stream_destroy_wrap);
+    aws_ref_count_init(&impl->base.ref_count, impl, s_aws_input_checksum_stream_destroy_wrap);
     return impl;
 on_error:
     aws_mem_release(impl->allocator, impl);
