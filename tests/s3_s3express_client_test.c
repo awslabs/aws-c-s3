@@ -35,6 +35,10 @@ struct aws_s3express_client_tester {
 
 static struct aws_s3express_client_tester s_tester;
 
+static void s_credentials_release_wrap(void *value) {
+    aws_credentials_release(value);
+}
+
 static int s_s3express_client_tester_init(struct aws_allocator *allocator) {
     s_tester.allocator = allocator;
     aws_hash_table_init(
@@ -44,7 +48,7 @@ static int s_s3express_client_tester_init(struct aws_allocator *allocator) {
         aws_hash_string,
         aws_hash_callback_string_eq,
         aws_hash_callback_string_destroy,
-        (aws_hash_callback_destroy_fn *)aws_credentials_release);
+        s_credentials_release_wrap);
     aws_atomic_init_int(&s_tester.provider_requests_made, 0);
     return AWS_OP_SUCCESS;
 }
