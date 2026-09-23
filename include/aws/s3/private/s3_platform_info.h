@@ -26,8 +26,10 @@ AWS_S3_API
 struct aws_s3_platform_info_loader *aws_s3_platform_info_loader_release(struct aws_s3_platform_info_loader *loader);
 
 /**
- * Retrieves the pre-configured metadata for a given ec2 instance type. If no such pre-configuration exists, returns
- * NULL.
+ * Retrieves metadata for a given EC2 instance type. Returns pre-configured
+ * metadata if available, or an estimate based on the instance family's NIC
+ * bandwidth if the family is recognized. Returns NULL if the instance type's
+ * family is not recognized.
  */
 AWS_S3_API
 const struct aws_s3_platform_info *aws_s3_get_platform_info_for_instance_type(

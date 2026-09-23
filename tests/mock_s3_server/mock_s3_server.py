@@ -52,6 +52,10 @@ class ResponseConfig:
     request: Optional[object] = None  # Add request as a field
     disconnect_after_headers: bool = False
     generate_body_size: Optional[int] = None
+    # Object offset the generated body starts at. When set, each byte encodes its own
+    # position in the object rather than being filler, so a part written to the wrong
+    # offset is detectable -- filler bytes would compare equal wherever they landed.
+    generate_body_offset: Optional[int] = None
     json_path: Optional[str] = None
     forced_throttle: bool = False
     force_retry: bool = False
@@ -104,7 +108,15 @@ class ResponseConfig:
         # if response has delay, then sleep before sending it
         delay = data.get('delay', 0)
         status_code = data['status']
-        if self.generate_body_size is not None:
+        if self.generate_body_size is not None and self.generate_body_offset is not None:
+            # Position-derived body: byte at object offset o is chr(32 + o % 90). The modulus is
+            # not a divisor of any part size in use, so consecutive parts start at different
+            # phases and a part landing at the wrong offset does not compare equal. Values stay
+            # in printable ASCII so the body remains a single-byte-per-char str like the filler
+            # path below.
+            start = self.generate_body_offset
+            body = "".join(chr(32 + (start + i) % 90) for i in range(self.generate_body_size))
+        elif self.generate_body_size is not None:
             # generate body with a specific size instead
             body = "a" * self.generate_body_size
         else:
@@ -425,6 +437,12 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         # Don't generate the body for those requests
         return response_config
 
+    if parsed_path.path == "/get_object_checksum_suffix_range" and head_request:
+        # The HEAD copies the original request's headers, so it carries the suffix range
+        # ("bytes=-1024") that the range parsing below cannot make sense of. Answer it first,
+        # from a response file that spells its Content-Range out.
+        return ResponseConfig("/get_object_checksum_suffix_range_head", request=request)
+
     body_range_value = get_request_header_value(request, "range")
 
     if body_range_value:
@@ -453,6 +471,51 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_size = data_length
         return response_config
 
+    if parsed_path.path == "/get_object_parallel_write_empty_part":
+        # 256 KiB object in 4 x 64 KiB parts, where part 2 comes back with an EMPTY body while its
+        # Content-Range still claims the full 64 KiB range. Nothing validates body length against
+        # Content-Range, so the part reaches delivery as a zero-length one -- which is the only way to
+        # reach the zero-length branch of the delivery loop, since a zero-byte OBJECT has no later part
+        # whose accounting could reveal whether the empty one advanced the contiguous prefix.
+        if start_range == 65536:
+            return ResponseConfig("/get_object_parallel_write_empty_part", request=request)
+        response_config = ResponseConfig("/get_object_parallel_write_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_noncombinable":
+        # Same 256 KiB object, but the HEAD advertises a whole-object SHA256 instead of a CRC32.
+        # SHA256 cannot be combined from per-part digests, so the only way to verify it is to hash the
+        # body in object order -- which is what forces delivery back onto the ordered path even when
+        # out-of-order delivery was asked for. Part responses carry no checksum header, as with the
+        # combinable route.
+        if head_request:
+            return ResponseConfig("/get_object_checksum_noncombinable_head", request=request)
+        response_config = ResponseConfig("/get_object_checksum_combine_part", request=request)
+    if parsed_path.path == "/get_object_checksum_per_part_header":
+        # 256 KiB object of repeated 'a' where every part response carries the CRC32 of its own
+        # 64 KiB of body, the way S3 answers a range that lines up with an uploaded part. No
+        # single response here describes the whole object.
+        response_config = ResponseConfig("/get_object_checksum_per_part_header", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_mp_parts_count":
+        # 64 KiB object stored as a multipart upload with a full object checksum: a plain GET returns the
+        # whole object, its CRC32, and x-amz-mp-parts-count. The checksum covers exactly the bytes returned,
+        # even though the parts count says the object was assembled from several parts.
+        response_config = ResponseConfig("/get_object_checksum_mp_parts_count", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_checksum_suffix_range":
+        # 64 KiB object whose whole-object CRC32 is advertised on the HEAD response (see above).
+        # The part responses carry no checksum header, since they only cover the requested suffix.
+        response_config = ResponseConfig("/get_object_checksum_suffix_range_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
     if parsed_path.path in ("/get_object_checksum_combine", "/get_object_checksum_combine_out_of_order"):
         # 256 KiB object of repeated 'a'. The whole-object CRC32 is advertised on the HEAD response only,
         # the way real S3 does for a single-part upload: ranged part responses carry no checksum header.
@@ -465,6 +528,55 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         else:
             response_config = ResponseConfig("/get_object_checksum_combine_part", request=request)
         response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path == "/get_object_parallel_write":
+        # 200000 byte object served in 64 KiB parts: 3 full parts plus a 3392 byte tail, so the
+        # last part is unaligned. Body bytes encode their own object offset, which is what lets a
+        # test detect a part written to the wrong offset rather than only a wrong total size.
+        response_config = ResponseConfig("/get_object_parallel_write", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
+        return response_config
+
+    if parsed_path.path == "/get_object_parallel_write_aligned":
+        # 256 KiB object served in four aligned 64 KiB parts, no delay. Every part's file offset is
+        # page-aligned, so O_DIRECT is used for all of them and the fallback counter stays at 0 --
+        # which is what lets a test assert direct I/O was really used rather than silently replaced
+        # by buffered writes. Bodies encode their own object offset, so a part landing at the wrong
+        # file offset is caught. Used by the recv_file_option and ranged-GET offset tests: the same
+        # object shape works for CREATE_OR_REPLACE, CREATE_OR_APPEND, WRITE_TO_POSITION and for a
+        # ranged GET, because a ranged GET's part boundaries are relative to the range start.
+        response_config = ResponseConfig("/get_object_parallel_write_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
+        return response_config
+
+    if parsed_path.path == "/get_object_parallel_write_delay_part":
+        # 256 KiB object served in 64 KiB parts (4 parts), with the part at offset 65536 (part 2)
+        # delayed so parts 3 and 4 are written to the file while part 2 is still in flight. That
+        # makes part 2 the last portion written, which is only possible if writes are not ordered
+        # by offset. Bodies encode their own object offset so a part landing at the wrong offset is
+        # still caught. The delay is short because this route runs to completion, unlike the 30s
+        # /get_object_pause_delay_part_positional whose test pauses before the delay elapses.
+        if start_range == 65536:
+            response_config = ResponseConfig("/get_object_parallel_write_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_parallel_write_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
+        return response_config
+
+    if parsed_path.path == "/get_object_pause_delay_part_positional":
+        # Same 256 KiB / 4 part shape and the same part-2 delay as /get_object_pause_delay_part, but
+        # the bodies encode their own object offset. A test pausing mid-download can then tell which
+        # parts reached disk and at which offsets, rather than only how many bytes arrived.
+        if start_range == 65536:
+            response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        response_config.generate_body_offset = start_range
         return response_config
 
     if parsed_path.path == "/get_object_pause_delay_part":

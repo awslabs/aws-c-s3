@@ -127,6 +127,11 @@ static int s_s3_test_meta_request_body_callback(
     AWS_PRECONDITION(body);
 
     struct aws_s3_meta_request_test_results *meta_request_test_results = user_data;
+    if (!meta_request_test_results->first_body_range_start_captured) {
+        meta_request_test_results->first_body_range_start = range_start;
+        meta_request_test_results->first_body_range_start_captured = true;
+    }
+    ++meta_request_test_results->body_chunk_count;
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
     AWS_LOGF_DEBUG(
@@ -137,6 +142,7 @@ static int s_s3_test_meta_request_body_callback(
         meta_request_test_results->expected_range_start);
 
     uint64_t object_range_start = 0;
+    bool object_range_start_known = false;
 
     /* If this is an auto-ranged-get meta request, then grab the object range start so that the expected_range_start can
      * be properly offset.*/
@@ -153,10 +159,53 @@ static int s_s3_test_meta_request_body_callback(
         aws_s3_meta_request_unlock_synced_data(meta_request);
 
         ASSERT_TRUE(object_range_known);
+        object_range_start_known = true;
     }
 
-    ASSERT_TRUE((object_range_start + meta_request_test_results->expected_range_start) == range_start);
-    meta_request_test_results->expected_range_start += body->len;
+    if (meta_request_test_results->allow_out_of_order_body) {
+        /* Out-of-order delivery breaks contiguity by design, so instead of asserting each range
+         * continues the last one, place it at its own offset. A test that then finds the whole object
+         * intact has verified both the bytes and the range_start of every delivery. */
+        size_t object_offset = (size_t)(range_start - object_range_start);
+        size_t range_end = object_offset + body->len;
+        if (meta_request_test_results->received_body_content.capacity < range_end) {
+            ASSERT_SUCCESS(aws_byte_buf_reserve(&meta_request_test_results->received_body_content, range_end));
+        }
+        if (meta_request_test_results->received_body_content.len < range_end) {
+            /* Zero the gap so a hole reads as zeros rather than as whatever the allocator returned. */
+            memset(
+                meta_request_test_results->received_body_content.buffer +
+                    meta_request_test_results->received_body_content.len,
+                0,
+                range_end - meta_request_test_results->received_body_content.len);
+            meta_request_test_results->received_body_content.len = range_end;
+        }
+        memcpy(meta_request_test_results->received_body_content.buffer + object_offset, body->ptr, body->len);
+
+        if (range_start < meta_request_test_results->highest_body_range_end) {
+            meta_request_test_results->body_arrived_out_of_order = true;
+        }
+        if (range_start + body->len > meta_request_test_results->highest_body_range_end) {
+            meta_request_test_results->highest_body_range_end = range_start + body->len;
+        }
+    } else {
+        /* Which absolute offset the first chunk should carry depends on what this harness can find out.
+         * A test that supplied a base has it pinned against that. An auto-ranged GET can be asked for
+         * the range it resolved. Any other implementation -- a default meta request, say -- keeps no
+         * such record reachable from here, so its first chunk defines the base and the assertion covers
+         * contiguity from there; a test wanting the absolute value pinned sets
+         * validate_body_range_start_base. */
+        uint64_t expected_base;
+        if (meta_request_test_results->validate_body_range_start_base) {
+            expected_base = meta_request_test_results->body_range_start_base;
+        } else if (object_range_start_known) {
+            expected_base = object_range_start;
+        } else {
+            expected_base = meta_request_test_results->first_body_range_start;
+        }
+        ASSERT_TRUE((expected_base + meta_request_test_results->expected_range_start) == range_start);
+        meta_request_test_results->expected_range_start += body->len;
+    }
 
     if (meta_request_test_results->body_callback != NULL) {
         return meta_request_test_results->body_callback(meta_request, body, range_start, user_data);
@@ -194,7 +243,28 @@ static void s_s3_test_meta_request_finish(
     meta_request_test_results->finished_error_code = result->error_code;
     meta_request_test_results->did_validate = result->did_validate;
     meta_request_test_results->validation_algorithm = result->validation_algorithm;
-    meta_request_test_results->recv_file_direct_io_fallback_count = meta_request->recv_file_direct_io_fallback_count;
+    meta_request_test_results->recv_file_direct_io_fallback_count =
+        aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count);
+    /* Settled during init, before any body is delivered, so it is stable by the time we finish. */
+    meta_request_test_results->recv_file_direct_io = meta_request->recv_file_direct_io;
+    /* Resolved once, at discovery, and never revisited, so by the time the meta request is finishing it
+     * cannot still be changing. */
+    meta_request_test_results->out_of_order_delivery = aws_atomic_load_int(&meta_request->out_of_order_delivery) != 0;
+
+    /* The two delivered-byte counters the download resume token is built from. Taken under the lock
+     * because an out-of-order sink may still have been advancing them from another thread until the
+     * meta request finished. */
+    aws_s3_meta_request_lock_synced_data(meta_request);
+    meta_request_test_results->num_bytes_delivered = meta_request->synced_data.num_bytes_delivered;
+    meta_request_test_results->num_bytes_delivered_total = meta_request->synced_data.num_bytes_delivered_total;
+    /* Spread state is auto-ranged-GET-only. The type check is necessary: a GET whose query has
+     * partNumber carries type GET_OBJECT but a default-impl, so casting to auto_ranged_get would
+     * read unrelated struct memory. The vtable is the authoritative identity. */
+    if (meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT && meta_request->part_size != 0) {
+        struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+        meta_request_test_results->spread_num_regions = auto_ranged_get->synced_data.spread_num_regions;
+    }
+    aws_s3_meta_request_unlock_synced_data(meta_request);
 
     if (meta_request_test_results->finish_callback != NULL) {
         meta_request_test_results->finish_callback(meta_request, result, user_data);
@@ -559,6 +629,9 @@ void aws_s3_meta_request_test_results_init(
     AWS_ZERO_STRUCT(*test_meta_request);
     test_meta_request->allocator = allocator;
     aws_atomic_init_int(&test_meta_request->received_body_size_delta, 0);
+    /* Zero capacity, but it carries the allocator, so the body callback can reserve into it as ranges
+     * arrive without knowing the object size up front. */
+    aws_byte_buf_init(&test_meta_request->received_body_content, allocator, 0);
     aws_array_list_init_dynamic(
         &test_meta_request->synced_data.metrics, allocator, 4, sizeof(struct aws_s3_request_metrics *));
     aws_array_list_init_dynamic(
@@ -575,6 +648,8 @@ void aws_s3_meta_request_test_results_clean_up(struct aws_s3_meta_request_test_r
     aws_byte_buf_clean_up(&test_meta_request->error_response_body);
     aws_string_destroy(test_meta_request->error_response_operation_name);
     aws_http_headers_release(test_meta_request->response_headers);
+    aws_byte_buf_clean_up(&test_meta_request->received_file_content);
+    aws_byte_buf_clean_up(&test_meta_request->received_body_content);
     while (aws_array_list_length(&test_meta_request->synced_data.metrics) > 0) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_back(&test_meta_request->synced_data.metrics, (void **)&metrics);
@@ -1048,18 +1123,20 @@ struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *te
 }
 
 /* Mock request defaults to GET request */
-struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
+struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new_with_options(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request_options *options) {
     AWS_PRECONDITION(tester);
+    AWS_PRECONDITION(options);
 
     struct aws_s3_empty_meta_request *empty_meta_request =
         aws_mem_calloc(tester->allocator, 1, sizeof(struct aws_s3_empty_meta_request));
 
-    struct aws_http_message *dummy_http_message = aws_s3_tester_dummy_http_request_new(tester);
-
-    struct aws_s3_meta_request_options options = {
-        .message = dummy_http_message,
-        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
-    };
+    struct aws_http_message *dummy_http_message = NULL;
+    if (options->message == NULL) {
+        dummy_http_message = aws_s3_tester_dummy_http_request_new(tester);
+        options->message = dummy_http_message;
+    }
 
     aws_s3_meta_request_init_base(
         tester->allocator,
@@ -1067,14 +1144,24 @@ struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_te
         0,
         false,
         false,
-        &options,
+        options,
         empty_meta_request,
         &s_s3_mock_meta_request_vtable,
         &empty_meta_request->base);
 
-    aws_http_message_release(dummy_http_message);
+    if (dummy_http_message != NULL) {
+        aws_http_message_release(dummy_http_message);
+        options->message = NULL;
+    }
 
     return &empty_meta_request->base;
+}
+
+struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester) {
+    struct aws_s3_meta_request_options options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+    };
+    return aws_s3_tester_mock_meta_request_new_with_options(tester, &options);
 }
 
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf) {
@@ -1426,6 +1513,7 @@ int aws_s3_tester_client_new(
         .enable_s3express = options->s3express_provider_override_factory != NULL,
         .memory_limit_in_bytes = options->memory_limit_in_bytes,
         .buffer_pool_factory_fn = options->buffer_pool_factory_fn,
+        .out_of_order_delivery = options->out_of_order_delivery,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,
@@ -1556,6 +1644,7 @@ int aws_s3_tester_send_meta_request_with_options(
         .fio_opts = options->fio_opts,
         .part_size = options->part_size,
         .on_error_resume_token = options->on_error_resume_token,
+        .out_of_order_delivery = options->out_of_order_delivery,
     };
 
     if (options->mock_server) {
@@ -1861,6 +1950,7 @@ int aws_s3_tester_send_meta_request_with_options(
     out_results->upload_review_callback = options->upload_review_callback;
 
     out_results->algorithm = options->expected_validate_checksum_alg;
+    out_results->allow_out_of_order_body = options->get_options.allow_out_of_order_body;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -1877,6 +1967,24 @@ int aws_s3_tester_send_meta_request_with_options(
         /* Wait for the request to finish. */
         aws_s3_tester_wait_for_meta_request_finish(tester);
         ASSERT_TRUE(aws_s3_meta_request_is_finished(meta_request));
+    }
+
+    /* Read the downloaded file before the switch, so a test that expects the request to fail -- a
+     * pause, say -- can still inspect what reached disk. The meta request has finished, so its write
+     * descriptors are closed and the file is complete. */
+    if (options->get_options.file_on_disk && filepath_str != NULL && aws_path_exists(filepath_str)) {
+        FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
+        ASSERT_NOT_NULL(file);
+        ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
+        if (options->get_options.capture_file_content && out_results->received_file_size > 0) {
+            /* Hand the bytes to the test before the file is deleted at the end, so a test can check
+             * where each part landed and not just how many bytes arrived. */
+            size_t to_read = (size_t)out_results->received_file_size;
+            aws_byte_buf_init(&out_results->received_file_content, allocator, to_read);
+            out_results->received_file_content.len = fread(out_results->received_file_content.buffer, 1, to_read, file);
+            ASSERT_UINT_EQUALS(to_read, out_results->received_file_content.len);
+        }
+        fclose(file);
     }
 
     switch (options->validate_type) {
@@ -1905,15 +2013,11 @@ int aws_s3_tester_send_meta_request_with_options(
             ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->stats.num_requests_streaming_response));
             ASSERT_SUCCESS(s_tester_check_client_thread_data(client));
             if (options->get_options.file_on_disk) {
-                /* Validate the size match. */
+                /* Validate the size match. The bytes were read above, before the switch. */
                 ASSERT_NOT_NULL(filepath_str);
-                FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
-                ASSERT_NOT_NULL(file);
-                ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
                 if (options->get_options.recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE) {
                     ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
-                fclose(file);
             }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:

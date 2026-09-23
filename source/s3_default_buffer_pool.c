@@ -196,13 +196,22 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
 
     size_t chunk_size = config.part_size;
 
-    if (config.memory_limit < GB_TO_BYTES(1)) {
+    if (config.memory_limit < MB_TO_BYTES(256)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "Failed to initialize buffer pool. "
-            "Minimum supported value for Memory Limit is 1GB.");
+            "Minimum supported value for Memory Limit is 256MB.");
         aws_raise_error(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG);
         return NULL;
+    }
+
+    if (config.memory_limit % MB_TO_BYTES(1) != 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "Memory limit (%zu bytes) is not aligned to a MiB boundary. "
+            "The extra %zu bytes will be unused. Consider using a round MiB value.",
+            config.memory_limit,
+            config.memory_limit % MB_TO_BYTES(1));
     }
 
     if (chunk_size < (1024) || chunk_size % (4 * 1024) != 0) {
@@ -212,6 +221,17 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
             "Consider specifying size in multiples of 4KiB. Ideal part size for most transfers is "
             "1MiB multiple between 8MiB and 16MiB. Note: the client will automatically scale part size "
             "if its not sufficient to transfer data within the maximum number of parts");
+    }
+
+    if (config.max_part_size > 0 && chunk_size > config.max_part_size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Failed to initialize buffer pool. "
+            "Part size (%zu bytes) exceeds max part size (%zu bytes).",
+            chunk_size,
+            config.max_part_size);
+        aws_raise_error(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return NULL;
     }
 
     size_t adjusted_mem_lim = config.memory_limit - s_buffer_pool_reserved_mem;
@@ -674,7 +694,24 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     AWS_FATAL_ASSERT(meta.size != 0);
-    AWS_FATAL_ASSERT(meta.size <= buffer_pool->mem_limit);
+
+    /* A reservation bigger than the pool's usable limit can never be satisfied: even releasing
+     * every outstanding buffer would not make room. s_try_reserve_synced would return NULL and
+     * the request would park on pending_reserves forever, so fail the future instead.
+     * This also covers meta.can_block reservations, which cannot wait at all.
+     * Note: mem_limit is immutable after construction, so this is safe to read unlocked. */
+    if (meta.size > buffer_pool->mem_limit) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "Cannot reserve a buffer of %zu bytes; it exceeds the buffer pool's usable memory limit of %zu bytes. "
+            "Increase the client memory limit or reduce the part size.",
+            meta.size,
+            buffer_pool->mem_limit);
+
+        struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(buffer_pool->base_allocator);
+        aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT);
+        return future;
+    }
 
     aws_mutex_lock(&buffer_pool->mutex);
 

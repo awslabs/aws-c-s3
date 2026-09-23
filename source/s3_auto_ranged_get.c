@@ -22,6 +22,9 @@ const struct aws_byte_cursor g_application_xml_value = AWS_BYTE_CUR_INIT_FROM_ST
 
 static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request *meta_request);
 
+static void s_init_spread_synced(struct aws_s3_meta_request *meta_request);
+static uint32_t s_next_part_number_synced(struct aws_s3_meta_request *meta_request);
+
 static bool s_s3_auto_ranged_get_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
@@ -378,7 +381,7 @@ static bool s_s3_auto_ranged_get_update(
                     meta_request,
                     AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE,
                     AWS_S3_REQUEST_TYPE_GET_OBJECT,
-                    auto_ranged_get->synced_data.num_parts_requested + 1 /*part_number*/,
+                    s_next_part_number_synced(meta_request) /*part_number*/,
                     AWS_S3_REQUEST_FLAG_ALLOCATE_BUFFER_FROM_POOL);
 
                 aws_s3_calculate_auto_ranged_get_part_range(
@@ -441,6 +444,18 @@ static bool s_s3_auto_ranged_get_update(
         }
 
         if (!work_remaining) {
+            if (!aws_s3_meta_request_has_finish_result_synced(meta_request)) {
+                /* About to report success, so every part must have been delivered. A gap here means a part
+                 * was dropped somewhere in the delivery path, which would hand the caller a short or holed
+                 * file while reporting success -- fail instead. set_fail_synced wins over the
+                 * set_success_synced below, which becomes a no-op once a finish result is set. */
+                if (aws_s3_meta_request_validate_parts_delivered_synced(meta_request) != AWS_OP_SUCCESS) {
+                    aws_s3_meta_request_set_fail_synced(meta_request, NULL, aws_last_error());
+                }
+                aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
+                meta_request->synced_data.parts_delivered_mask = NULL;
+                meta_request->synced_data.parts_delivered_mask_length = 0;
+            }
             aws_s3_meta_request_set_success_synced(meta_request, s_s3_auto_ranged_get_success_status(meta_request));
             if (auto_ranged_get->synced_data.num_parts_checksum_validated ==
                 auto_ranged_get->synced_data.num_parts_requested) {
@@ -746,6 +761,202 @@ static int s_discover_object_range_and_size(
     return result;
 }
 
+/* Does the checksum carried by this discovery response cover exactly the bytes this meta request will deliver?
+ *
+ * The meta-request-level checksum is compared against a running sum of every byte handed to the caller, so
+ * adopting a value that describes any other span of bytes reports intact data as a mismatch. Two things have to
+ * line up: the download has to be the whole object, and the response's checksum has to describe the whole object
+ * rather than one part or one range of it. */
+static bool s_discovery_checksum_covers_download(
+    const struct aws_s3_request *request,
+    uint64_t object_range_start,
+    uint64_t object_range_end,
+    uint64_t object_size,
+    uint64_t first_part_size) {
+
+    if (object_size == 0) {
+        /* Nothing to deliver, so whatever the response carries is the empty object's own checksum. */
+        return true;
+    }
+
+    if (object_range_start != 0 || object_range_end != object_size - 1) {
+        /* A ranged download. No checksum of the whole object can be checked against a slice of it. */
+        return false;
+    }
+
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_HEAD_OBJECT:
+            /* HeadObject reports the object's own checksum. */
+            return true;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+            /* A partNumber request reports part 1's checksum, which is the object's checksum only when part 1 is
+             * the entire object, i.e. when the object was not uploaded as a multipart upload. */
+            return first_part_size == object_size;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+            /* A ranged GET reports the checksum of the bytes it returned, so it covers the object only when this
+             * one request spanned the whole thing. */
+            return request->part_range_start == 0 && request->part_range_end >= object_size - 1;
+        default:
+            return false;
+    }
+}
+
+/* Are the bytes this one response returned the entire download, so that no other request carries data? A response
+ * whose body is the whole download and which already validated itself needs no meta-request-level checksum: the
+ * running sum would hash the same bytes a second time to reach a verdict the request level already has. */
+static bool s_request_body_is_entire_download(
+    const struct aws_s3_request *request,
+    uint64_t object_range_start,
+    uint64_t object_range_end,
+    uint64_t first_part_size) {
+
+    switch (request->request_tag) {
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
+            /* Part 1 starts at the beginning of the object, so its body is [0, first_part_size - 1]. An empty
+             * response reports first_part_size == 0 and so never covers anything. */
+            return object_range_start == 0 && first_part_size > object_range_end;
+        case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_RANGE:
+            return request->part_range_start <= object_range_start && request->part_range_end >= object_range_end;
+        default:
+            /* HeadObject returns no body. */
+            return false;
+    }
+}
+
+/* Set up the block-cyclic spread for this download. After this, s_next_part_number_synced produces part
+ * numbers that rotate across K far-apart regions of the object instead of sweeping it. Called from
+ * discovery finish, after the delivery order has been resolved. */
+static void s_init_spread_synced(struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    /* Reset from any previous attempt (a retry can throw away a discovered range). */
+    auto_ranged_get->synced_data.spread_num_regions = 0;
+
+    if (meta_request->client == NULL || meta_request->client->force_sequential_requests) {
+        return;
+    }
+
+    /* Spreading is what hands parts out of object order; an ordered download must sweep contiguously. */
+    if (aws_atomic_load_int(&meta_request->out_of_order_delivery) == 0) {
+        return;
+    }
+
+    const uint32_t first_part = auto_ranged_get->synced_data.num_parts_requested + 1;
+    const uint32_t total_num_parts = auto_ranged_get->synced_data.total_num_parts;
+    /* If the first part completed the full download, stops here. */
+    if (first_part > total_num_parts) {
+        return;
+    }
+
+    const uint32_t parts_remaining = total_num_parts - first_part + 1;
+    const uint32_t num_regions = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
+    if (num_regions <= 1) {
+        return;
+    }
+
+    /* With a region per remaining part the rotation visits region 0, 1, 2 ... which is parts first,
+     * first + 1, first + 2 -- object order, exactly what handing them out with no spread already does.
+     * Declining here also keeps the region size below from dividing to zero when the connection count
+     * runs ahead of the part count. */
+    if (parts_remaining <= num_regions) {
+        return;
+    }
+
+    /* The leftover of an uneven division goes to the first few regions, one part each. See the spread
+     * fields in s3_auto_ranged_get.h for what each of these means, and a worked example. */
+    auto_ranged_get->synced_data.spread_num_regions = num_regions;
+    auto_ranged_get->synced_data.spread_region_size = parts_remaining / num_regions;
+    auto_ranged_get->synced_data.spread_num_large_regions = parts_remaining % num_regions;
+    auto_ranged_get->synced_data.spread_first_part = first_part;
+    auto_ranged_get->synced_data.spread_parts_handed_out = 0;
+
+    AWS_LOGF_INFO(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p: Spreading parts %" PRIu32 "-%" PRIu32 " across %" PRIu32 " regions of the object.",
+        (void *)meta_request,
+        first_part,
+        total_num_parts,
+        num_regions);
+}
+
+/* The 1-based part number to hand out next. When spreading is off, parts go out in object order. When on,
+ * parts rotate across the spread's regions. See the spread fields in s3_auto_ranged_get.h for what each
+ * one means. */
+static uint32_t s_next_part_number_synced(struct aws_s3_meta_request *meta_request) {
+    struct aws_s3_auto_ranged_get *auto_ranged_get = meta_request->impl;
+    ASSERT_SYNCED_DATA_LOCK_HELD(meta_request);
+
+    /* 0 means spreading is off. 1 would mean a single region, which is a contiguous sweep of the object
+     * and so is object order as well -- the arithmetic below would return the same numbers for it, but
+     * sweeping says it more directly. */
+    const uint32_t num_regions = auto_ranged_get->synced_data.spread_num_regions;
+    if (num_regions < 2) {
+        return auto_ranged_get->synced_data.num_parts_requested + 1;
+    }
+
+    /* Split the handout index in two: `region` is which region this part comes from and `step` is how far
+     * into that region it sits. Taking the region from the remainder is what makes the handout visit every
+     * region before it comes back to any of them. Using the header's example -- 10 parts from part 2
+     * across 3 regions, cut as [2 3 4 5] [6 7 8] [9 10 11] -- an index of 4 is region 1, step 1, which is
+     * the second part of [6 7 8]: part 7. */
+    const uint32_t i = auto_ranged_get->synced_data.spread_parts_handed_out++;
+    const uint32_t region = i % num_regions;
+    const uint32_t step = i / num_regions;
+    const uint32_t region_size = auto_ranged_get->synced_data.spread_region_size;
+    const uint32_t num_large_regions = auto_ranged_get->synced_data.spread_num_large_regions;
+    const uint32_t first = auto_ranged_get->synced_data.spread_first_part;
+
+    /* Where this region begins: each of the first `num_large_regions` regions is one part wider. */
+    uint32_t region_start;
+    if (region < num_large_regions) {
+        region_start = first + region * (region_size + 1);
+    } else {
+        region_start = first + num_large_regions * (region_size + 1) + (region - num_large_regions) * region_size;
+    }
+
+    return region_start + step;
+}
+
+/* True when the whole-object checksum can only be assembled by feeding bytes in object order, which the
+ * parallel-write path cannot do. Combinable algorithms fold each part's own digest in at finish, so they
+ * place no ordering demand. Both fields are settled by the end of discovery: the checksum is read from the
+ * discovery response's headers, and whether it can be folded is decided from the part count. */
+static bool s_response_needs_ordered_body(const struct aws_s3_meta_request *meta_request) {
+    return meta_request->meta_request_level_running_response_sum != NULL &&
+           !meta_request->meta_request_level_checksum_combinable;
+}
+
+/* Resolve, once, whether this download delivers bodies out of object order, and record it on the meta
+ * request. Static here because discovery is the only place the question is ever asked: no other meta
+ * request implementation splits a download into parts, so no other one has an order to deliver out of,
+ * and every one of them leaves the flag at the false it was initialized to. */
+static void s_resolve_out_of_order_delivery(struct aws_s3_meta_request *meta_request) {
+    bool out_of_order = aws_s3_allow_out_of_order_delivery(
+        /* A file sink needs the per-worker descriptors, which init only allocates given a client that
+         * had not already ruled out-of-order delivery out. */
+        meta_request->recv_filepath != NULL && meta_request->recv_file_write_fd_slots != NULL,
+        meta_request->recv_filepath == NULL && meta_request->client != NULL,
+        meta_request->out_of_order_delivery_override,
+        meta_request->client != NULL ? meta_request->client->out_of_order_delivery : AWS_TRIBOOL_UNSET,
+        meta_request->client != NULL ? meta_request->client->out_of_order_delivery_env : AWS_TRIBOOL_UNSET);
+
+    /* A whole-object checksum that cannot be folded per part has to be hashed in object order, which the
+     * parallel path cannot do. A correctness constraint, so it overrides the preference -- and worth
+     * saying out loud, since it is the one case where the caller asked for out-of-order delivery and did
+     * not get it. */
+    if (out_of_order && s_response_needs_ordered_body(meta_request)) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: Delivering in object order despite out-of-order delivery being available: this "
+            "response's whole-object checksum can only be verified by hashing the body in order.",
+            (void *)meta_request);
+        out_of_order = false;
+    }
+
+    aws_atomic_store_int(&meta_request->out_of_order_delivery, out_of_order ? 1 : 0);
+}
+
 static void s_s3_auto_ranged_get_request_finished(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_request *request,
@@ -906,12 +1117,30 @@ static void s_s3_auto_ranged_get_request_finished(
 
         /* Check for checksums if requested to */
         if (meta_request->checksum_config.validate_response_checksum) {
-            if (aws_s3_check_headers_for_checksum(
+            if (!s_discovery_checksum_covers_download(
+                    request, object_range_start, object_range_end, object_size, first_part_size)) {
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Discovery response's checksum does not cover the bytes being downloaded. The download "
+                    "will not be validated against a whole-object checksum.",
+                    (void *)meta_request);
+            } else if (
+                request->did_validate &&
+                s_request_body_is_entire_download(request, object_range_start, object_range_end, first_part_size)) {
+                /* This response's body was already compared against a checksum header of its own, and that body is
+                 * every byte the meta request delivers, so there is nothing left for a meta-request-level sum to
+                 * check. update() reports the outcome through the all-parts-validated promotion instead. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p: Discovery response covered the whole download and was already validated against its own "
+                    "checksum.",
+                    (void *)meta_request);
+            } else if (
+                aws_s3_check_headers_for_checksum(
                     meta_request,
                     request->send_data.response_headers,
                     &meta_request->meta_request_level_running_response_sum,
-                    &meta_request->meta_request_level_response_header_checksum,
-                    true) != AWS_OP_SUCCESS) {
+                    &meta_request->meta_request_level_response_header_checksum) != AWS_OP_SUCCESS) {
                 error_code = aws_last_error_or_unknown();
                 goto update_synced_data;
             }
@@ -1002,6 +1231,11 @@ update_synced_data:
             auto_ranged_get->synced_data.object_range_start = object_range_start;
             auto_ranged_get->synced_data.object_range_end = object_range_end;
             auto_ranged_get->synced_data.object_size = object_size;
+            /* A part is delivered at its absolute position in the object, so the file sink needs the
+             * range's origin to map the range's first byte to the file's base offset. Set before any
+             * body is delivered, since the range is resolved from the first response's headers. */
+            meta_request->recv_file_object_range_origin_resolved = true;
+            meta_request->recv_file_object_range_origin = object_range_start;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so
@@ -1014,6 +1248,14 @@ update_synced_data:
                     auto_ranged_get->synced_data.first_part_size,
                     object_range_start,
                     object_range_end);
+
+                /* Delivery validation mask: one bit per part, checked before success. */
+                aws_mem_release(meta_request->allocator, meta_request->synced_data.parts_delivered_mask);
+                const uint32_t mask_length = (uint32_t)(((size_t)auto_ranged_get->synced_data.total_num_parts + 7) / 8);
+                meta_request->synced_data.parts_delivered_mask =
+                    aws_mem_calloc(meta_request->allocator, mask_length, sizeof(uint8_t));
+                meta_request->synced_data.parts_delivered_mask_length = mask_length;
+                meta_request->synced_data.parts_delivered_mask_num_parts = auto_ranged_get->synced_data.total_num_parts;
             }
 
             /* Only now is the part count known, which is what sizes the per-part checksum slots. Deciding
@@ -1024,6 +1266,12 @@ update_synced_data:
                     error_code = aws_last_error_or_unknown();
                 }
             }
+
+            /* And only now is the last input to the delivery order known: the line above is what decides
+             * whether a whole-object checksum can be folded per part or has to see the body in object
+             * order. Resolved here rather than on the first body so that the discovery response's own body,
+             * delivered further down this same function, is already governed by it. */
+            s_resolve_out_of_order_delivery(meta_request);
         }
 
         switch (request->request_tag) {
@@ -1121,6 +1369,15 @@ update_synced_data:
         if (finishing_metrics) {
             aws_s3_request_finish_up_metrics_synced(request, meta_request);
         }
+
+        /* Both decisions -- delivery order and request order -- are made from the discovery finish, after
+         * every input is settled and every recovery branch has had its say. Lane init reads the delivery
+         * order that was just resolved, so the two cannot disagree. Skipped when a branch threw the range
+         * away, since the rediscovery will decide. */
+        if (request->discovers_object_size && auto_ranged_get->synced_data.object_range_known) {
+            s_init_spread_synced(meta_request);
+        }
+
         aws_s3_meta_request_unlock_synced_data(meta_request);
     }
     /* END CRITICAL SECTION */
@@ -1154,11 +1411,11 @@ static struct aws_s3_meta_request_resume_token *s_build_download_resume_token_sy
             aws_string_new_from_string(meta_request->allocator, auto_ranged_get->s3_object_last_modified);
     }
 
-    /* Delivery is strictly sequential today, so the delivered bytes are both the contiguous
-     * prefix and the total. A parallel-write delivery path will need to track the two
-     * separately, diverging total (may have gaps) from continues (gap-free prefix). */
+    /* These diverge once parts are written out of order: the prefix stops at the first gap, while the
+     * total counts every part that landed. A caller resuming must re-fetch from the prefix, since
+     * anything past the gap is not contiguous with what is already on disk. */
     token->continuous_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
-    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered;
+    token->total_downloaded_bytes = meta_request->synced_data.num_bytes_delivered_total;
 
     return token;
 }

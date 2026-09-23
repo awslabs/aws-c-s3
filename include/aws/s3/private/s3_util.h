@@ -137,9 +137,6 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_accept_ranges_header_name;
 
 AWS_S3_API
-extern const struct aws_byte_cursor g_mp_parts_count_header_name;
-
-AWS_S3_API
 extern const struct aws_byte_cursor g_post_method;
 
 AWS_S3_API
@@ -246,7 +243,25 @@ AWS_S3_API
 int aws_last_error_or_unknown(void);
 
 AWS_S3_API
-void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message);
+void aws_s3_add_user_agent_header(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    uint32_t feature_ids);
+
+/**
+ * Feature ID flags for the User-Agent `m/` section (UA 2.1 SEP).
+ * Boolean flags tracked as a bitmask: client-level flags are derived from aws_s3_client_config in
+ * aws_s3_client_new; each meta request copies them and ORs in per-request flags derived from
+ * aws_s3_meta_request_options in aws_s3_meta_request_init_base. Feature IDs are allocated from the
+ * shared AWS SDK feature-ID registry; do not invent new IDs here without registering them.
+ */
+enum aws_s3_feature_id {
+    AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE = (1 << 0),    /* AX - non-default part size configured */
+    AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT = (1 << 1),   /* AY - non-default throughput target configured */
+    AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT = (1 << 2), /* AZ - non-default memory pool size configured */
+    AWS_S3_FEATURE_ID_ON_EC2 = (1 << 3),              /* Aa - running on EC2 instance */
+    AWS_S3_FEATURE_ID_FILE_PATH = (1 << 4),           /* Ab - request used send_filepath or recv_filepath */
+};
 
 /* Given the response headers list, finds the Content-Range header and parses the range-start, range-end and
  * object-size. All output arguments are optional.*/
@@ -307,6 +322,35 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     size_t *out_part_size,
     uint32_t *out_num_parts);
 
+/**
+ * Whether a download may deliver bodies out of object order.
+ *
+ * Three inputs. The first preference expressed wins, and the destination's default applies when none is:
+ *
+ *  1. The request's override, then the client's setting. Either direction, either sink -- a preference
+ *     passed through the API means the caller's own code is built around that answer.
+ *  2. The environment's setting, asked only when neither of those said anything. Lets an operator change
+ *     what an indifferent caller gets without overruling one who asked.
+ *  3. What the destination defaults to. A file absorbs arrival order completely, since every part is
+ *     written at its own absolute offset, so it defaults to out of order. A body callback surfaces the
+ *     order to the caller through `range_start`, so it defaults to in order. Neither sink means there
+ *     is nothing that could deliver out of order.
+ *
+ * A whole-object checksum that can only be built by hashing the body in object order is a correctness
+ * constraint that outranks the answer here. It is applied by the caller rather than passed in, because
+ * the constraint is not known at every call site -- see the auto-ranged GET's discovery finish, which
+ * applies it there.
+ *
+ * Pure, so the policy can be exercised directly rather than inferred from a download's behaviour.
+ */
+AWS_S3_API
+bool aws_s3_allow_out_of_order_delivery(
+    bool file_sink,
+    bool callback_sink,
+    enum aws_tribool request_override,
+    enum aws_tribool client_setting,
+    enum aws_tribool env_setting);
+
 /* Calculates the part range for a part given overall object range, size of each part, and the part's number. Note: part
  * numbers begin at one. Intended to be used in conjunction
  * with aws_s3_calculate_auto_ranged_get_num_parts. part_number should be less than or equal to the result of
@@ -329,14 +373,14 @@ AWS_S3_API
 void aws_s3_request_finish_up_metrics_synced(struct aws_s3_request *request, struct aws_s3_meta_request *meta_request);
 
 /* Check the response headers for checksum to verify, return a running checksum based on the algorithm found. If no
- * checksum found from header, return null. */
+ * checksum found from header, return null. The caller is responsible for deciding whether the value describes the
+ * bytes it intends to compare it against; this only reports what the headers carry. */
 AWS_S3_API
 int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     struct aws_s3_checksum **out_checksum,
-    struct aws_byte_buf *out_checksum_buffer,
-    bool meta_request_level);
+    struct aws_byte_buf *out_checksum_buffer);
 
 /**
  * Calculate client-level optimal range size based on memory and connection constraints.

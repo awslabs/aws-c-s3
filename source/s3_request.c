@@ -47,7 +47,7 @@ struct aws_s3_request *aws_s3_request_new(
 
     if (meta_request->fio_opts.should_stream && meta_request->request_body_parallel_stream != NULL) {
         /* The request buffer size should be two times the buffer size to allow one buffer to be read async. */
-        request->buffer_size = 2 * g_streaming_buffer_size;
+        request->buffer_size = aws_min_size(meta_request->part_size, 2 * g_streaming_buffer_size);
     } else {
         request->buffer_size = meta_request->part_size;
     }
@@ -83,6 +83,8 @@ static void s_populate_metrics_from_message(struct aws_s3_request *request, stru
     request->send_data.metrics->req_resp_info_metrics.host_address =
         aws_string_new_from_cursor(request->send_data.metrics->allocator, &host_header_value);
     AWS_ASSERT(request->send_data.metrics->req_resp_info_metrics.host_address != NULL);
+
+    request->send_data.metrics->req_resp_info_metrics.is_https = request->meta_request->is_https;
 
     request->send_data.metrics->req_resp_info_metrics.request_type = request->request_type;
     request->send_data.metrics->req_resp_info_metrics.operation_name =
@@ -572,6 +574,19 @@ void aws_s3_request_metrics_get_host_address(
     AWS_PRECONDITION(metrics);
     AWS_PRECONDITION(host_address);
     *host_address = metrics->req_resp_info_metrics.host_address;
+}
+
+bool aws_s3_request_metrics_get_is_https(const struct aws_s3_request_metrics *metrics) {
+    AWS_PRECONDITION(metrics);
+    return metrics->req_resp_info_metrics.is_https;
+}
+
+void aws_s3_request_metrics_get_http_manager_metrics(
+    const struct aws_s3_request_metrics *metrics,
+    struct aws_http_manager_metrics *out_metrics) {
+    AWS_PRECONDITION(metrics);
+    AWS_PRECONDITION(out_metrics);
+    *out_metrics = metrics->http_manager_metrics;
 }
 
 int aws_s3_request_metrics_get_ip_address(

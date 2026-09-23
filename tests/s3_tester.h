@@ -145,6 +145,9 @@ struct aws_s3_tester_client_options {
     void *factory_user_data;
     uint64_t memory_limit_in_bytes;
     aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
+    /* Passed straight through to aws_s3_client_config. AWS_TRIBOOL_UNSET (0) is the default, so a test
+     * that does not set this gets whatever the client decides. */
+    enum aws_tribool out_of_order_delivery;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
@@ -158,6 +161,10 @@ struct aws_s3_tester_meta_request_options {
     /* Optional. Passed through to aws_s3_meta_request_options.on_error_resume_token.
      * Note: the callback receives the tester's user_data; tests should use their own statics. */
     aws_s3_meta_request_pause_complete_fn *on_error_resume_token;
+
+    /* Passed straight through to aws_s3_meta_request_options. Overrides whatever the client is set to,
+     * so a test can exercise the per-request override without a second client. */
+    enum aws_tribool out_of_order_delivery;
 
     /* Optional. When NULL, a message will attempted to be created by the meta request type specific options. */
     struct aws_http_message *message;
@@ -213,6 +220,13 @@ struct aws_s3_tester_meta_request_options {
         /* If larger than 0, create a pre-exist file with the length */
         uint64_t pre_exist_file_length;
         bool force_dynamic_part_size;
+        /* Read the downloaded file back into out_results->received_file_content. Opt-in, so tests
+         * that only care about size do not slurp the whole object into memory. */
+        bool capture_file_content;
+        /* Set when the test expects the body callback to be invoked out of object order. The default
+         * body callback stops asserting each range continues the last one, and instead assembles the
+         * object into out_results->received_body_content by range_start. */
+        bool allow_out_of_order_body;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -285,6 +299,66 @@ struct aws_s3_meta_request_test_results {
     /* Captured from meta_request->recv_file_direct_io_fallback_count via a finish callback.
      * Tests can check this to verify the expected number of O_DIRECT fallbacks occurred. */
     size_t recv_file_direct_io_fallback_count;
+
+    /* Captured from meta_request->recv_file_direct_io via a finish callback: whether the writers
+     * actually held O_DIRECT descriptors. A zero fallback count does NOT imply this -- a path that
+     * gives up on direct I/O without recording a fallback leaves the count at 0 as well -- so a test
+     * that means to cover the direct-I/O path has to check this flag too. */
+    bool recv_file_direct_io;
+
+    /* Captured from meta_request->out_of_order_delivery via a finish callback. Lets a
+     * test confirm parts really were written out of order, rather than the run having quietly taken
+     * the ordered path and passed for the wrong reason. */
+    bool out_of_order_delivery;
+
+    /* How many regions a download spread its range requests across. 0 = object order. */
+    uint32_t spread_num_regions;
+
+    /* The downloaded file's bytes, when get_options.capture_file_content was set. Read after the
+     * meta request finished and before the tester deletes the file. */
+    struct aws_byte_buf received_file_content;
+
+    /* Set from get_options.allow_out_of_order_body. Turns off the default body callback's
+     * "each range continues the last one" assertion, which out-of-order delivery breaks by design. */
+    bool allow_out_of_order_body;
+
+    /* The object assembled from the body callback, each range placed at its own offset. Only filled
+     * when allow_out_of_order_body is set, which is what makes it meaningful: it proves the callback
+     * handed over the right bytes AND the right range_start for each one. */
+    struct aws_byte_buf received_body_content;
+
+    /* True once a body arrived at an offset behind one already delivered. Without this a passing
+     * out-of-order test could just as well have delivered everything in order. */
+    bool body_arrived_out_of_order;
+
+    /* The range_start reported for the very first body chunk that arrived, and whether one arrived at
+     * all. The documented contract on aws_s3_meta_request_receive_body_callback_fn is that this equals
+     * the request's Range header start. Only meaningful under ordered delivery, where the first chunk
+     * is also the lowest-offset one. */
+    uint64_t first_body_range_start;
+    bool first_body_range_start_captured;
+
+    /* Number of body chunks the callback received. A test that means to cover multi-chunk delivery has
+     * to check this: a range that happens to fit inside one part would validate only the first chunk
+     * and still pass. */
+    size_t body_chunk_count;
+
+    /* When set, the body callback validates every chunk's range_start against `body_range_start_base`
+     * plus the bytes delivered so far, rather than against the range start the implementation computed
+     * for itself. The default comparison is circular -- it checks the reported offset against the same
+     * internal number that produced it, so a wrong computation agrees with itself -- and a base the
+     * test supplies is what makes the assertion independent of the code under test. */
+    bool validate_body_range_start_base;
+    uint64_t body_range_start_base;
+
+    /* Highest object offset reached by any delivered body, used to detect the above. */
+    uint64_t highest_body_range_end;
+
+    /* Captured from synced_data at finish: the gap-free prefix and the grand total of delivered bytes.
+     * These are what a download resume token reports as continuous_downloaded_bytes and
+     * total_downloaded_bytes, so a test can check the prefix bookkeeping without pausing. */
+    uint64_t num_bytes_delivered;
+    uint64_t num_bytes_delivered_total;
 
     /* Record data from progress_callback() */
     struct {
@@ -372,6 +446,13 @@ struct aws_s3_endpoint *aws_s3_tester_mock_endpoint_new(struct aws_s3_tester *te
 /* Create a new meta request for testing meta request functionality in isolation. test_results and client are optional.
  * If client is not specified, a new mock client will be created for the meta request. */
 struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new(struct aws_s3_tester *tester);
+
+/* Like aws_s3_tester_mock_meta_request_new, but lets the caller supply per-request options
+ * (e.g. part_size, recv_filepath). options->message is filled in with a dummy request if NULL.
+ * No client is attached, so options that require one (e.g. send_filepath) are not supported. */
+struct aws_s3_meta_request *aws_s3_tester_mock_meta_request_new_with_options(
+    struct aws_s3_tester *tester,
+    struct aws_s3_meta_request_options *options);
 
 void aws_s3_create_test_buffer(struct aws_allocator *allocator, size_t buffer_size, struct aws_byte_buf *out_buf);
 

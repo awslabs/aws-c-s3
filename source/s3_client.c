@@ -96,7 +96,17 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 /**
  * The environment variable name for memory limit control.
  */
-static const char *s_memory_limit_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
+static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
+static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
+
+/* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
+ * object order. Consulted below both the request and the client setting, so it changes the default rather
+ * than overruling a caller. See `aws_s3_client.out_of_order_delivery_env`. */
+static const char *s_ordered_delivery_env_var = "AWS_CRT_S3_ORDERED_DELIVERY";
+
+/* Set to anything non-empty and every download requests its parts in object order instead of spreading
+ * them across far-apart regions of the object. See `aws_s3_client.force_sequential_requests`. */
+static const char *s_force_sequential_requests_env_var = "AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -106,6 +116,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client);
 
 /* Called when the body streaming elg shutdown has completed. */
 static void s_s3_client_body_streaming_elg_shutdown(void *user_data);
+static void s_s3_client_file_io_elg_shutdown(void *user_data);
 
 static void s_s3_client_create_connection_for_request(struct aws_s3_client *client, struct aws_s3_request *request);
 
@@ -166,6 +177,98 @@ static uint32_t s_get_ideal_connection_number_from_throughput(double throughput_
     ideal_connection_count_double = ceil(ideal_connection_count_double);
     ideal_connection_count_double = aws_min_double(g_max_num_connections, ideal_connection_count_double);
     return (uint32_t)ideal_connection_count_double;
+}
+
+/**
+ * Returns the default memory pool size for a given throughput target.
+ * This is the single source of truth for the throughput-to-memory-pool tier table.
+ * Used both for pool sizing when no explicit memory_limit is set, and for
+ * feature IDs to determine whether a caller's explicit limit differs from the default.
+ */
+static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
+#if SIZE_BITS == 32
+    if (throughput_gbps > 25.0) {
+        return GB_TO_BYTES(2);
+    } else {
+        return GB_TO_BYTES(1);
+    }
+#else
+    /*
+     * Memory pool sizing tiers based on detected/configured throughput.
+     *
+     * Upper tiers (>=10 Gbps): unchanged from original values. These cover
+     * instances that were already getting CRT with these pool sizes. We need
+     * to reinvestigate whether these numbers are optimal in the future but for
+     * now we will keep them as is to ensure we don't break/regress current
+     * users.
+     *
+     * Sub-10 Gbps tiers: added to right-size the memory pool for lower-bandwidth
+     * instances. Without these tiers, all sub-25 Gbps instances would get 2 GiB,
+     * which is 8-40x more than needed and causes unnecessary RSS on constrained
+     * instances (t3.micro: 1 GiB RAM, m5.large: 8 GiB RAM).
+     *
+     * Tier breakdown:
+     *   >=200 Gbps -> 24 GiB (unchanged)
+     *   >=100 Gbps -> 16 GiB (unchanged)
+     *   >=75 Gbps  ->  8 GiB (unchanged)
+     *   >=25 Gbps  ->  4 GiB (unchanged)
+     *   >=10 Gbps  ->  2 GiB (unchanged, was the previous catch-all default)
+     *   >=5 Gbps   -> 512 MiB: covers t3.medium/large burst (5 Gbps), m5.xlarge and
+     *                  c5.xlarge baseline (1.25 Gbps). 2x headroom over 256 MiB for
+     *                  moderate throughput instances that may burst.
+     *   >0 Gbps    -> 256 MiB: any positively-detected or assigned sub-5 Gbps throughput.
+     *                  Validated via benchmark on t2.micro, t3.micro/small,
+     *                  m5.large (0.064-0.75 Gbps baseline). 38-90% RSS reduction vs
+     *                  2 GiB default with no throughput penalty at baseline speeds.
+     *                  16 x 8 MiB parts fit in the 128 MiB usable pool (256 - 128 reserved).
+     *   0 Gbps     ->  2 GiB: throughput not detected (non-EC2 or unknown instance).
+     *                  Preserves existing default for callers that don't set a throughput
+     *                  target.
+     */
+    if (throughput_gbps >= 200.0) {
+        return GB_TO_BYTES(24);
+    } else if (throughput_gbps >= 100.0) {
+        return GB_TO_BYTES(16);
+    } else if (throughput_gbps >= 75.0) {
+        return GB_TO_BYTES(8);
+    } else if (throughput_gbps >= 25.0) {
+        return GB_TO_BYTES(4);
+    } else if (throughput_gbps >= 10.0) {
+        return GB_TO_BYTES(2);
+    } else if (throughput_gbps >= 5.0) {
+        return MB_TO_BYTES(512);
+    } else if (throughput_gbps > 0.0) {
+        return MB_TO_BYTES(256);
+    } else {
+        /* throughput_target_gbps == 0.0: not detected (non-EC2 or unknown instance).
+         * Preserve 2 GiB default for backward compatibility. */
+        return GB_TO_BYTES(2);
+    }
+#endif
+}
+
+size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
+    /*
+     * Resolve the effective throughput used for default memory pool sizing.
+     *
+     * If the caller provided a positive throughput, use it directly. Otherwise
+     * attempt to auto-detect from the current EC2 environment via the
+     * per-family NIC bandwidth table, applied only when the detected value is
+     * below the conservative right-sizing threshold (10 Gbps). Right-sizing
+     * at higher bandwidth tiers can be addressed in the future. When no
+     * throughput is provided and auto-detection fails or yields a value at/
+     * above the threshold, throughput stays 0.0 and callers get the 2 GiB
+     * tier-table default.
+     */
+    double effective_throughput_gbps = throughput_target_gbps;
+    if (effective_throughput_gbps == 0.0) {
+        const struct aws_s3_platform_info *detected_platform = aws_s3_get_current_platform_info();
+        if (detected_platform != NULL && detected_platform->max_throughput_gbps > 0.0 &&
+            detected_platform->max_throughput_gbps < 10.0) {
+            effective_throughput_gbps = detected_platform->max_throughput_gbps;
+        }
+    }
+    return s_get_default_mem_limit_from_throughput(effective_throughput_gbps);
 }
 
 /* Returns the max number of connections allowed.
@@ -329,38 +432,74 @@ struct aws_s3_client *aws_s3_client_new(
         aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
         return NULL;
     }
+
     uint64_t mem_limit_configured = 0;
     if (client_config->memory_limit_in_bytes == 0) {
-        /* Try to read from the environment variable for memory limit */
-        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_env_var);
-        if (memory_limit_from_env_var) {
-            uint64_t mem_limit_in_gib = 0;
-            if (aws_byte_cursor_utf8_parse_u64(
-                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
-                aws_string_destroy(memory_limit_from_env_var);
+        /*
+         * Try to read from the environment variable for memory limit.
+         * First we try _IN_MB (allows sub-GiB values, e.g. 256 for 256 MiB).
+         */
+        struct aws_string *mem_limit_mb_str = aws_get_env_nonempty(allocator, s_memory_limit_mb_env_var);
+        if (mem_limit_mb_str) {
+            uint64_t mem_limit_in_mb = 0;
+            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_mb_str), &mem_limit_in_mb)) {
+                aws_string_destroy(mem_limit_mb_str);
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
                     "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
                     "integers supported.",
-                    s_memory_limit_env_var);
+                    s_memory_limit_mb_env_var);
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
-            aws_string_destroy(memory_limit_from_env_var);
-            uint64_t mem_limit_in_bytes = 0;
-            /* Convert mem_limit_in_gib to bytes */
-            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
-                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+            aws_string_destroy(mem_limit_mb_str);
+            /* Convert MiB to bytes */
+            uint64_t mem_limit_from_env = 0;
+            if (aws_mul_u64_checked(mem_limit_in_mb, 1024, &mem_limit_from_env) ||
+                aws_mul_u64_checked(mem_limit_from_env, 1024, &mem_limit_from_env)) {
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, overflow detected.",
-                    s_memory_limit_env_var);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    "Cannot create client from client_config; environment variable: %s, overflows when converted "
+                    "to bytes.",
+                    s_memory_limit_mb_env_var);
+                aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
                 return NULL;
             }
+            mem_limit_configured = mem_limit_from_env;
+        }
 
-            mem_limit_configured = mem_limit_in_bytes;
+        /* _IN_GIB is only checked if _IN_MB was not set */
+        if (mem_limit_configured == 0) {
+            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
+            if (memory_limit_from_env_var) {
+                uint64_t mem_limit_in_gib = 0;
+                if (aws_byte_cursor_utf8_parse_u64(
+                        aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                    aws_string_destroy(memory_limit_from_env_var);
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
+                        "integers supported.",
+                        s_memory_limit_gib_env_var);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
+                aws_string_destroy(memory_limit_from_env_var);
+                uint64_t mem_limit_in_bytes = 0;
+                /* Convert mem_limit_in_gib to bytes */
+                if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_CLIENT,
+                        "Cannot create client from client_config; environment variable: %s, overflow detected.",
+                        s_memory_limit_gib_env_var);
+                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+                    return NULL;
+                }
+
+                mem_limit_configured = mem_limit_in_bytes;
+            }
         }
     } else {
         mem_limit_configured = client_config->memory_limit_in_bytes;
@@ -380,27 +519,14 @@ struct aws_s3_client *aws_s3_client_new(
 
     client->allocator = allocator;
 
+    /*
+     * Determine the default memory pool size. When no explicit memory limit was configured, size from the tier table.
+     * Resolves the effective throughput (caller-provided or auto-detected from the current EC2 environment) internally.
+     */
     size_t mem_limit = 0;
     if (mem_limit_configured == 0) {
-#if SIZE_BITS == 32
-        if (client_config->throughput_target_gbps > 25.0) {
-            mem_limit = GB_TO_BYTES(2);
-        } else {
-            mem_limit = GB_TO_BYTES(1);
-        }
-#else
-        if (client_config->throughput_target_gbps >= 200.0) {
-            mem_limit = GB_TO_BYTES(24);
-        } else if (client_config->throughput_target_gbps >= 100.0) {
-            mem_limit = GB_TO_BYTES(16);
-        } else if (client_config->throughput_target_gbps >= 75.0) {
-            mem_limit = GB_TO_BYTES(8);
-        } else if (client_config->throughput_target_gbps >= 25.0) {
-            mem_limit = GB_TO_BYTES(4);
-        } else {
-            mem_limit = GB_TO_BYTES(2);
-        }
-#endif
+        /* No explicit memory limit was set (programmatic or env var); size from the tier table. */
+        mem_limit = aws_s3_default_memory_limit_for_throughput(client_config->throughput_target_gbps);
     } else {
         // cap memory limit to SIZE_MAX
         if (mem_limit_configured > SIZE_MAX) {
@@ -445,6 +571,48 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->fio_opts) {
         client->fio_opts = *client_config->fio_opts;
         client->fio_options_set = true;
+    }
+
+    /* Initialize client-level feature IDs for the User-Agent m/ section.
+     * These are set AFTER all defaults are resolved so we can compare the effective
+     * values against what the system would have chosen automatically. A feature ID
+     * tracks "is the customer using non-default behavior?" not "did the customer
+     * touch the API?" Per-request flags (and per-request overrides such as
+     * aws_s3_meta_request_options.part_size) are added in aws_s3_meta_request_init_base. */
+    client->feature_ids = 0;
+
+    if (client_config->part_size != 0 && part_size != (size_t)g_default_part_size_fallback) {
+        /* Caller set part_size AND it differs from the 8 MiB default */
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE;
+    }
+
+    if (client_config->throughput_target_gbps != 0.0 &&
+        client->throughput_target_gbps != g_default_throughput_target_gbps) {
+        /* Caller set throughput AND the effective value differs from the 10.0 Gbps default */
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT;
+    }
+
+    if (mem_limit_configured != 0) {
+        /* A memory limit was explicitly configured, either programmatically via
+         * client_config->memory_limit_in_bytes or via the AWS_CRT_S3_MEMORY_LIMIT_IN_MB /
+         * AWS_CRT_S3_MEMORY_LIMIT_IN_GIB environment variables. Flag it only if it differs
+         * from what the tier table would have chosen for this environment. */
+        size_t default_mem_limit = aws_s3_default_memory_limit_for_throughput(client_config->throughput_target_gbps);
+        if (mem_limit != default_mem_limit) {
+            client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT;
+        }
+    }
+
+    {
+        /* Not cached_only: the instance type cache is only populated as a side effect of the
+         * throughput auto-detection above, which is skipped when the caller supplies a
+         * throughput target. Force detection here so ON_EC2 is reported regardless of config.
+         * Detection reads DMI sysfs (cheap) and only falls back to IMDS when DMI confirms a
+         * Nitro host but lacks the product name. The result is cached for the process lifetime. */
+        struct aws_byte_cursor ec2_instance = aws_s3_get_current_platform_ec2_intance_type(false /* cached_only */);
+        if (ec2_instance.len > 0) {
+            client->feature_ids |= AWS_S3_FEATURE_ID_ON_EC2;
+        }
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -521,6 +689,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     aws_atomic_init_int(&client->stats.num_requests_stream_queued_waiting, 0);
     aws_atomic_init_int(&client->stats.num_requests_streaming_response, 0);
+    aws_atomic_init_int(&client->next_write_loop_index, 0);
+    aws_atomic_init_int(&client->num_pending_writes, 0);
 
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
@@ -652,6 +822,51 @@ struct aws_s3_client *aws_s3_client_new(
         }
     }
 
+    client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
+    if (client_config->enable_s3express) {
+        if (client_config->s3express_provider_override_factory) {
+            client->s3express_provider_factory = client_config->s3express_provider_override_factory;
+            client->factory_user_data = client_config->factory_user_data;
+        } else {
+            client->s3express_provider_factory = s_s3express_provider_default_factory;
+        }
+    }
+
+    client->synced_data.active = true;
+
+    if (client_config->retry_strategy != NULL) {
+        aws_retry_strategy_acquire(client_config->retry_strategy);
+        client->retry_strategy = client_config->retry_strategy;
+    } else {
+        /* max_retries requires explicit S3 default because passing 0 to aws-c-io's
+         * standard retry strategy would use its own default of 3, not the S3 default of 5.
+         * The other fields use 0 = "use aws-c-io defaults" which match the S3 defaults. */
+        uint32_t max_retries = client_config->retry_config.max_retries > 0
+                                   ? (uint32_t)client_config->retry_config.max_retries
+                                   : s_default_max_retries;
+
+        struct aws_exponential_backoff_retry_options backoff_retry_options = {
+            .el_group = client_config->client_bootstrap->event_loop_group,
+            .max_retries = max_retries,
+            .backoff_scale_factor_ms = client_config->retry_config.backoff_scale_factor_ms,
+            .max_backoff_secs = client_config->retry_config.max_backoff_secs,
+            .jitter_mode = client_config->retry_config.jitter_mode,
+        };
+
+        struct aws_standard_retry_options retry_options = {
+            .backoff_retry_options = backoff_retry_options,
+            .initial_bucket_capacity = client_config->retry_config.initial_bucket_capacity,
+        };
+
+        client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+
+        if (client->retry_strategy == NULL) {
+            /* if something failed in creation of retry_strategy, we should error instead of having a null
+             * retry_strategy attached to the client */
+            goto on_error;
+        }
+    }
+
     /* Set up body streaming ELG */
     {
         uint16_t num_event_loops =
@@ -676,35 +891,35 @@ struct aws_s3_client *aws_s3_client_new(
         }
         client->synced_data.body_streaming_elg_allocated = true;
     }
-    /* Setup cannot fail after this point. */
 
-    client->cached_signing_config = aws_cached_signing_config_new(client, client_config->signing_config);
-    if (client_config->enable_s3express) {
-        if (client_config->s3express_provider_override_factory) {
-            client->s3express_provider_factory = client_config->s3express_provider_override_factory;
-            client->factory_user_data = client_config->factory_user_data;
-        } else {
-            client->s3express_provider_factory = s_s3express_provider_default_factory;
+    /* Set up file I/O ELG */
+    {
+        uint16_t num_file_io_threads = client_config->num_file_io_threads;
+
+        if (num_file_io_threads == 0) {
+            /* Default to one thread per bootstrap event loop, matching the body streaming ELG. */
+            num_file_io_threads =
+                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
         }
-    }
 
-    client->synced_data.active = true;
-
-    if (client_config->retry_strategy != NULL) {
-        aws_retry_strategy_acquire(client_config->retry_strategy);
-        client->retry_strategy = client_config->retry_strategy;
-    } else {
-        struct aws_exponential_backoff_retry_options backoff_retry_options = {
-            .el_group = client_config->client_bootstrap->event_loop_group,
-            .max_retries = s_default_max_retries,
+        struct aws_shutdown_callback_options file_io_elg_shutdown_options = {
+            .shutdown_callback_fn = s_s3_client_file_io_elg_shutdown,
+            .shutdown_callback_user_data = client,
         };
 
-        struct aws_standard_retry_options retry_options = {
-            .backoff_retry_options = backoff_retry_options,
-        };
+        client->file_io_elg =
+            aws_event_loop_group_new_default(client->allocator, num_file_io_threads, &file_io_elg_shutdown_options);
 
-        client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+        if (!client->file_io_elg) {
+            goto on_error;
+        }
+        client->synced_data.file_io_elg_allocated = true;
+
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p File I/O ELG created with %u threads.", (void *)client, num_file_io_threads);
     }
+
+    /***************** Setup cannot fail after this point. *************************/
 
     aws_hash_table_init(
         &client->synced_data.endpoints,
@@ -723,6 +938,73 @@ struct aws_s3_client *aws_s3_client_new(
 
     *((bool *)&client->enable_read_backpressure) = client_config->enable_read_backpressure;
     *((size_t *)&client->initial_read_window) = client_config->initial_read_window;
+    *((enum aws_tribool *)&client->out_of_order_delivery) = client_config->out_of_order_delivery;
+
+    {
+        struct aws_string *ordered_delivery = aws_get_env_nonempty(allocator, s_ordered_delivery_env_var);
+        if (ordered_delivery != NULL) {
+            *((enum aws_tribool *)&client->out_of_order_delivery_env) = AWS_TRIBOOL_FALSE;
+            aws_string_destroy(ordered_delivery);
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "id=%p %s is set, so a download that does not ask for a delivery order of its own delivers "
+                "its body in object order.",
+                (void *)client,
+                s_ordered_delivery_env_var);
+        }
+    }
+
+    {
+        struct aws_string *force_sequential = aws_get_env_nonempty(allocator, s_force_sequential_requests_env_var);
+        if (force_sequential != NULL) {
+            *((bool *)&client->force_sequential_requests) = true;
+            aws_string_destroy(force_sequential);
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "id=%p %s is set, so downloads request their parts in object order.",
+                (void *)client,
+                s_force_sequential_requests_env_var);
+        }
+    }
+
+    /* Diagnose the read-backpressure / initial-read-window pairing.
+     *
+     * When backpressure is enabled with a zero window, no parts can EVER be
+     * scheduled (auto_ranged_get's scheduling check gates on
+     * read_data_requested >= read_window_running_total, which is 0 >= 0 on
+     * the first attempt). Downloads stall indefinitely until the caller
+     * invokes aws_s3_meta_request_increment_read_window. Warn loudly so the
+     * caller can find the config bug in logs, but do not fail construction --
+     * some existing callers may already be in this state and we don't want
+     * to break them.
+     *
+     * When backpressure is disabled with a positive window, the window value
+     * is stored but every gating check is bypassed. Warn similarly: the
+     * client is still functional at native pool ceiling capacity, just not
+     * throttled the way the caller may have expected.
+     *
+     * Any positive initial_read_window paired with enable_read_backpressure
+     * is valid: aws_s3_auto_ranged_get schedules the first part as long as
+     * the window is > 0, then normal backpressure gating kicks in once
+     * bytes accumulate. See the comment in s_s3_auto_ranged_get_update. */
+    if (client->enable_read_backpressure && client->initial_read_window == 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p enable_read_backpressure is true but initial_read_window is 0. "
+            "No parts will be scheduled and downloads will stall indefinitely until "
+            "aws_s3_meta_request_increment_read_window is called. Set initial_read_window "
+            "to a positive value, or disable read backpressure.",
+            (void *)client);
+    } else if (!client->enable_read_backpressure && client->initial_read_window > 0) {
+        AWS_LOGF_WARN(
+            AWS_LS_S3_CLIENT,
+            "id=%p initial_read_window is set to %zu but enable_read_backpressure is false. "
+            "The window value has no runtime effect when backpressure is disabled; aws-c-s3 "
+            "skips all window gating. Enable backpressure or clear initial_read_window to "
+            "remove this warning.",
+            (void *)client,
+            client->initial_read_window);
+    }
 
     return client;
 
@@ -808,6 +1090,8 @@ static void s_s3_client_start_destroy(void *user_data) {
 
     aws_event_loop_group_release(client->body_streaming_elg);
     client->body_streaming_elg = NULL;
+    aws_event_loop_group_release(client->file_io_elg);
+    client->file_io_elg = NULL;
     aws_s3express_credentials_provider_release(client->s3express_provider);
 
     /* BEGIN CRITICAL SECTION */
@@ -855,6 +1139,9 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
 
     aws_mutex_clean_up(&client->synced_data.lock);
 
+    /* A meta request cannot finish while any of its writes are outstanding. */
+    AWS_ASSERT(aws_atomic_load_int(&client->num_pending_writes) == 0);
+
     AWS_ASSERT(aws_linked_list_empty(&client->synced_data.pending_meta_request_work));
     AWS_ASSERT(aws_linked_list_empty(&client->threaded_data.meta_requests));
     aws_hash_table_clean_up(&client->synced_data.endpoints);
@@ -901,6 +1188,22 @@ static void s_s3_client_body_streaming_elg_shutdown(void *user_data) {
     {
         aws_s3_client_lock_synced_data(client);
         client->synced_data.body_streaming_elg_allocated = false;
+        s_s3_client_schedule_process_work_synced(client);
+        aws_s3_client_unlock_synced_data(client);
+    }
+    /* END CRITICAL SECTION */
+}
+
+static void s_s3_client_file_io_elg_shutdown(void *user_data) {
+    struct aws_s3_client *client = user_data;
+    AWS_PRECONDITION(client);
+
+    AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Client file I/O ELG shutdown.", (void *)client);
+
+    /* BEGIN CRITICAL SECTION */
+    {
+        aws_s3_client_lock_synced_data(client);
+        client->synced_data.file_io_elg_allocated = false;
         s_s3_client_schedule_process_work_synced(client);
         aws_s3_client_unlock_synced_data(client);
     }
@@ -1094,6 +1397,7 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
         return NULL;
     }
     meta_request->is_express = use_s3express_signing;
+    meta_request->is_https = is_https;
 
     bool error_occurred = false;
 
@@ -1856,6 +2160,15 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         uint32_t num_requests_streaming_response =
             (uint32_t)aws_atomic_load_int(&client->stats.num_requests_streaming_response);
 
+        /* The file-sink counterpart of num_requests_streaming_response: a download writing to
+         * recv_filepath out of order counts its bodies here instead, so without this a parallel-write
+         * download shows zero for both streaming counters and its write backlog is invisible.
+         *
+         * Deliberately not folded into total_approx_requests. A body write detaches from its request so
+         * the request can be released right away, which already decremented the exact in-flight count,
+         * so counting it on the approx side would make approx exceed exact for the whole download. */
+        uint32_t num_pending_writes = (uint32_t)aws_atomic_load_int(&client->num_pending_writes);
+
         uint32_t total_approx_requests = num_requests_network_io + num_requests_stream_queued_waiting +
                                          num_requests_streaming_response + num_requests_being_prepared +
                                          client->threaded_data.request_queue_size;
@@ -1864,7 +2177,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             AWS_LS_S3_CLIENT_STATS,
             "id=%p Requests-in-flight(approx/exact):%d/%d  Requests-preparing:%d  Requests-queued:%d  "
             "Requests-network(get/put/default/total):%d/%d/%d/%d  Requests-streaming-waiting:%d  "
-            "Requests-streaming-response:%d "
+            "Requests-streaming-response:%d  Writes-pending:%d"
             " Endpoints(in-table/allocated):%d/%d",
             (void *)client,
             total_approx_requests,
@@ -1877,6 +2190,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             num_requests_network_io,
             num_requests_stream_queued_waiting,
             num_requests_streaming_response,
+            num_pending_writes,
             num_endpoints_in_table,
             num_endpoints_allocated);
     }
@@ -1895,6 +2209,7 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
         bool finish_destroy =
             client->synced_data.active == false && client->synced_data.start_destroy_executing == false &&
             client->synced_data.body_streaming_elg_allocated == false &&
+            client->synced_data.file_io_elg_allocated == false &&
             client->synced_data.process_work_task_scheduled == false &&
             client->synced_data.process_work_task_in_progress == false &&
             client->synced_data.s3express_provider_active == false && client->synced_data.num_endpoints_allocated == 0;
@@ -1905,11 +2220,13 @@ static void s_s3_client_process_work_default(struct aws_s3_client *client) {
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
                 "id=%p Client shutdown progress: starting_destroy_executing=%d  body_streaming_elg_allocated=%d  "
+                "file_io_elg_allocated=%d  "
                 "process_work_task_scheduled=%d  process_work_task_in_progress=%d  num_endpoints_allocated=%d "
                 "s3express_provider_active=%d finish_destroy=%d",
                 (void *)client,
                 (int)client->synced_data.start_destroy_executing,
                 (int)client->synced_data.body_streaming_elg_allocated,
+                (int)client->synced_data.file_io_elg_allocated,
                 (int)client->synced_data.process_work_task_scheduled,
                 (int)client->synced_data.process_work_task_in_progress,
                 (int)client->synced_data.num_endpoints_allocated,
@@ -2108,11 +2425,16 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     if (error_code != AWS_ERROR_SUCCESS) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
-            "id=%p Could not allocate buffer for request with tag %d for the meta request.",
+            "id=%p Could not allocate buffer for request with tag %d for the meta request due to error %d (%s).",
             (void *)meta_request,
-            request->request_tag);
+            request->request_tag,
+            error_code,
+            aws_error_str(error_code));
 
-        s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED);
+        /* Propagate the pool's error rather than flattening it, so an unserviceable part size
+         * surfaces as AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT instead of a generic
+         * allocation failure. */
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, error_code);
         s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
         return;
     }
@@ -2188,7 +2510,7 @@ void s_acquire_mem_and_prepare_request(
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = request_size,
+            .size = aws_min_size(request->buffer_size, request_size),
         };
 
         struct aws_s3_reserve_memory_payload *payload =
@@ -2538,6 +2860,9 @@ static void s_s3_client_acquired_retry_token(
     aws_s3_client_acquire(client);
 
     aws_high_res_clock_get_ticks((uint64_t *)&request->send_data.metrics->time_metrics.conn_acquire_start_timestamp_ns);
+
+    aws_http_connection_manager_fetch_metrics(
+        endpoint->http_connection_manager, &request->send_data.metrics->http_manager_metrics);
 
     client->vtable->acquire_http_connection(
         endpoint->http_connection_manager, s_s3_client_on_acquire_http_connection, connection);

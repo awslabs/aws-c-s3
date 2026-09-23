@@ -22,6 +22,13 @@
 #    pragma warning(disable : 4996)
 #endif
 
+/* Defined by the build system from the VERSION file (see CMakeLists.txt) so the version reported in the
+ * user agent cannot drift from the released version. The fallback only applies to builds that do not go
+ * through our CMakeLists. */
+#ifndef AWS_S3_CLIENT_VERSION
+#    define AWS_S3_CLIENT_VERSION "unknown"
+#endif
+
 const struct aws_byte_cursor g_s3_client_version = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(AWS_S3_CLIENT_VERSION);
 const struct aws_byte_cursor g_s3_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3");
 const struct aws_byte_cursor g_s3express_service_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("s3express");
@@ -50,8 +57,6 @@ const struct aws_byte_cursor g_sdk_checksum_algorithm_header_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm");
 const struct aws_byte_cursor g_accept_ranges_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("accept-ranges");
 const struct aws_byte_cursor g_acl_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-acl");
-const struct aws_byte_cursor g_mp_parts_count_header_name =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-mp-parts-count");
 const struct aws_byte_cursor g_post_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("POST");
 const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("HEAD");
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");
@@ -353,7 +358,24 @@ int aws_last_error_or_unknown(void) {
     return error;
 }
 
-void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_http_message *message) {
+/* Map of feature ID flag -> User-Agent metric ID string. Order matches the enum definition
+ * and determines the emission order in the m/ section. */
+static const struct {
+    uint32_t flag;
+    const char *id;
+} s_feature_id_strings[] = {
+    {AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, "AX"},
+    {AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, "AY"},
+    {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, "AZ"},
+    {AWS_S3_FEATURE_ID_ON_EC2, "Aa"},
+    {AWS_S3_FEATURE_ID_FILE_PATH, "Ab"},
+};
+
+void aws_s3_add_user_agent_header(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    uint32_t feature_ids) {
+
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(message);
 
@@ -363,9 +385,6 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     if (!platform_cursor.len) {
         platform_cursor = g_user_agent_header_unknown;
     }
-    const size_t user_agent_length = g_user_agent_header_product_name.len + forward_slash.len +
-                                     g_s3_client_version.len + space_delimiter.len + g_user_agent_header_platform.len +
-                                     forward_slash.len + platform_cursor.len;
 
     struct aws_http_headers *headers = aws_http_message_get_headers(message);
     AWS_ASSERT(headers != NULL);
@@ -376,25 +395,20 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
     struct aws_byte_buf user_agent_buffer;
     AWS_ZERO_STRUCT(user_agent_buffer);
 
+    /* Start with generous initial capacity */
+    const size_t initial_capacity = 256;
+
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
-        /* If the header was found, then create a buffer with the total size we'll need, and append the current user
-         * agent header with a trailing space. */
         aws_byte_buf_init(
-            &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + user_agent_length);
-
+            &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + initial_capacity);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
-
         aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
-
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
-
-        /* If the header was not found, then create a buffer with just the size of the user agent string that is about
-         * to be appended to the buffer. */
-        aws_byte_buf_init(&user_agent_buffer, allocator, user_agent_length);
+        aws_byte_buf_init(&user_agent_buffer, allocator, initial_capacity);
     }
 
-    /* Append the client's user-agent string. */
+    /* Append the client's user-agent string: aws-c-s3/{version} platform/{instance-type} */
     {
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_product_name);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
@@ -403,6 +417,27 @@ void aws_s3_add_user_agent_header(struct aws_allocator *allocator, struct aws_ht
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_platform);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
+    }
+
+    /* Append feature IDs m/ section per UA 2.1 SEP.
+     * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas.
+     * The section is omitted entirely when no flags are set. */
+    if (feature_ids != 0) {
+        aws_byte_buf_append_dynamic(
+            &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/"));
+
+        bool first = true;
+        for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
+            if (feature_ids & s_feature_id_strings[i].flag) {
+                if (!first) {
+                    aws_byte_buf_append_dynamic(
+                        &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(","));
+                }
+                struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
+                aws_byte_buf_append_dynamic(&user_agent_buffer, &id_cursor);
+                first = false;
+            }
+        }
     }
 
     /* Apply the updated header. */
@@ -671,6 +706,7 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     uint64_t client_max_part_size,
     size_t *out_part_size,
     uint32_t *out_num_parts) {
+    (void)client_max_part_size;
 
     AWS_FATAL_ASSERT(out_part_size);
     AWS_FATAL_ASSERT(out_num_parts);
@@ -698,16 +734,6 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
 
     size_t part_size = (size_t)part_size_uint64;
 
-    if (part_size > client_max_part_size) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "Could not create meta request; required part size for request is %" PRIu64
-            ", but current maximum part size is %" PRIu64,
-            (uint64_t)part_size,
-            (uint64_t)client_max_part_size);
-        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-    }
-
     if (part_size < client_part_size) {
         part_size = client_part_size;
     }
@@ -727,6 +753,43 @@ int aws_s3_calculate_optimal_mpu_part_size_and_num_parts(
     *out_part_size = part_size;
     *out_num_parts = num_parts;
     return AWS_OP_SUCCESS;
+}
+
+bool aws_s3_allow_out_of_order_delivery(
+    bool file_sink,
+    bool callback_sink,
+    enum aws_tribool request_override,
+    enum aws_tribool client_setting,
+    enum aws_tribool env_setting) {
+
+    bool out_of_order;
+    if (file_sink) {
+        out_of_order = true;
+    } else if (callback_sink) {
+        out_of_order = false;
+    } else {
+        /* Either no sink at all (no client, so nothing is ever delivered), or a file sink whose
+         * per-worker descriptors were never allocated -- init skips them when the client or request
+         * ruled out-of-order delivery out. The latter must stay ordered: the parallel path indexes
+         * recv_file_write_fd_slots unconditionally, and the ordered path has its own descriptor. */
+        return false;
+    }
+
+    /* First preference expressed wins, and the environment is asked last. So an operator can change what
+     * a caller who expressed nothing gets, but cannot overrule one who asked -- a setting passed through
+     * the API means the caller's own code is built around that answer. */
+    enum aws_tribool preference = request_override;
+    if (preference == AWS_TRIBOOL_UNSET) {
+        preference = client_setting;
+    }
+    if (preference == AWS_TRIBOOL_UNSET) {
+        preference = env_setting;
+    }
+    if (preference != AWS_TRIBOOL_UNSET) {
+        out_of_order = preference == AWS_TRIBOOL_TRUE;
+    }
+
+    return out_of_order;
 }
 
 int aws_s3_crt_error_code_from_recoverable_server_error_code_string(struct aws_byte_cursor error_code_string) {
@@ -773,20 +836,12 @@ int aws_s3_check_headers_for_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_http_headers *headers,
     struct aws_s3_checksum **out_checksum,
-    struct aws_byte_buf *out_checksum_buffer,
-    bool meta_request_level) {
+    struct aws_byte_buf *out_checksum_buffer) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(out_checksum);
     AWS_PRECONDITION(out_checksum_buffer);
 
     if (!headers || aws_http_headers_count(headers) == 0) {
-        *out_checksum = NULL;
-        return AWS_OP_SUCCESS;
-    }
-    if (meta_request_level && aws_http_headers_has(headers, g_mp_parts_count_header_name)) {
-        /* g_mp_parts_count_header_name indicates it's a object was uploaded as a
-         * multipart upload. So, the checksum should not be applied to the meta request level.
-         * But we we want to check it for the request level. */
         *out_checksum = NULL;
         return AWS_OP_SUCCESS;
     }

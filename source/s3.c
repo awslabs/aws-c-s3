@@ -46,7 +46,7 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_FILE_MODIFIED, "The file was modified during upload."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_EXCEEDS_MEMORY_LIMIT, "Request was not created due to used memory exceeding memory limit."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INVALID_MEMORY_LIMIT_CONFIG, "Specified memory configuration is invalid for the system. "
-        "Memory limit should be at least 1GiB. Part size and max part size should be smaller than memory limit."),
+        "Memory limit should be at least 256MiB. Part size and max part size should be smaller than memory limit."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3EXPRESS_CREATE_SESSION_FAILED, "CreateSession call failed when signing with S3 Express."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE, "buffer size mismatch, content length exceeds reserved buffer size, possibly due to wrong object_size_hint. Retrying with Range instead of partNumber."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_REQUEST_HAS_COMPLETED, "Request has already completed, action cannot be performed."),
@@ -54,6 +54,7 @@ static struct aws_error_info s_errors[] = {
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_RECV_FILE_NOT_FOUND, "The receive file doesn't exist, cannot create as configuration required."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_REQUEST_TIMEOUT, "RequestTimeout error received from S3."),
     AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_BUFFER_ALLOCATION_FAILED, "Could not reserve memory for object."),
+    AWS_DEFINE_ERROR_INFO_S3(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, "Part size exceeds the configured memory limit. Increase the memory limit or reduce the part size."),
 };
 /* clang-format on */
 

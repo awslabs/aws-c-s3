@@ -20,7 +20,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 #### Environment Variables
 
-1. **Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB`**
+1. **Memory Limit - `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB` and `AWS_CRT_S3_MEMORY_LIMIT_IN_MB`** 
 
    The S3 client uses a buffer pool to manage memory for concurrent transfers. 
 
@@ -28,15 +28,18 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
    ```bash
    export AWS_CRT_S3_MEMORY_LIMIT_IN_GIB=4  # 4 GiB limit
+   # or
+   export AWS_CRT_S3_MEMORY_LIMIT_IN_MB=256 # 256 MiB limit
    ```
 
    **Default Behavior**:
    When nothing is set, the client sets a default memory limit based on the target throughput.
 
    **Notes**:
+   * If both are set `AWS_CRT_S3_MEMORY_LIMIT_IN_MB` is used and `AWS_CRT_S3_MEMORY_LIMIT_IN_GIB` is ignored.
    * The limit applies per client. If multiple clients created, limit will apply to each separately.
-   * The environment variable value must be a valid positive integer representing gigabytes (GiB).
-   * The value is converted from GiB to bytes internally (1 GiB = 1024³ bytes).
+   * The environment variable value must be a valid positive integer representing gigabytes (GiB) or megabytes (MiB).
+   * The value is converted from GiB or MiB to bytes internally.
    * Invalid values or overflow conditions will cause client creation to fail with `AWS_ERROR_INVALID_ARGUMENT`.
 
 > [!TIP]
@@ -70,9 +73,54 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    * The value is read once on first use and cached for the lifetime of the process.
    * If the network bandwidth of the device is too low, even a higher value of pending read might not be respected due to having maximum allowed requests in flight.
 
-3. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
+3. **Ordered Delivery - `AWS_CRT_S3_ORDERED_DELIVERY`**
+
+   Makes a download deliver its body in object order when it has not asked for a delivery order of its own.
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_ORDERED_DELIVERY=1
+   ```
+
+   **Default Behavior**:
+   When nothing is set, a download to a file delivers out of object order (each part is written at its own offset as it arrives) and a download through `body_callback` delivers in object order.
+
+   **Notes**:
+   * Any non-empty value turns it on; the value itself is not read.
+   * It changes the default, it does not overrule the caller. A `out_of_order_delivery` set on the meta request wins over one set on the client, and either wins over this variable. Only a download that expressed no preference is affected.
+   * It can only ask for ordered delivery. There is deliberately no way to turn *out-of-order* delivery on from the environment: for a `body_callback` sink that would change what the caller's own code sees, since `range_start` stops advancing contiguously.
+   * Setting it means an interrupted download to a file leaves a valid prefix rather than a file with gaps, at the cost of parts waiting on the part ahead of them.
+   * Read once per client, when the client is created.
+
+4. **Sequential Requests - `AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS`**
+
+   Makes every download request its parts in object order instead of spreading them across several far-apart regions of the object at once.
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS=1
+   ```
+
+   **Default Behavior**:
+   When nothing is set, a download that delivers out of order also issues its range requests across as many far-apart regions of the object as it has connections, one region per connection. A download that delivers in object order already requests in object order and is unaffected.
+
+   **Notes**:
+   * Any non-empty value turns it on; the value itself is not read.
+   * It only changes what is requested, not how it is delivered. Parts can still be written to the file at their own offsets as they arrive, depending on the delivery order setting.
+   * Setting it makes an interrupted download's file size bound how many of its bytes are valid, and makes resuming cheaper, because there are no gaps for the download to be ahead of.
+   * Read once per client, when the client is created.
+
+5. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
 
    The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
+
+## Versioning
+
+This library uses a three-part `Major.Minor.Patch` version scheme. See
+[VERSIONING.md](VERSIONING.md) for what each part means and our API/ABI
+stability policy.
 
 ## License
 

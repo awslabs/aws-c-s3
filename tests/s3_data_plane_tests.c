@@ -1768,7 +1768,7 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
     /* 20 MiB multipart download with 5 MiB parts: all parts page-aligned.
      * fallback_count is 0 if O_DIRECT is supported, otherwise 1 from the init-time platform fallback. */
     size_t expected_fallback_count = aws_file_direct_io_is_supported() ? 0 : 1;
-    ASSERT_UINT_EQUALS(expected_fallback_count, meta_request->recv_file_direct_io_fallback_count);
+    ASSERT_UINT_EQUALS(expected_fallback_count, aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count));
 
     aws_s3_meta_request_release(meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -1799,6 +1799,375 @@ static int s_test_s3_get_object_file_path_direct_io_content_verify(struct aws_al
     aws_http_message_release(message);
     aws_string_destroy(host_name);
     aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_get_object_range_parallel_write_content_verify,
+    s_test_s3_get_object_range_parallel_write_content_verify)
+static int s_test_s3_get_object_range_parallel_write_content_verify(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Range [100, 100 + 2 MiB) of a 4 MiB object, downloaded in 256 KiB parts. Sized to be the
+     * smallest shape that still exercises what this test is about: 8 parts means the client has
+     * several part requests in flight handing bodies to different writers, which one part would not.
+     *
+     * The unaligned start is deliberate: it makes the object-side range origin non-zero, so every
+     * part's file offset is the result of real arithmetic rather than an identity mapping. */
+    const uint64_t range_start = 100;
+    const size_t range_length = MB_TO_BYTES(2);
+    const uint64_t range_end_inclusive = range_start + range_length - 1;
+    const uint32_t object_size_mb = 4;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 256 * 1024,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    /* Verify what landed on disk, not what came off the wire. The tester uploads the repeating
+     * AWS_AUTOGEN_LOREM_IPSUM pattern, which is a pure function of absolute offset, so the expected
+     * bytes for the range are the same buffer indexed at range_start. */
+    struct aws_byte_buf expected_buf;
+    s_byte_buf_init_autogenned(&expected_buf, allocator, (size_t)range_start + range_length, AWS_AUTOGEN_LOREM_IPSUM);
+
+    /* Upload an object with non-zero content rather than reusing a pre-existing-* fixture. Those are
+     * all zero-filled, and a checksum over a zero-filled download cannot distinguish bytes that were
+     * written from a hole that was never written at all -- both read back as the same zeros. Out-of-
+     * order writes are exactly the case where a part can go missing while the file still looks the
+     * right length, so the fixture has to carry content for the assertion to mean anything. */
+    struct aws_byte_buf path_buf;
+    AWS_ZERO_STRUCT(path_buf);
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &path_buf, aws_byte_cursor_from_c_str("/prefix/round_trip/range_parallel_write_verify.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = object_size_mb,
+                .object_path_override = object_path,
+            },
+    };
+    /* Capture the upload's own result rather than discarding it. This helper waits for the meta
+     * request to finish and shut down, so asserting on its status makes "the object is fully written
+     * before the download starts" something the test checks rather than something it assumes. */
+    struct aws_s3_meta_request_test_results put_results;
+    aws_s3_meta_request_test_results_init(&put_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &put_results));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, put_results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_200_OK, put_results.finished_response_status);
+    aws_s3_meta_request_test_results_clean_up(&put_results);
+
+    /* Ranged GET straight to disk. */
+    const char *local_file_path = "aws_s3_range_parallel_write_verify_test_file";
+    remove(local_file_path);
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_byte_cursor host_cursor = aws_byte_cursor_from_string(host_name);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    char range_value[64];
+    snprintf(range_value, sizeof(range_value), "bytes=%" PRIu64 "-%" PRIu64, range_start, range_end_inclusive);
+    struct aws_http_header range_header = {
+        .name = g_range_header_name,
+        .value = aws_byte_cursor_from_c_str(range_value),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
+
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .recv_filepath = aws_byte_cursor_from_c_str(local_file_path),
+        /* Asked for explicitly rather than left UNSET: the request-level setting outranks
+         * AWS_CRT_S3_ORDERED_DELIVERY, so the parallel write path is exercised regardless of what the
+         * environment running the test has set. */
+        .out_of_order_delivery = AWS_TRIBOOL_TRUE,
+    };
+
+    struct aws_s3_meta_request_test_results test_results;
+    aws_s3_meta_request_test_results_init(&test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &meta_request_options, &test_results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, test_results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, test_results.finished_response_status);
+
+    /* Confirm the download actually took the parallel write path. The resolved flag is what the write
+     * dispatch reads to pick between the per-writer descriptors and the single ordered one, so this
+     * rules out the file having been filled sequentially -- which would make the content assertion
+     * below pass for the wrong reason. Read from the captured results rather than the meta request:
+     * the per-writer descriptors and their count are torn down at finish, so the meta request no
+     * longer reports them by the time the wait returns.
+     *
+     * The delivered-byte pair is the writers' own accounting. Equal to each other means the gap-free
+     * prefix reached the grand total, so no part was accounted for beyond a hole; equal to the range
+     * length means that prefix covers everything asked for. */
+    ASSERT_TRUE(test_results.out_of_order_delivery);
+    ASSERT_UINT_EQUALS(range_length, test_results.num_bytes_delivered);
+    ASSERT_UINT_EQUALS(range_length, test_results.num_bytes_delivered_total);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    ASSERT_UINT_EQUALS((size_t)range_start + range_length, expected_buf.len);
+    uint32_t expected_crc = aws_checksums_crc32(expected_buf.buffer + range_start, (int)range_length, 0);
+
+    FILE *verify_file = aws_fopen(local_file_path, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    struct aws_byte_buf file_buf;
+    /* One byte of slack so a file longer than the range shows up as a length mismatch rather than
+     * being silently truncated by the read. */
+    aws_byte_buf_init(&file_buf, allocator, range_length + 1);
+    file_buf.len = fread(file_buf.buffer, 1, range_length + 1, verify_file);
+    fclose(verify_file);
+
+    ASSERT_UINT_EQUALS(range_length, file_buf.len);
+    uint32_t actual_crc = aws_checksums_crc32(file_buf.buffer, (int)file_buf.len, 0);
+    ASSERT_UINT_EQUALS(expected_crc, actual_crc);
+
+    remove(local_file_path);
+    aws_byte_buf_clean_up(&file_buf);
+    /****************************************************************************************/
+    /* Second download of the same object, this time forced through the DEFAULT meta request
+     * implementation instead of the auto-ranged GET one, to check where a ranged body lands on disk
+     * when nothing in the pipeline knows the range's origin.
+     *
+     * The two implementations arrive at the same file offset by different routes. The auto-ranged GET
+     * records the range start as the object offset that maps to the base position and stamps each part
+     * with its absolute object offset, so the subtraction cancels. DEFAULT sets neither term: the
+     * request's range start stays 0 and no origin is ever recorded. A small range at a non-zero,
+     * non-aligned object offset is what separates the two: if the object offset leaked into the file
+     * offset, the file would come back `default_range_start` bytes longer with a hole at the front,
+     * which the exact-length assertion catches. */
+    const uint64_t default_range_start = 800;
+    const size_t default_range_length = 10;
+    const uint64_t default_range_end_inclusive = default_range_start + default_range_length - 1;
+
+    const char *default_local_file_path = "aws_s3_range_default_write_verify_test_file";
+    remove(default_local_file_path);
+
+    struct aws_http_message *default_message = aws_s3_test_get_object_request_new(allocator, host_cursor, object_path);
+
+    char default_range_value[64];
+    snprintf(
+        default_range_value,
+        sizeof(default_range_value),
+        "bytes=%" PRIu64 "-%" PRIu64,
+        default_range_start,
+        default_range_end_inclusive);
+    struct aws_http_header default_range_header = {
+        .name = g_range_header_name,
+        .value = aws_byte_cursor_from_c_str(default_range_value),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(default_message, default_range_header));
+
+    struct aws_s3_meta_request_options default_meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+        .message = default_message,
+        .recv_filepath = aws_byte_cursor_from_c_str(default_local_file_path),
+    };
+
+    struct aws_s3_meta_request_test_results default_test_results;
+    aws_s3_meta_request_test_results_init(&default_test_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &default_meta_request_options, &default_test_results));
+
+    struct aws_s3_meta_request *default_meta_request =
+        aws_s3_client_make_meta_request(client, &default_meta_request_options);
+    ASSERT_NOT_NULL(default_meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(&tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, default_test_results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, default_test_results.finished_response_status);
+    /* DEFAULT is not the implementation that resolves delivery order, so it stays ordered and writes
+     * through the single descriptor no matter what the request asked for. */
+    ASSERT_FALSE(default_test_results.out_of_order_delivery);
+
+    aws_s3_meta_request_release(default_meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&tester);
+
+    uint32_t default_expected_crc =
+        aws_checksums_crc32(expected_buf.buffer + default_range_start, (int)default_range_length, 0);
+
+    FILE *default_verify_file = aws_fopen(default_local_file_path, "rb");
+    ASSERT_NOT_NULL(default_verify_file);
+    struct aws_byte_buf default_file_buf;
+    aws_byte_buf_init(&default_file_buf, allocator, default_range_length + 1);
+    default_file_buf.len = fread(default_file_buf.buffer, 1, default_range_length + 1, default_verify_file);
+    fclose(default_verify_file);
+
+    /* Exactly the range length: the bytes start at the front of the file, with nothing skipped ahead of
+     * them and nothing written past them. */
+    ASSERT_UINT_EQUALS(default_range_length, default_file_buf.len);
+    uint32_t default_actual_crc = aws_checksums_crc32(default_file_buf.buffer, (int)default_file_buf.len, 0);
+    ASSERT_UINT_EQUALS(default_expected_crc, default_actual_crc);
+
+    remove(default_local_file_path);
+    aws_byte_buf_clean_up(&default_file_buf);
+    aws_s3_meta_request_test_results_clean_up(&default_test_results);
+    aws_http_message_release(default_message);
+
+    aws_byte_buf_clean_up(&expected_buf);
+    aws_s3_meta_request_test_results_clean_up(&test_results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    aws_byte_buf_clean_up(&path_buf);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
+/* Runs one ranged GET with a body callback and reports the range_start the callback saw for the first
+ * chunk. The implementation is chosen by `type`: GET_OBJECT reaches the auto-ranged GET, DEFAULT
+ * reaches the default implementation. Everything else about the two requests is identical, so the
+ * range_start each reports is attributable to the implementation and nothing else. */
+static int s_first_body_range_start_for_type(
+    struct aws_allocator *allocator,
+    struct aws_s3_tester *tester,
+    struct aws_s3_client *client,
+    enum aws_s3_meta_request_type type,
+    struct aws_byte_cursor range_header_value,
+    uint64_t expected_range_start,
+    bool validate_every_chunk,
+    uint64_t *out_first_range_start,
+    size_t *out_chunk_count,
+    uint64_t *out_received_body_size) {
+
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct aws_http_message *message = aws_s3_test_get_object_request_new(
+        allocator, aws_byte_cursor_from_string(host_name), g_pre_existing_object_10MB);
+
+    struct aws_http_header range_header = {
+        .name = g_range_header_name,
+        .value = range_header_value,
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(message, range_header));
+
+    struct aws_s3_meta_request_options options = {
+        .type = type,
+        .message = message,
+    };
+    if (type == AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        options.operation_name = aws_byte_cursor_from_c_str("GetObject");
+    }
+
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+    /* Binding a body callback is what makes this a callback-sink download, which is the only sink the
+     * range_start contract is about: a file sink never sees the value. */
+    if (validate_every_chunk) {
+        /* Check every chunk, not just the first, and check it against the range start this test wrote
+         * down rather than the one the implementation derived. */
+        results.validate_body_range_start_base = true;
+        results.body_range_start_base = expected_range_start;
+    }
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &options, &results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &options);
+    ASSERT_NOT_NULL(meta_request);
+
+    aws_s3_tester_wait_for_meta_request_finish(tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, results.finished_error_code);
+    ASSERT_INT_EQUALS(AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, results.finished_response_status);
+    ASSERT_TRUE(results.first_body_range_start_captured);
+
+    *out_first_range_start = results.first_body_range_start;
+    *out_chunk_count = results.body_chunk_count;
+    *out_received_body_size = results.received_body_size;
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(tester);
+
+    aws_s3_meta_request_test_results_clean_up(&results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    return 0;
+}
+
+/* aws_s3_meta_request_receive_body_callback_fn documents range_start as "the byte index of the object
+ * that this refers to", and says that for a request carrying a range header the first chunk's
+ * range_start matches the range header's range-start. This checks that both download implementations
+ * honour that for the same request.
+ *
+ * The auto-ranged GET does: it records the range start as each part's absolute object offset. The
+ * default implementation does not: it never assigns the request's range start, so the value stays 0
+ * and the callback is handed a cursor relative to the range instead of an offset into the object. */
+AWS_TEST_CASE(test_s3_get_object_range_body_callback_range_start, s_test_s3_get_object_range_body_callback_range_start)
+static int s_test_s3_get_object_range_body_callback_range_start(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* An initial range that starts partway into the object at an offset no part boundary lands on, and
+     * spans 1 MiB so that 256 KiB parts break it into several chunks. Both properties matter: a
+     * part-aligned start would let an off-by-a-part mapping still look right, and a range small enough
+     * to fit in one part would only ever exercise the first chunk. */
+    const uint64_t expected_range_start = 1048677;
+    const uint64_t expected_range_length = MB_TO_BYTES(1);
+    struct aws_byte_cursor range_header_value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=1048677-2097252");
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 256 * 1024,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* The auto-ranged GET, as a control: it establishes that the harness reads the value correctly and
+     * that the contract is satisfiable for this request. */
+    uint64_t auto_ranged_get_range_start = 0;
+    size_t auto_ranged_get_chunk_count = 0;
+    uint64_t auto_ranged_get_body_size = 0;
+    ASSERT_SUCCESS(s_first_body_range_start_for_type(
+        allocator,
+        &tester,
+        client,
+        AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        range_header_value,
+        expected_range_start,
+        true /*validate_every_chunk*/,
+        &auto_ranged_get_range_start,
+        &auto_ranged_get_chunk_count,
+        &auto_ranged_get_body_size));
+    ASSERT_UINT_EQUALS(expected_range_start, auto_ranged_get_range_start);
+    /* More than one chunk is what makes the per-chunk validation above mean anything, and the full
+     * range length is what proves the validation covered all of it rather than stopping early. */
+    ASSERT_TRUE(auto_ranged_get_chunk_count > 1);
+    ASSERT_UINT_EQUALS(expected_range_length, auto_ranged_get_body_size);
+
+    /* The same request through the default implementation. */
+    uint64_t default_range_start = 0;
+    size_t default_chunk_count = 0;
+    uint64_t default_body_size = 0;
+    /* Only the first chunk is checked here, so the failure reports the reported offset against the
+     * expected one directly instead of surfacing as a failed meta request from inside the callback. */
+    ASSERT_SUCCESS(s_first_body_range_start_for_type(
+        allocator,
+        &tester,
+        client,
+        AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        range_header_value,
+        expected_range_start,
+        false /*validate_every_chunk*/,
+        &default_range_start,
+        &default_chunk_count,
+        &default_body_size));
+    ASSERT_UINT_EQUALS(expected_range_length, default_body_size);
+    ASSERT_UINT_EQUALS(expected_range_start, default_range_start);
+
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
     return 0;
@@ -1872,7 +2241,7 @@ static int s_test_s3_get_object_file_path_direct_io_dev_null(struct aws_allocato
     ASSERT_TRUE(meta_request_test_results.did_validate);
     ASSERT_INT_EQUALS(AWS_SCA_CRC32, meta_request_test_results.validation_algorithm);
     /* /dev/null doesn't support O_DIRECT — verify fallback triggered (1 from init-time open failure) */
-    ASSERT_UINT_EQUALS(1, meta_request->recv_file_direct_io_fallback_count);
+    ASSERT_UINT_EQUALS(1, aws_atomic_load_int(&meta_request->recv_file_direct_io_fallback_count));
 
     aws_s3_meta_request_release(meta_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
@@ -1992,7 +2361,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_
 }
 
 /* O_DIRECT with WRITE_TO_POSITION at a page-aligned position should successfully use O_DIRECT.
- * On Linux: count == 0 (all writes go through O_DIRECT, no fallback). The base_position is
+ * On Linux: count == 0 (all writes go through O_DIRECT, no fallback). The base_offset is
  * applied to delivery write_offset. */
 AWS_TEST_CASE(
     test_s3_get_object_file_path_direct_io_write_to_position_aligned,
@@ -2238,7 +2607,7 @@ static int s_test_s3_get_object_file_path_direct_io_unaligned_last_part(struct a
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, get_results.finished_error_code);
     /* On Linux: 2 aligned parts go through O_DIRECT, 1 unaligned last part falls back. count == 1.
      * On non-Linux: first write triggers UNSUPPORTED_OPERATION fallback, count == 1. */
-    ASSERT_UINT_EQUALS(1, get_request->recv_file_direct_io_fallback_count);
+    ASSERT_UINT_EQUALS(1, aws_atomic_load_int(&get_request->recv_file_direct_io_fallback_count));
     aws_s3_meta_request_release(get_request);
     aws_s3_tester_wait_for_meta_request_shutdown(&tester);
 
@@ -5006,9 +5375,9 @@ static int s_test_s3_round_trip_multipart_get_fc_header(struct aws_allocator *al
  * parts for those parts to be recombined into that checksum. A per-meta-request part size gives each one
  * what it needs from a single client, and on a PUT it doubles as the multipart threshold.
  *
- * With validate_response_checksum set, the download discovers the object with a HEAD, which never carries
- * x-amz-mp-parts-count, so the whole-object checksum is taken at the meta request level (a composite
- * checksum is still rejected there, since its trailing "-N" makes the value the wrong length). Combinable
+ * With validate_response_checksum set, the download discovers the object with a HEAD, whose checksum
+ * describes the whole object, so it is taken at the meta request level (a composite checksum is still
+ * rejected there, since its trailing "-N" makes the value the wrong length). Combinable
  * algorithms then have each part digest its own body and fold the digests together when the meta request
  * finishes; the rest fall back to feeding the running sum from the delivery thread in object order. Looping
  * the whole priority list covers both branches.
@@ -5983,6 +6352,40 @@ static int s_check_metrics_helper(
     return AWS_OP_SUCCESS;
 }
 
+/* Same range checks as s_check_metrics_helper, but locates the GET_OBJECT metric by part number rather
+ * than by position in the list. succeed_metrics is appended as requests complete, and parallel writes
+ * let parts complete out of order, so a part's index is not its part number. */
+static int s_check_get_part_metrics_helper(
+    struct aws_s3_meta_request_test_results *test_results,
+    size_t expected_part_number,
+    size_t expected_range_start,
+    size_t expected_range_end) {
+
+    size_t num_metrics = aws_array_list_length(&test_results->synced_data.succeed_metrics);
+    for (size_t i = 0; i < num_metrics; ++i) {
+        struct aws_s3_request_metrics *metrics = NULL;
+        ASSERT_SUCCESS(aws_array_list_get_at(&test_results->synced_data.succeed_metrics, (void **)&metrics, i));
+
+        enum aws_s3_request_type request_type = AWS_S3_REQUEST_TYPE_UNKNOWN;
+        aws_s3_request_metrics_get_request_type(metrics, &request_type);
+        uint32_t part_number = 0;
+        aws_s3_request_metrics_get_part_number(metrics, &part_number);
+        if (request_type != AWS_S3_REQUEST_TYPE_GET_OBJECT || part_number != expected_part_number) {
+            continue;
+        }
+
+        uint64_t range_start = 0;
+        uint64_t range_end = 0;
+        aws_s3_request_metrics_get_part_range_start(metrics, &range_start);
+        aws_s3_request_metrics_get_part_range_end(metrics, &range_end);
+        ASSERT_UINT_EQUALS(expected_range_start, range_start);
+        ASSERT_UINT_EQUALS(expected_range_end, range_end);
+        return AWS_OP_SUCCESS;
+    }
+
+    FAIL("No succeeded GET_OBJECT metric for part %zu", expected_part_number);
+}
+
 AWS_TEST_CASE(
     test_s3_round_trip_dynamic_range_size_download_multipart,
     s_test_s3_round_trip_dynamic_range_size_download_multipart)
@@ -6070,12 +6473,10 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
-        /* Second request made should be get with range and range from 0 to stored part size -1. */
-        ASSERT_SUCCESS(
-            s_check_metrics_helper(&test_results, 1, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, aligned_part_size - 1));
+        /* Part 1 covers 0 to the stored part size - 1. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, aligned_part_size - 1));
         /* The last part will be ending with the total size of the object */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 2, AWS_S3_REQUEST_TYPE_GET_OBJECT, 2, aligned_part_size, object_size - 1));
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 2, aligned_part_size, object_size - 1));
 
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
@@ -6100,14 +6501,11 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
         ASSERT_UINT_EQUALS(3, aws_array_list_length(&test_results.synced_data.succeed_metrics));
-        /* First request made was Get object and the range should be 0 to default range - 1 */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
-        /* Second request made should be get with range and range from 0 to optimal part size. */
-        ASSERT_SUCCESS(s_check_metrics_helper(
+        /* Part 1 is the discovery range: 0 to the default range - 1. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
+        /* Part 2 picks up at the default range and runs one optimal part size further. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(
             &test_results,
-            1,
-            AWS_S3_REQUEST_TYPE_GET_OBJECT,
             2,
             (size_t)g_default_part_size_fallback,
             (size_t)g_default_part_size_fallback + aligned_part_size - 1));
@@ -6354,9 +6752,8 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
         /* First request made was head object and the range should be 0 */
         ASSERT_SUCCESS(s_check_metrics_helper(&test_results, 0, AWS_S3_REQUEST_TYPE_HEAD_OBJECT, 0, 0, 0));
-        /* Second request made should be get with range and range from 0 to optimal part size. */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 1, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, MB_TO_BYTES(stored_part_size_mb) - 1));
+        /* Part 1 covers 0 to the optimal part size - 1. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, MB_TO_BYTES(stored_part_size_mb) - 1));
 
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
@@ -6381,17 +6778,11 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
         ASSERT_FALSE(test_results.did_validate);
         /* The tests has been done, we are safe to touch the synced data from test results. */
         ASSERT_UINT_EQUALS(2, aws_array_list_length(&test_results.synced_data.succeed_metrics));
-        /* First request made was Get object and the range should be 0 to default range - 1 */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results, 0, AWS_S3_REQUEST_TYPE_GET_OBJECT, 1, 0, (size_t)g_default_part_size_fallback - 1));
-        /* Second request made should be get with range and range from 0 to optimal part size. */
-        ASSERT_SUCCESS(s_check_metrics_helper(
-            &test_results,
-            1,
-            AWS_S3_REQUEST_TYPE_GET_OBJECT,
-            2,
-            (size_t)g_default_part_size_fallback,
-            MB_TO_BYTES(stored_part_size_mb) - 1));
+        /* Part 1 is the discovery range: 0 to the default range - 1. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(&test_results, 1, 0, (size_t)g_default_part_size_fallback - 1));
+        /* Part 2 picks up at the default range and runs to the optimal part size. */
+        ASSERT_SUCCESS(s_check_get_part_metrics_helper(
+            &test_results, 2, (size_t)g_default_part_size_fallback, MB_TO_BYTES(stored_part_size_mb) - 1));
         aws_s3_meta_request_test_results_clean_up(&test_results);
 
         /*** GET FILE WITHOUT FORCING -- old behavior should be changed ***/
@@ -7324,6 +7715,110 @@ static int s_test_s3_put_fail_object_invalid_send_filepath(struct aws_allocator 
     return 0;
 }
 
+/* Verify the max_part_size gate in aws_s3_meta_request_auto_ranged_put_new.
+ *
+ * With a 256 MiB memory limit, the client derives max_part_size = min(mem_limit / 2, 5 GiB)
+ * = 128 MiB. A meta-request-level part size at or below that is accepted; anything above it is
+ * rejected with AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, because each request would need to
+ * reserve a full part-sized buffer from a pool that only has 128 MiB usable.
+ *
+ * The rejection must be a clean error from aws_s3_client_make_meta_request. Before this gate
+ * existed the oversized reservation reached the buffer pool and tripped a fatal assert.
+ *
+ * Note the body here is an in-memory stream, so streaming is off and the part size is the
+ * reservation size. The file-streaming exemption is covered by the mock server tests.
+ */
+AWS_TEST_CASE(test_s3_put_object_part_size_exceeds_max_part_size, s_test_s3_put_object_part_size_exceeds_max_part_size)
+static int s_test_s3_put_object_part_size_exceeds_max_part_size(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .memory_limit_in_bytes = MB_TO_BYTES(256),
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* max_part_size is derived as half the memory limit. */
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(128), client->max_part_size);
+
+    struct aws_byte_cursor host_name = aws_byte_cursor_from_c_str("dummy_host");
+    struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
+
+    /* Content length must exceed the part size so this stays a multipart upload rather than
+     * dropping to a single-part default meta request, which does not run this gate. */
+    const uint64_t content_length = MB_TO_BYTES((uint64_t)512);
+
+    /* One byte over the limit is rejected. */
+    {
+        struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+            allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
+        ASSERT_NOT_NULL(message);
+        struct aws_input_stream *body_stream = aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        aws_http_message_set_body_stream(message, body_stream);
+
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .message = message,
+            .part_size = MB_TO_BYTES(128) + 1,
+        };
+        ASSERT_NULL(aws_s3_client_make_meta_request(client, &meta_request_options));
+        ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, aws_last_error());
+
+        aws_input_stream_release(body_stream);
+        aws_http_message_release(message);
+    }
+
+    /* A part size well over the limit is rejected the same way. */
+    {
+        struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+            allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
+        ASSERT_NOT_NULL(message);
+        struct aws_input_stream *body_stream = aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        aws_http_message_set_body_stream(message, body_stream);
+
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .message = message,
+            .part_size = MB_TO_BYTES(256),
+        };
+        ASSERT_NULL(aws_s3_client_make_meta_request(client, &meta_request_options));
+        ASSERT_INT_EQUALS(AWS_ERROR_S3_PART_SIZE_EXCEEDS_MEMORY_LIMIT, aws_last_error());
+
+        aws_input_stream_release(body_stream);
+        aws_http_message_release(message);
+    }
+
+    /* Exactly at the limit is accepted: the gate is >, not >=. */
+    {
+        struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+            allocator, &host_name, g_test_body_content_type, object_key, content_length, 0 /*flags*/);
+        ASSERT_NOT_NULL(message);
+        struct aws_input_stream *body_stream = aws_s3_test_input_stream_new(allocator, (size_t)content_length);
+        aws_http_message_set_body_stream(message, body_stream);
+
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .message = message,
+            .part_size = MB_TO_BYTES(128),
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(client, &meta_request_options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(MB_TO_BYTES(128), meta_request->part_size);
+
+        aws_s3_meta_request_cancel(meta_request);
+        aws_s3_meta_request_release(meta_request);
+        aws_input_stream_release(body_stream);
+        aws_http_message_release(message);
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 static int s_assert_make_meta_request_fails(
     struct aws_allocator *allocator,
     struct aws_s3_meta_request_options *options,
@@ -7696,11 +8191,9 @@ static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator,
 
     struct aws_s3_client_config client_config = {
         .part_size = 64 * 1024,
-        .max_part_size = 64 * 1024,
     };
 
     ASSERT_TRUE(client_config.part_size < g_s3_min_upload_part_size);
-    ASSERT_TRUE(client_config.max_part_size < g_s3_min_upload_part_size);
 
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
@@ -7744,6 +8237,15 @@ static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
     const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
 
+    /* The platform token is the detected EC2 instance type, or "unknown" when it could not be determined.
+     * Creating a client warms the loader's instance-type cache (aws_s3_client_new consults the platform info
+     * to size its memory pool), so on EC2 the header carries a real instance type. Resolve it the same way
+     * aws_s3_add_user_agent_header does so this expectation holds both on and off EC2. */
+    struct aws_byte_cursor platform_cursor = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
+    if (platform_cursor.len == 0) {
+        platform_cursor = g_user_agent_header_unknown;
+    }
+
     ASSERT_SUCCESS(aws_byte_buf_init(dest, allocator, 32));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_product_name));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
@@ -7751,7 +8253,7 @@ static int s_get_expected_user_agent(struct aws_allocator *allocator, struct aws
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &single_space));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_platform));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &forward_slash));
-    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &g_user_agent_header_unknown));
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &platform_cursor));
     return AWS_OP_SUCCESS;
 }
 
@@ -7776,7 +8278,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
         struct aws_http_message *message = aws_http_message_new_request(allocator);
 
-        aws_s3_add_user_agent_header(allocator, message);
+        aws_s3_add_user_agent_header(allocator, message, 0);
 
         struct aws_http_headers *headers = aws_http_message_get_headers(message);
 
@@ -7806,7 +8308,7 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
 
         ASSERT_SUCCESS(aws_http_headers_add(headers, g_user_agent_header_name, dummy_agent_header_value));
 
-        aws_s3_add_user_agent_header(allocator, message);
+        aws_s3_add_user_agent_header(allocator, message, 0);
 
         {
             struct aws_byte_cursor user_agent_value;
@@ -7824,6 +8326,272 @@ static int s_test_add_user_agent_header(struct aws_allocator *allocator, void *c
     }
 
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that feature IDs flags produce the correct m/ section in the User-Agent header. */
+AWS_TEST_CASE(test_add_user_agent_header_feature_ids, s_test_add_user_agent_header_feature_ids)
+static int s_test_add_user_agent_header_feature_ids(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Test with multiple flags set */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        uint32_t metrics = AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE | AWS_S3_FEATURE_ID_ON_EC2 | AWS_S3_FEATURE_ID_FILE_PATH;
+        aws_s3_add_user_agent_header(allocator, message, metrics);
+
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+        /* The header should end with " m/AX,Aa,Ab" */
+        struct aws_byte_cursor expected_metrics = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/AX,Aa,Ab");
+        ASSERT_TRUE(user_agent_value.len >= expected_metrics.len);
+        struct aws_byte_cursor tail = {
+            .ptr = user_agent_value.ptr + user_agent_value.len - expected_metrics.len,
+            .len = expected_metrics.len,
+        };
+        ASSERT_TRUE(aws_byte_cursor_eq(&tail, &expected_metrics));
+
+        aws_http_message_release(message);
+    }
+
+    /* Test with no flags: no m/ section should appear */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        aws_s3_add_user_agent_header(allocator, message, 0);
+
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+        /* Should NOT contain " m/" */
+        struct aws_byte_cursor m_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
+        ASSERT_FALSE(aws_byte_cursor_find_exact(&user_agent_value, &m_prefix, NULL) == AWS_OP_SUCCESS);
+
+        aws_http_message_release(message);
+    }
+
+    /* Test with single flag: CUSTOM_PART_SIZE only */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+
+        aws_s3_add_user_agent_header(allocator, message, AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE);
+
+        struct aws_byte_cursor user_agent_value;
+        AWS_ZERO_STRUCT(user_agent_value);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value));
+
+        /* Should end with " m/AX" (no comma, single metric) */
+        struct aws_byte_cursor expected_metrics = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/AX");
+        ASSERT_TRUE(user_agent_value.len >= expected_metrics.len);
+        struct aws_byte_cursor tail = {
+            .ptr = user_agent_value.ptr + user_agent_value.len - expected_metrics.len,
+            .len = expected_metrics.len,
+        };
+        ASSERT_TRUE(aws_byte_cursor_eq(&tail, &expected_metrics));
+
+        aws_http_message_release(message);
+    }
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Helper: create a client from a partially filled config and return its feature_ids with the
+ * environment-dependent ON_EC2 bit masked off (it depends on the host running the test).
+ * Owns a tester per call because aws_s3_tester_bind_client() may only be invoked once per tester. */
+static int s_get_client_feature_ids(
+    struct aws_allocator *allocator,
+    struct aws_s3_client_config *client_config,
+    uint32_t *out_metrics) {
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* This test never sends a request, so TLS is irrelevant. AWS_MR_TLS_ENABLED is the zero value, and
+     * under BYO_CRYPTO aws_s3_client_new rejects TLS-enabled configs without tls_connection_options. */
+    client_config->tls_mode = AWS_MR_TLS_DISABLED;
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, client_config);
+    ASSERT_NOT_NULL(client);
+
+    *out_metrics = client->feature_ids & ~(uint32_t)AWS_S3_FEATURE_ID_ON_EC2;
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that aws_s3_client_new derives the client-level feature IDs flags correctly.
+ * The CUSTOM_* flags must fire only when the caller set a value AND that value differs from
+ * the default the client would have chosen on its own. */
+AWS_TEST_CASE(test_s3_client_feature_ids, s_test_s3_client_feature_ids)
+static int s_test_s3_client_feature_ids(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t metrics = 0;
+
+    /* Nothing configured: no flags. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(0, metrics);
+    }
+
+    /* Explicitly passing the defaults is not "custom": no CUSTOM_* flags. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.part_size = (size_t)g_default_part_size_fallback;
+        config.throughput_target_gbps = g_default_throughput_target_gbps;
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(0, metrics);
+    }
+
+    /* Non-default part size. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.part_size = MB_TO_BYTES(16);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, metrics);
+    }
+
+    /* Non-default throughput target. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, metrics);
+    }
+
+    /* Explicit memory limit that differs from the tier-table default for the given throughput.
+     * 100 Gbps maps to 16 GiB (64-bit) / 2 GiB (32-bit); 512 MiB differs from both. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        config.memory_limit_in_bytes = MB_TO_BYTES(512);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT | AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, metrics);
+    }
+
+#if SIZE_BITS == 64
+    /* Explicit memory limit equal to the tier-table default is not "custom". */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        config.memory_limit_in_bytes = GB_TO_BYTES(16);
+        ASSERT_SUCCESS(s_get_client_feature_ids(allocator, &config, &metrics));
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT, metrics);
+    }
+#endif
+
+    /* Memory limit supplied via environment variable counts as configured too. */
+    {
+        const struct aws_string *env_name = aws_string_new_from_c_str(allocator, "AWS_CRT_S3_MEMORY_LIMIT_IN_MB");
+        const struct aws_string *env_value = aws_string_new_from_c_str(allocator, "512");
+        ASSERT_SUCCESS(aws_set_environment_value(env_name, env_value));
+
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.throughput_target_gbps = 100.0;
+        int result = s_get_client_feature_ids(allocator, &config, &metrics);
+
+        ASSERT_SUCCESS(aws_unset_environment_value(env_name));
+        aws_string_destroy((struct aws_string *)env_name);
+        aws_string_destroy((struct aws_string *)env_value);
+
+        ASSERT_SUCCESS(result);
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_THROUGHPUT | AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, metrics);
+    }
+
+    return 0;
+}
+
+/* Test that aws_s3_meta_request_init_base derives per-request feature IDs from the meta request
+ * options: a per-request part_size override and a file-based transfer (recv_filepath). send_filepath
+ * needs a client to build the parallel stream, so the upload direction is covered by the network test
+ * test_s3_auto_ranged_put_file_sending_user_agent instead. */
+AWS_TEST_CASE(test_s3_meta_request_feature_ids, s_test_s3_meta_request_feature_ids)
+static int s_test_s3_meta_request_feature_ids(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* No per-request options: nothing set (no client attached, so no client-level flags either). */
+    {
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(0, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+    }
+
+    /* Per-request part_size equal to the default is not "custom". */
+    {
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .part_size = g_default_part_size_fallback,
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(0, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+    }
+
+    /* Per-request part_size override that differs from the default. */
+    {
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .part_size = MB_TO_BYTES(16),
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+    }
+
+    /* Download to a file path. */
+    {
+        struct aws_string *filepath =
+            aws_s3_tester_create_file(allocator, aws_byte_cursor_from_c_str("feature_ids_recv"), NULL);
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .recv_filepath = aws_byte_cursor_from_string(filepath),
+        };
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(AWS_S3_FEATURE_ID_FILE_PATH, meta_request->feature_ids);
+        aws_s3_meta_request_release(meta_request);
+        aws_file_delete(filepath);
+        aws_string_destroy(filepath);
+    }
+
     aws_s3_tester_clean_up(&tester);
 
     return 0;
@@ -7853,7 +8621,43 @@ static void s_s3_test_user_agent_meta_request_finished_request(
     AWS_ZERO_STRUCT(user_agent_value);
 
     AWS_FATAL_ASSERT(aws_http_headers_get(headers, g_user_agent_header_name, &user_agent_value) == AWS_OP_SUCCESS);
-    AWS_FATAL_ASSERT(aws_byte_cursor_eq(&user_agent_value, &expected_user_agent_value));
+
+    /* The product/platform portion must come first, exactly as before feature IDs were added. */
+    AWS_FATAL_ASSERT(aws_byte_cursor_starts_with(&user_agent_value, &expected_user_agent_value));
+
+    /* Whatever follows is the optional feature IDs section: either nothing (no flags set on
+     * this host/config) or " m/<id>,<id>,...". Which flags appear depends on the host (Aa is set
+     * only on EC2), so parse the section as tokens rather than matching a fixed string. */
+    struct aws_byte_cursor metrics_section = user_agent_value;
+    aws_byte_cursor_advance(&metrics_section, expected_user_agent_value.len);
+
+    bool has_file_path_metric = false;
+    if (metrics_section.len > 0) {
+        const struct aws_byte_cursor metrics_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
+        AWS_FATAL_ASSERT(aws_byte_cursor_starts_with(&metrics_section, &metrics_prefix));
+        aws_byte_cursor_advance(&metrics_section, metrics_prefix.len);
+        AWS_FATAL_ASSERT(metrics_section.len > 0); /* " m/" with no IDs is malformed */
+
+        const struct aws_byte_cursor file_path_id = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Ab");
+        struct aws_byte_cursor token;
+        AWS_ZERO_STRUCT(token);
+        while (aws_byte_cursor_next_split(&metrics_section, ',', &token)) {
+            AWS_FATAL_ASSERT(token.len > 0); /* no empty IDs, e.g. "m/AX,,AY" or trailing comma */
+            if (aws_byte_cursor_eq(&token, &file_path_id)) {
+                has_file_path_metric = true;
+            }
+        }
+    }
+
+    /* Ab (file path) must be present if and only if the meta request was given send_filepath or
+     * recv_filepath. Cross-check against the resolved field (recv side) and the FILE_PATH flag the
+     * meta request derived from its options at init (both sides). */
+    bool expect_file_path_metric = (meta_request->feature_ids & AWS_S3_FEATURE_ID_FILE_PATH) != 0;
+    AWS_FATAL_ASSERT(has_file_path_metric == expect_file_path_metric);
+    if (meta_request->recv_filepath != NULL || meta_request->request_body_parallel_stream != NULL) {
+        AWS_FATAL_ASSERT(expect_file_path_metric);
+    }
+
     aws_byte_buf_clean_up(&expected_user_agent_value_buf);
 
     struct aws_s3_meta_request_vtable *original_meta_request_vtable =
@@ -7927,6 +8731,40 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
     return 0;
 }
 
+/* Same as the get test above, but downloads via recv_filepath so the request must carry the
+ * Ab (file path) feature ID. The shared finished_request callback asserts on it. */
+AWS_TEST_CASE(test_s3_auto_ranged_get_file_sending_user_agent, s_test_s3_auto_ranged_get_file_sending_user_agent)
+static int s_test_s3_auto_ranged_get_file_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .get_options =
+                {
+                    .object_path = g_pre_existing_object_1MB,
+                    .file_on_disk = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_auto_ranged_put_sending_user_agent, s_test_s3_auto_ranged_put_sending_user_agent)
 static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -7946,6 +8784,40 @@ static int s_test_s3_auto_ranged_put_sending_user_agent(struct aws_allocator *al
             .put_options =
                 {
                     .ensure_multipart = true,
+                },
+        };
+
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+    }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Same as the put test above, but uploads via send_filepath so the request must carry the
+ * Ab (file path) feature ID. The shared finished_request callback asserts on it. */
+AWS_TEST_CASE(test_s3_auto_ranged_put_file_sending_user_agent, s_test_s3_auto_ranged_put_file_sending_user_agent)
+static int s_test_s3_auto_ranged_put_file_sending_user_agent(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(s_s3_test_sending_user_agent_create_client(&tester, &client));
+
+    {
+        struct aws_s3_tester_meta_request_options options = {
+            .allocator = allocator,
+            .client = client,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .put_options =
+                {
+                    .ensure_multipart = true,
+                    .file_on_disk = true,
                 },
         };
 
