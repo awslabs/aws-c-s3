@@ -2934,6 +2934,38 @@ static int s_deliver_body_to_sink(
     return AWS_OP_SUCCESS;
 }
 
+/* A byte whose lowest `count` bits are 1 and the rest 0, for a `count` of 0 through 8.
+ *
+ * Take a count of 3. Shifting a 1 up by 3 gives 00001000 -- one set bit with nothing but zeros beneath
+ * it. Subtracting 1 from that finds nothing to borrow from in those low bits, so the borrow cascades:
+ * bit 3 clears and every bit under it flips to 1, leaving 00000111. Which is the first 3 bits are masked. */
+static uint8_t s_byte_with_lowest_bits_set(uint32_t count) {
+    AWS_PRECONDITION(count <= 8);
+    return (uint8_t)((1u << count) - 1);
+}
+
+/* Part numbers are 1-based and bits are 0-based, so part N is bit N-1 of the mask. Dividing that bit
+ * index by 8 splits it in two: the quotient says which byte holds the bit, the remainder says where it
+ * sits inside that byte. Each helper below is one half of that split, and they are the only places that
+ * spell it out.
+ *
+ * Part 11, say. Its bit index is 10, and 10 / 8 is 1 with a remainder of 2, so part 11 is bit 2 of
+ * byte 1. */
+static uint32_t s_byte_index_holding_part(uint32_t part_number) {
+    AWS_PRECONDITION(part_number >= 1);
+    return (part_number - 1) / 8;
+}
+
+/* The remainder from above, turned into a byte with only that bit set -- position 2 becomes 00000100.
+ * Returning the bit already shifted into place is what lets callers test it with & and set it with |=
+ * instead of shifting at each use. The shift runs on 1u rather than on a byte because anything narrower
+ * promotes to int before shifting anyway, and a position of at most 7 leaves a result of at most
+ * 10000000, so narrowing back to a byte cannot drop the bit. */
+static uint8_t s_bit_mask_for_part(uint32_t part_number) {
+    AWS_PRECONDITION(part_number >= 1);
+    return (uint8_t)(1u << ((part_number - 1) % 8));
+}
+
 /* Mark part_number as delivered in the validation mask. Returns true on success, false if something is
  * wrong (out of range or duplicate), in which case it logs the error. The caller should fail the meta
  * request on false rather than aborting, since a double-delivery is a bug but not an unrecoverable one. */
@@ -2953,8 +2985,7 @@ static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint3
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    const uint32_t bit_index = part_number - 1;
-    const uint32_t byte_index = bit_index / 8;
+    const uint32_t byte_index = s_byte_index_holding_part(part_number);
     if (byte_index >= meta_request->synced_data.parts_delivered_mask_length) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
@@ -2967,10 +2998,9 @@ static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint3
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    uint8_t *byte = &meta_request->synced_data.parts_delivered_mask[byte_index];
-    const uint8_t bit = (uint8_t)(1u << (bit_index % 8));
-
-    if (*byte & bit) {
+    const uint8_t part_bit_mask = s_bit_mask_for_part(part_number);
+    const bool already_delivered = (meta_request->synced_data.parts_delivered_mask[byte_index] & part_bit_mask) != 0;
+    if (already_delivered) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Part %" PRIu32 " was delivered more than once.",
@@ -2979,7 +3009,7 @@ static int s_mark_part_delivered(struct aws_s3_meta_request *meta_request, uint3
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    *byte |= bit;
+    meta_request->synced_data.parts_delivered_mask[byte_index] |= part_bit_mask;
     return AWS_OP_SUCCESS;
 }
 
@@ -3017,13 +3047,15 @@ int aws_s3_meta_request_validate_parts_delivered_synced(struct aws_s3_meta_reque
          * multiple of 8 leaves a partial byte at the end whose high bits stand for no part at all, so
          * only its low bits are required. That byte exists only when there is a remainder, which is
          * exactly when `num_bytes` reaches past `num_full_bytes`. */
-        const uint8_t required = (byte < num_full_bytes) ? 0xFF : (uint8_t)((1u << (num_parts % 8)) - 1);
+        const bool is_partial_last_byte = byte >= num_full_bytes;
+        const uint8_t required = is_partial_last_byte ? s_byte_with_lowest_bits_set(num_parts % 8) : 0xFF;
         if ((mask[byte] & required) == required) {
             continue;
         }
 
         /* Name the first part that is missing rather than the byte it sits in. */
-        const uint32_t missing_part = byte * 8 + (uint32_t)aws_ctz_u32(required & (uint32_t)~mask[byte]) + 1;
+        const uint8_t missing_bits = (uint8_t)(required & ~mask[byte]);
+        const uint32_t missing_part = byte * 8 + (uint32_t)aws_ctz_u32(missing_bits) + 1;
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Download is finishing successfully but part %" PRIu32 " of %" PRIu32 " was never delivered.",
