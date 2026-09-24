@@ -341,7 +341,7 @@ enum aws_s3_checksum_validation_mode {
      *
      * The client does not do any additional setup to validate full-object checksum and hence does not attempt
      * any type of discovery to get full-object checksum. Setting expected checksum with this mode will result in error.
-     * Note: This will reduce durabulity guarantees whenever the client splits the request into several parallel gets 
+     * Note: This will reduce durabulity guarantees whenever the client splits the request into several parallel gets
      * (as full object checksum is not longer verified). The exception to that is get meta requests that only result
      * in one request to server, which from practical standpoint is equivalent to full-object checksum check.
      *
