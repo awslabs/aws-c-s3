@@ -8083,7 +8083,8 @@ static int s_test_s3_expected_checksum_invalid_options(struct aws_allocator *all
         ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
     }
 
-    /* Only a GET has downloaded data for the value to cover. */
+    /* Only a download has object data for the value to cover, which a default meta request running some other
+     * operation does not return. */
     {
         struct aws_s3_checksum_config checksum_config = {
             .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
@@ -8091,7 +8092,21 @@ static int s_test_s3_expected_checksum_invalid_options(struct aws_allocator *all
         };
         struct aws_s3_meta_request_options meta_request_options = {
             .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-            .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            .operation_name = aws_byte_cursor_from_c_str("HeadObject"),
+            .message = message,
+            .checksum_config = &checksum_config,
+        };
+        ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
+    }
+
+    /* Nor does a default meta request that names no operation at all. */
+    {
+        struct aws_s3_checksum_config checksum_config = {
+            .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+            .expected_checksum_algorithm = AWS_SCA_CRC32,
+        };
+        struct aws_s3_meta_request_options meta_request_options = {
+            .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
             .message = message,
             .checksum_config = &checksum_config,
         };

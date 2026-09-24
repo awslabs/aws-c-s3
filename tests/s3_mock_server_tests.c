@@ -3485,6 +3485,94 @@ TEST_CASE(get_object_expected_checksum_takes_precedence_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* A download the caller asked not to be split is a default meta request, and the checksum it supplies covers the
+ * response body the single request returns. /get_object_default_no_checksum is a 64 KiB object of repeated 'a'
+ * answered whole, with no checksum header of any kind, so the caller's value is the only thing validation runs
+ * against. */
+static int s_test_default_get_expected_checksum(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor object_path,
+    struct aws_byte_cursor expected_checksum,
+    int expected_error_code) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .client = client,
+        .expected_checksum = expected_checksum,
+        .expected_checksum_algorithm = AWS_SCA_CRC32,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            },
+        .mock_server = true,
+        .validate_type = expected_error_code == AWS_ERROR_SUCCESS ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS
+                                                                  : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(expected_error_code, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+    ASSERT_UINT_EQUALS(64 * 1024, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* The CRC32 of the 64 KiB the request returns. */
+TEST_CASE(default_get_expected_checksum_mock_server) {
+    (void)ctx;
+    return s_test_default_get_expected_checksum(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_default_no_checksum"),
+        aws_byte_cursor_from_c_str("wyCR/w=="),
+        AWS_ERROR_SUCCESS);
+}
+
+/* The CRC32 of 128 KiB of 'a', offered as the checksum of the 64 KiB that came back. */
+TEST_CASE(default_get_expected_checksum_mismatch_mock_server) {
+    (void)ctx;
+    return s_test_default_get_expected_checksum(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_default_no_checksum"),
+        aws_byte_cursor_from_c_str("ypdRMA=="),
+        AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+}
+
+/* The caller's value decides the outcome even where the response reports a checksum of its own:
+ * /get_object_checksum_mp_parts_count answers with the correct CRC32 of its 64 KiB, so the response is validated
+ * against its own header and passes, and against the caller's wrong value and does not. */
+TEST_CASE(default_get_expected_checksum_takes_precedence_mock_server) {
+    (void)ctx;
+    return s_test_default_get_expected_checksum(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_mp_parts_count"),
+        aws_byte_cursor_from_c_str("ypdRMA=="),
+        AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+}
+
 /* response_checksum_validation_mode picks which checksums a download is checked against. The downloads below use the
  * same objects as the tests above, so what changes with the mode is visible in the result: whether the whole download
  * was validated against a single checksum on top of each part being validated against its own. */

@@ -208,11 +208,21 @@ static int s_meta_request_init_expected_checksum(
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
-    if (options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+    /* Only a download returns object data for the value to describe. A GetObject issued as a default meta request
+     * is one too: the client itself routes a GET carrying a partNumber down that path, and a caller can ask for a
+     * download it does not want split by naming the operation directly. Either way the whole response body is the
+     * bytes the value covers, arriving through the same delivery loop that feeds the running sum. */
+    bool downloads_object_data =
+        options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
+        (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
+         aws_byte_cursor_eq_c_str_ignore_case(
+             &options->operation_name, aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_GET_OBJECT)));
+    if (!downloads_object_data) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Cannot create meta request; expected_checksum is only supported for "
-            "AWS_S3_META_REQUEST_TYPE_GET_OBJECT.",
+            "AWS_S3_META_REQUEST_TYPE_GET_OBJECT, or AWS_S3_META_REQUEST_TYPE_DEFAULT with operation name "
+            "GetObject.",
             (void *)meta_request);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }

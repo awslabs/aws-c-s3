@@ -917,9 +917,11 @@ struct aws_s3_checksum_config {
      *
      * `expected_checksum_algorithm` must be set to the algorithm of this value.
      *
-     * NOTE: Only applies to AWS_S3_META_REQUEST_TYPE_GET_OBJECT. Setting it on any other type
-     * raises AWS_ERROR_INVALID_ARGUMENT, as does setting it together with
-     * `response_checksum_validation_mode` AWS_SCVM_PART_ONLY, which asks for the opposite.
+     * NOTE: Only applies to downloads: AWS_S3_META_REQUEST_TYPE_GET_OBJECT, or
+     * AWS_S3_META_REQUEST_TYPE_DEFAULT whose `operation_name` is "GetObject". Setting it on
+     * anything else raises AWS_ERROR_INVALID_ARGUMENT, since nothing else returns object data for
+     * the value to cover, as does setting it together with `response_checksum_validation_mode`
+     * AWS_SCVM_PART_ONLY, which asks for the opposite.
      */
     struct aws_byte_cursor expected_checksum;
 
