@@ -3625,26 +3625,28 @@ static int s_test_get_object_checksum_validation_mode(
 }
 
 /* Every part response of this object carries the CRC32 of its own body and nothing describes the whole object, so
- * part-only validation is all these headers can support, and it still reports the download as validated. */
-TEST_CASE(get_object_checksum_validation_part_only_mock_server) {
+ * validating each response against its own checksum is all these headers can support, and it still reports the
+ * download as validated. */
+TEST_CASE(get_object_checksum_validation_request_only_mock_server) {
     (void)ctx;
     return s_test_get_object_checksum_validation_mode(
         allocator,
         aws_byte_cursor_from_c_str("/get_object_checksum_per_part_header"),
-        AWS_SCVM_PART_ONLY,
+        AWS_SCVM_REQUEST_ONLY,
         true /*expected_did_validate*/);
 }
 
 /* Here the object's CRC32 is only advertised on the HEAD response and the part responses carry no checksum of their
- * own, so validation is only possible by combining the parts against the discovered value. Part-only validation
- * neither makes that HEAD request nor uses its checksum, leaving nothing to validate: the same download that
- * multipart_download_checksum_combine_mock_server reports as validated finishes unvalidated here. */
-TEST_CASE(get_object_checksum_validation_part_only_skips_whole_object_mock_server) {
+ * own, so validation is only possible by combining the parts against the discovered value -- which spans more than
+ * one response. AWS_SCVM_REQUEST_ONLY neither makes that HEAD request nor uses its checksum, leaving nothing to
+ * validate: the same download that multipart_download_checksum_combine_mock_server reports as validated finishes
+ * unvalidated here. */
+TEST_CASE(get_object_checksum_validation_request_only_skips_whole_object_mock_server) {
     (void)ctx;
     return s_test_get_object_checksum_validation_mode(
         allocator,
         aws_byte_cursor_from_c_str("/get_object_checksum_combine"),
-        AWS_SCVM_PART_ONLY,
+        AWS_SCVM_REQUEST_ONLY,
         false /*expected_did_validate*/);
 }
 

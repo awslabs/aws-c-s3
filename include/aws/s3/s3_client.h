@@ -335,19 +335,23 @@ enum aws_s3_checksum_validation_mode {
     AWS_SCVM_DEFAULT = 0,
 
     /**
-     * Validate each part response against the checksum that response reports, and nothing else.
+     * Validate each response the client receives against the checksum that same response reports, and
+     * nothing else. A download split into parts validates each part response on its own, and nothing
+     * spanning more than one of them is ever checked.
      *
-     * The client never looks for a checksum covering the whole download, so it does not make the HeadObject
-     * request it would otherwise make to learn one, and `expected_checksum` cannot be used with this mode
-     * (setting both raises AWS_ERROR_INVALID_ARGUMENT).
+     * The client does not do any additional setup to validate full-object checksum and hence does not attempt
+     * any type of discovery to get full-object checksum. Setting expected checksum with this mode will result in error.
+     * Note: This will reduce durabulity guarantees whenever the client splits the request into several parallel gets 
+     * (as full object checksum is not longer verified). The exception to that is get meta requests that only result
+     * in one request to server, which from practical standpoint is equivalent to full-object checksum check.
      *
-     * A part response the service reports no checksum for is not validated, so did_validate may end up false.
+     * A response the service reports no checksum for is not validated, so did_validate may end up false.
      */
-    AWS_SCVM_PART_ONLY,
+    AWS_SCVM_REQUEST_ONLY,
 
     /**
-     * Validate the whole download against a single checksum covering it, on top of validating each part
-     * response against the checksum that response reports.
+     * Validate the whole download against a single checksum covering it, on top of validating each response
+     * against the checksum that same response reports.
      *
      * The client uses `expected_checksum` if given, and otherwise discovers a checksum from the service
      * (which may cost a HeadObject request). This is best effort: when the service has no checksum covering
@@ -921,7 +925,7 @@ struct aws_s3_checksum_config {
      * AWS_S3_META_REQUEST_TYPE_DEFAULT whose `operation_name` is "GetObject". Setting it on
      * anything else raises AWS_ERROR_INVALID_ARGUMENT, since nothing else returns object data for
      * the value to cover, as does setting it together with `response_checksum_validation_mode`
-     * AWS_SCVM_PART_ONLY, which asks for the opposite.
+     * AWS_SCVM_REQUEST_ONLY, which asks for the opposite.
      */
     struct aws_byte_cursor expected_checksum;
 

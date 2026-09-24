@@ -151,8 +151,9 @@ static void s_s3_meta_request_auto_ranged_get_destroy(struct aws_s3_meta_request
 
 /*
  * Whether the download should be validated against a single checksum covering all of it, on top of validating each
- * part response against the checksum that response reports. A caller who only wants the part checksums
- * (AWS_SCVM_PART_ONLY) also saves the HeadObject request the client makes to learn a whole-object one.
+ * part response against the checksum that response reports. A caller who only wants each response checked against
+ * its own checksum (AWS_SCVM_REQUEST_ONLY) also saves the HeadObject request the client makes to learn a
+ * whole-object one.
  */
 static bool s_should_validate_whole_download(const struct aws_s3_meta_request *meta_request) {
     if (!meta_request->checksum_config.validate_response_checksum) {

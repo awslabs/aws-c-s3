@@ -8113,13 +8113,13 @@ static int s_test_s3_expected_checksum_invalid_options(struct aws_allocator *all
         ASSERT_SUCCESS(s_assert_make_meta_request_fails(allocator, &meta_request_options, AWS_ERROR_INVALID_ARGUMENT));
     }
 
-    /* AWS_SCVM_PART_ONLY asks for the whole download not to be validated, which is the opposite of supplying a
-     * checksum that covers it. */
+    /* AWS_SCVM_REQUEST_ONLY asks for nothing spanning more than one response to be validated, which is the
+     * opposite of supplying a checksum that covers the whole download. */
     {
         struct aws_s3_checksum_config checksum_config = {
             .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
             .expected_checksum_algorithm = AWS_SCA_CRC32,
-            .response_checksum_validation_mode = AWS_SCVM_PART_ONLY,
+            .response_checksum_validation_mode = AWS_SCVM_REQUEST_ONLY,
         };
         struct aws_s3_meta_request_options meta_request_options = {
             .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,

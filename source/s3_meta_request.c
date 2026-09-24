@@ -227,12 +227,13 @@ static int s_meta_request_init_expected_checksum(
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
 
-    /* The value covers the whole download, and AWS_SCVM_PART_ONLY asks for the whole download not to be validated. */
-    if (options->checksum_config->response_checksum_validation_mode == AWS_SCVM_PART_ONLY) {
+    /* The value covers the whole download, which is more than any one response the client receives, and
+     * AWS_SCVM_REQUEST_ONLY asks for nothing spanning more than one response to be validated. */
+    if (options->checksum_config->response_checksum_validation_mode == AWS_SCVM_REQUEST_ONLY) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Cannot create meta request; expected_checksum cannot be used with "
-            "response_checksum_validation_mode AWS_SCVM_PART_ONLY.",
+            "response_checksum_validation_mode AWS_SCVM_REQUEST_ONLY.",
             (void *)meta_request);
         return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
     }
