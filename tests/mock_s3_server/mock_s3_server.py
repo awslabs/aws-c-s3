@@ -626,6 +626,15 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         response_config.generate_body_size = data_length
         return response_config
 
+    if parsed_path.path == "/get_object_default_no_checksum":
+        # 64 KiB object of repeated 'a' returned whole by a plain GET, with no checksum header of any
+        # kind. A default meta request sends no Range header, so the body size is pinned here rather
+        # than derived from one, and there is no HEAD response to serve: a download that tried to
+        # discover a checksum instead of using the caller's would fail outright.
+        response_config = ResponseConfig(parsed_path.path, request=request)
+        response_config.generate_body_size = 65536
+        return response_config
+
     response_config.generate_body_size = data_length
     return response_config
 
