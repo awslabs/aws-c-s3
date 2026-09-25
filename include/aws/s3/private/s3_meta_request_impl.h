@@ -472,6 +472,9 @@ struct aws_s3_meta_request {
      * `recv_file_write_fd_slots` and `recv_file_ordered_fds`. */
     struct aws_string *recv_filepath;
     bool recv_file_delete_on_failure;
+    /* Set by the finish call once it has kept (success, pause) or deleted (failure) the receive file. Destroy
+     * deletes on failure only while this is false, which means creation failed after the file was opened. */
+    bool recv_file_finalized;
     /* When true, attempt O_DIRECT for writes. Only read when a writer opens its descriptor. */
     bool recv_file_direct_io;
 
