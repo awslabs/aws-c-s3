@@ -290,6 +290,26 @@ static int s_s3_meta_request_init_recv_file(
 
     meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
 
+    /* Deleting on failure is only safe for a file whose previous content this transfer does not need to keep.
+     * WRITE_TO_POSITION always writes into an existing file, and CREATE_OR_APPEND does when the file is
+     * already there; deleting either would destroy bytes this transfer never wrote. Rejected before the file
+     * is touched. CREATE_OR_REPLACE is allowed: it truncates an existing file, so its old content is gone
+     * whether or not the file is deleted afterward. */
+    if (options->recv_file_delete_on_failure) {
+        bool writes_into_existing_file = options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION ||
+                                         (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_APPEND &&
+                                          aws_path_exists(meta_request->recv_filepath));
+        if (writes_into_existing_file) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request; recv_file_delete_on_failure cannot be used when writing into an "
+                "existing file (AWS_S3_RECV_FILE_WRITE_TO_POSITION, or AWS_S3_RECV_FILE_CREATE_OR_APPEND with a file "
+                "that already exists).",
+                (void *)meta_request);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+    }
+
     /* "direct_io" is what we'll attempt; we may flip it off below if any precondition fails.
      * recv_file_direct_io_fallback_count tracks each fallback decision (init-time and write). */
     bool direct_io = meta_request->fio_opts.direct_io;
@@ -958,9 +978,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
      * none are outstanding by the time we get here. */
     s_s3_meta_request_close_write_fds(meta_request);
 
-    if (meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure) {
-        /* If the meta request succeeded, the file was already dealt with by the finish call. So it must
-         * be failing. */
+    /* Not finalized means the finish call never ran, so creation failed after the file was opened. */
+    if (meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure &&
+        !meta_request->recv_file_finalized) {
         aws_file_delete(meta_request->recv_filepath);
     }
     aws_string_destroy(meta_request->recv_filepath);
@@ -3880,6 +3900,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         if (delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
+
+        /* Set on failure too, not just success: the file is already deleted here, and by the time destroy runs
+         * the caller may have been told of the failure and put a new file at this path. */
+        meta_request->recv_file_finalized = true;
     }
 
     /* Fire pause/error resume-token callbacks before the general finish callback below,

@@ -4721,6 +4721,120 @@ TEST_CASE(get_error_token_delete_on_failure_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* A download that succeeds with recv_file_delete_on_failure set must keep its file. The finish call
+ * only deletes on failure, but meta request destroy deletes whenever the flag is still armed, so the
+ * flag has to be disarmed once the finish call has dealt with the file. The tester checks the file
+ * still exists after shutdown, which is after destroy. */
+TEST_CASE(get_delete_on_failure_keeps_file_on_success_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .recv_file_delete_on_failure = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Sends a GET that must fail during creation with `expected_error`, then resets the tester's finish and
+ * shutdown counts so the next request on the same tester is not held to them. */
+static int s_send_get_expecting_creation_error(
+    struct aws_s3_tester *tester,
+    struct aws_s3_tester_meta_request_options *get_options,
+    int expected_error) {
+
+    get_options->validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(tester, get_options, NULL));
+    ASSERT_INT_EQUALS(expected_error, aws_last_error());
+
+    aws_s3_tester_lock_synced_data(tester);
+    ASSERT_UINT_EQUALS(0, tester->synced_data.meta_request_shutdown_count);
+    ASSERT_UINT_EQUALS(0, tester->synced_data.meta_request_finish_count);
+    tester->synced_data.desired_meta_request_shutdown_count = 0;
+    tester->synced_data.desired_meta_request_finish_count = 0;
+    aws_s3_tester_unlock_synced_data(tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* recv_file_delete_on_failure is rejected at creation wherever a failure would delete content this transfer
+ * did not write: WRITE_TO_POSITION always, and CREATE_OR_APPEND onto an existing file. CREATE_OR_APPEND onto a
+ * missing file is still allowed, since the transfer creates it. */
+TEST_CASE(get_delete_on_failure_rejects_existing_file_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write"),
+                .file_on_disk = true,
+                .recv_file_delete_on_failure = true,
+                .pre_exist_file_length = 10,
+            },
+        .mock_server = true,
+    };
+
+    get_options.get_options.recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION;
+    ASSERT_SUCCESS(s_send_get_expecting_creation_error(&tester, &get_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    get_options.get_options.recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND;
+    ASSERT_SUCCESS(s_send_get_expecting_creation_error(&tester, &get_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    /* No pre-existing file, so the tester only picks a path and the download creates it. */
+    get_options.get_options.pre_exist_file_length = 0;
+    get_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS;
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* PUT failure mid-upload: part 3 fails with 403 after a delay long enough for the other
  * parts to complete. The on_error_resume_token callback must fire with the meta request's
  * error code and a token carrying the upload id and part counters. */
