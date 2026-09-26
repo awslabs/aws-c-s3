@@ -17,6 +17,11 @@
 
 AWS_STATIC_STRING_FROM_LITERAL(s_readonly_bytes_mode, "rb");
 
+static void s_parallel_stream_vtable_destroy_wrap(void *user_data) {
+    struct aws_parallel_input_stream *stream = user_data;
+    stream->vtable->destroy(stream);
+}
+
 void aws_parallel_input_stream_init_base(
     struct aws_parallel_input_stream *stream,
     struct aws_allocator *alloc,
@@ -28,7 +33,7 @@ void aws_parallel_input_stream_init_base(
     stream->vtable = vtable;
     stream->impl = impl;
     stream->shutdown_future = aws_future_void_new(alloc);
-    aws_ref_count_init(&stream->ref_count, stream, (aws_simple_completion_callback *)vtable->destroy);
+    aws_ref_count_init(&stream->ref_count, stream, s_parallel_stream_vtable_destroy_wrap);
 }
 
 struct aws_parallel_input_stream *aws_parallel_input_stream_acquire(struct aws_parallel_input_stream *stream) {
