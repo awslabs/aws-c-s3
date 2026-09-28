@@ -616,10 +616,12 @@ int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offs
 /* CRC64NVME of the pattern over [object_offset, object_offset + length), computed without materializing it. */
 uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length);
 
-/* Base64-encoded checksum of everything `input_stream` will produce, computed by reading it to memory and seeking
- * back to the beginning. This is the value to put in an x-amz-checksum-* header as a full-object checksum: it is
- * computed from the source, independent of how the client cuts the upload into parts, so S3's check of the
- * assembled object against it fails the upload if any part was stored under the wrong number. */
+/* Base64-encoded checksum of everything `input_stream` produces from its current position to the end. The stream
+ * is consumed and NOT rewound: hash a throwaway second instance of the same content, or seek back yourself if the
+ * stream supports it (aws_s3_test_input_stream does not). This is the value to put in an x-amz-checksum-* header
+ * as a full-object checksum: computed from the source, independent of how the client cuts the upload into parts,
+ * so S3's check of the assembled object against it fails the upload if any part was stored under the wrong
+ * number. */
 int aws_s3_tester_encoded_checksum_of_stream(
     struct aws_allocator *allocator,
     struct aws_input_stream *input_stream,

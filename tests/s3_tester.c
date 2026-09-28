@@ -1942,6 +1942,8 @@ int aws_s3_tester_send_meta_request_with_options(
                 out_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
                 ASSERT_SUCCESS(aws_s3_tester_encoded_checksum_of_stream(
                     allocator, input_stream, options->checksum_algorithm, out_encoded_checksum));
+                /* That consumed the stream; put it back where the upload expects to find it. */
+                ASSERT_SUCCESS(aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN));
             }
 
             /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
@@ -1963,12 +1965,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, message_flags);
             } else {
                 message = aws_s3_test_put_object_request_new_without_body(
-                    allocator,
-                    &host_cur,
-                    g_test_body_content_type,
-                    test_object_path,
-                    upload_size_bytes,
-                    message_flags);
+                    allocator, &host_cur, g_test_body_content_type, test_object_path, upload_size_bytes, message_flags);
             }
 
             if (options->put_options.valid_md5) {
@@ -2486,11 +2483,9 @@ int aws_s3_tester_encoded_checksum_of_stream(
     aws_byte_buf_init(&data, allocator, (size_t)length);
     ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data));
     ASSERT_UINT_EQUALS((size_t)length, data.len);
-    /* Leave the stream where the upload expects to find it. */
-    ASSERT_SUCCESS(aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN));
 
-    int result =
-        s_calculate_in_memory_checksum_helper(allocator, aws_byte_cursor_from_buf(&data), algorithm, out_encoded_checksum);
+    int result = s_calculate_in_memory_checksum_helper(
+        allocator, aws_byte_cursor_from_buf(&data), algorithm, out_encoded_checksum);
     aws_byte_buf_clean_up(&data);
     return result;
 }

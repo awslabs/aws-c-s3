@@ -193,12 +193,15 @@ static int s_s3express_put_object_request(
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, key_cursor, g_test_body_content_type, upload_stream, 0);
 
-    /* Full-object checksum, computed from the source stream before the client touches it. Without this the
-     * test only proves S3 returned 200; with it S3 compares the assembled object against the source, so a
-     * multipart upload whose parts were stored out of order fails CompleteMultipartUpload instead of passing. */
+    /* Full-object checksum, computed from the source before the client touches it. Without this the test only
+     * proves S3 returned 200; with it S3 compares the assembled object against the source, so a multipart upload
+     * whose parts were stored out of order fails CompleteMultipartUpload instead of passing. The test stream is
+     * sequential-only (no seek), so hash a second instance of the same content rather than the upload stream. */
     struct aws_byte_buf encoded_checksum;
+    struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, content_length);
     ASSERT_SUCCESS(
-        aws_s3_tester_encoded_checksum_of_stream(allocator, upload_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+        aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+    aws_input_stream_release(checksum_stream);
     ASSERT_SUCCESS(aws_http_headers_set(
         aws_http_message_get_headers(message),
         aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
