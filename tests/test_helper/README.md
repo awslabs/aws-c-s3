@@ -25,7 +25,10 @@ python3 test_helper.py clean
 
 * Create `<BUCKET_NAME>` in us-west-2.
   + Add the lifecycle to automatic clean up the `upload/` and clean up incomplete multipart uploads after one day.
-  + Upload files:
+  + Upload files. Every sized file contains the repeating `Lorem ipsum ...` text from aws-c-io's
+    `<aws/testing/stream_tester.h>` (`AWS_AUTOGEN_LOREM_IPSUM`), the same content the C tester uploads,
+    so tests can verify downloaded bytes against a regenerated copy. Pre-existing objects are not covered by
+    the lifecycle rule; after changing their content, re-run `init` to overwrite them in an existing bucket.
     - `pre-existing-10MB-aes256-c` [SSE-C](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html#sse-c-highlights) encrypted file
     - `pre-existing-10MB-aes256` [SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/specifying-s3-encryption.html) encrypted file
     - `pre-existing-10MB-kms` [SSE-KMS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html) encrypted file

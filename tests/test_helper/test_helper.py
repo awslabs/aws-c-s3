@@ -64,8 +64,43 @@ ASYNC_ERROR_XML = (
 )
 
 
+# Content of every sized pre-existing object. This is the exact AWS_AUTOGEN_LOREM_IPSUM literal from
+# aws-c-io's <aws/testing/stream_tester.h>, which is what the C tester streams for uploads. Using the
+# same text for the pre-existing fixtures means a single verifier in the C tests can regenerate the
+# expected bytes for any object (uploaded or pre-existing) and compare a download against them.
+#
+# The bytes are deliberately NOT zeros: an all-zero object cannot reveal parts written out of order,
+# because every reordering of zeros is still zeros. This pattern is 446 bytes = 2 * 223 (223 is prime),
+# so its period never divides a power-of-two size; every MiB/KiB-aligned part boundary falls at a
+# different phase of the text and any part swap changes the byte sequence.
+#
+# If the literal in stream_tester.h ever changes, the pre-existing-object verification tests in
+# aws-c-s3 fail, which is the intended way to catch drift between the two copies.
+PATTERN = (
+    'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore '
+    'et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut '
+    'aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse '
+    'cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa '
+    'qui officia deserunt mollit anim id est laborum. '
+).encode('ascii')
+
+
 def create_bytes(size):
-    return bytes(size)
+    """Return `size` bytes of PATTERN repeated, starting at phase 0.
+
+    Built by copying a large tile whose length is a multiple of len(PATTERN), so the pattern stays in
+    phase across tile boundaries and peak memory stays near `size` even for the multi-GB fixtures.
+    """
+    if size == 0:
+        return b''
+    tile_len = (64 * MB // len(PATTERN)) * len(PATTERN)
+    tile = PATTERN * (tile_len // len(PATTERN))
+    body = bytearray(size)
+    view = memoryview(body)
+    for offset in range(0, size, tile_len):
+        n = min(tile_len, size - offset)
+        view[offset:offset + n] = tile[:n]
+    return bytes(body)
 
 
 def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
