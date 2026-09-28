@@ -326,6 +326,19 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
+    /* Every upload has the same 10 MiB content, so one full-object checksum serves all of them. This is the
+     * closest test in the suite to the conditions that produced silent part misordering -- many concurrent
+     * multipart uploads on one client -- so make S3 validate each assembled object against the source. */
+    struct aws_byte_buf encoded_checksum;
+    struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
+    ASSERT_SUCCESS(
+        aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+    aws_input_stream_release(checksum_stream);
+    struct aws_s3_checksum_config checksum_config = {
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
+        .location = AWS_SCL_TRAILER,
+    };
+
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         input_streams[i] = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
 
@@ -339,11 +352,16 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
             allocator, &request_host, key_cursor, g_test_body_content_type, input_streams[i], 0);
+        ASSERT_SUCCESS(aws_http_headers_set(
+            aws_http_message_get_headers(message),
+            aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
+            aws_byte_cursor_from_buf(&encoded_checksum)));
 
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
         options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
         options.message = message;
+        options.checksum_config = &checksum_config;
         struct aws_signing_config_aws s3express_signing_config = {
             .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
             .service = g_s3express_service_name,
@@ -378,6 +396,7 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_input_stream_release(input_streams[i]);
     }
+    aws_byte_buf_clean_up(&encoded_checksum);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

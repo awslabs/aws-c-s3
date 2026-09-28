@@ -5118,14 +5118,18 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
+    /* Checksum on the way up so S3 validates what it stored against the source, and pattern verification
+     * on the way down so the test checks the bytes it got back rather than just how many arrived. */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .put_options =
             {
                 .object_size_mb = 1,
                 .object_path_override = object_path,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -5141,6 +5145,7 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
     };
 
@@ -5175,14 +5180,18 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
+    /* Checksum on the way up so S3 validates what it stored against the source, and pattern verification
+     * on the way down so the test checks the bytes it got back rather than just how many arrived. */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .put_options =
             {
                 .object_size_mb = 1,
                 .object_path_override = object_path,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -5198,6 +5207,7 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .default_type_options =
             {
@@ -5419,6 +5429,7 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
         .headers_callback = s_s3_validate_headers_checksum_set,
@@ -5537,6 +5548,7 @@ static int s_test_s3_multipart_get_full_object_checksum_helper(
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                 },
             .finish_callback = s_s3_test_validate_checksum,
         };
@@ -5649,6 +5661,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
     };
@@ -5934,6 +5947,7 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .object_size_hint = &object_size_hint,
     };
@@ -6084,6 +6098,7 @@ static int s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc(struct 
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_no_validate_checksum,
     };
@@ -6152,6 +6167,7 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .default_type_options =
             {
@@ -6241,6 +6257,7 @@ static int s_test_s3_round_trip_with_filepath_helper(
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -11338,6 +11355,9 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
             {
                 .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 10,
+                /* S3 checks the assembled object against this; a part completed under the wrong number fails
+                 * CompleteMultipartUpload instead of passing with every per-part checksum intact. */
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -11388,6 +11408,7 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
             {
                 .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 540,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -11530,6 +11551,10 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
             {
                 .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 39,
+                /* The pool above hands parts out in reverse order -- the exact condition behind the silent
+                 * corruption this checksum exists to catch. Per-part checksums cannot see it; only S3
+                 * comparing the assembled object against the source can. */
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
