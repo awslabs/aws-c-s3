@@ -622,6 +622,12 @@ uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length
  * as a full-object checksum: computed from the source, independent of how the client cuts the upload into parts,
  * so S3's check of the assembled object against it fails the upload if any part was stored under the wrong
  * number. */
+/* For tests that drive a GET themselves (own message, own wait) rather than through send_meta_request_with_options:
+ * check the bytes the default body callback received against the tester pattern. The test must have set
+ * results->verify_body_against_pattern = true BEFORE binding the meta request, so the callback keeps the running
+ * CRC. Body-callback delivery only; downloads to a file are not read back here. */
+int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_results *results);
+
 int aws_s3_tester_encoded_checksum_of_stream(
     struct aws_allocator *allocator,
     struct aws_input_stream *input_stream,

@@ -1382,11 +1382,13 @@ static int s_test_s3_put_object_with_part_remainder(struct aws_allocator *alloca
         .allocator = allocator,
         .client = client,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .put_options =
             {
                 /* Object size meant to be one megabyte larger than the part size of the client. */
                 .object_size_mb = 6,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -1499,6 +1501,7 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
     };
 
@@ -1546,6 +1549,7 @@ static int s_test_s3_get_object_file_path(struct aws_allocator *allocator, void 
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -1635,6 +1639,7 @@ static int s_test_s3_get_object_file_path_append(struct aws_allocator *allocator
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
                 .pre_exist_file_length = pre_exist_file_length,
@@ -1737,6 +1742,7 @@ static int s_test_s3_get_object_file_path_direct_io(struct aws_allocator *alloca
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -1887,11 +1893,11 @@ static int s_test_s3_get_object_range_parallel_write_content_verify(struct aws_a
     struct aws_byte_buf expected_buf;
     s_byte_buf_init_autogenned(&expected_buf, allocator, (size_t)range_start + range_length, AWS_AUTOGEN_LOREM_IPSUM);
 
-    /* Upload an object with non-zero content rather than reusing a pre-existing-* fixture. Those are
-     * all zero-filled, and a checksum over a zero-filled download cannot distinguish bytes that were
-     * written from a hole that was never written at all -- both read back as the same zeros. Out-of-
-     * order writes are exactly the case where a part can go missing while the file still looks the
-     * right length, so the fixture has to carry content for the assertion to mean anything. */
+    /* Upload a fresh object rather than reading a pre-existing-* fixture, so the test controls the exact size
+     * (4 MiB, which no fixture has) and cannot be affected by a fixture refresh. The content is the same
+     * pattern the fixtures carry; what matters is that it is not all one byte value, since a checksum over
+     * uniform bytes cannot tell data that was written from a hole that never was, and a hole while the file
+     * still looks the right length is exactly what an out-of-order write bug produces. */
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
@@ -2255,6 +2261,7 @@ static int s_test_s3_get_object_file_path_direct_io_dev_null(struct aws_allocato
         .put_options =
             {
                 .object_size_mb = 6, // more than 1 part
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .object_path_override = object_path,
             },
     };
@@ -2342,6 +2349,7 @@ static int s_test_s3_get_object_file_path_direct_io_append_unaligned_fallback(
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
                 .pre_exist_file_length = 10,
@@ -2394,6 +2402,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
                 .recv_file_position = 100,
@@ -2449,6 +2458,7 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_aligned(
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
                 .recv_file_position = 4096,
@@ -2503,6 +2513,7 @@ static int s_test_s3_get_object_file_path_direct_io_multi_part(struct aws_alloca
         .get_options =
             {
                 .object_path = g_pre_existing_object_10MB,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -2556,6 +2567,7 @@ static int s_test_s3_get_object_file_path_direct_io_unaligned_part_size_fallback
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
+                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -2895,6 +2907,8 @@ static int s_test_s3_get_object_backpressure_helper(
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+    /* Backpressure changes when bodies are delivered, never what is in them: check the bytes too. */
+    meta_request_test_results.verify_body_against_pattern = true;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
 
@@ -2913,6 +2927,9 @@ static int s_test_s3_get_object_backpressure_helper(
     aws_s3_tester_unlock_synced_data(&tester);
 
     ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(&meta_request_test_results, 0));
+    if (!file_on_disk) {
+        ASSERT_SUCCESS(aws_s3_tester_verify_body_against_pattern(&meta_request_test_results));
+    }
 
     /* Regression test:
      * Ensure that it's safe to call increment-window even after the meta-request has finished */
@@ -3103,10 +3120,12 @@ static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx)
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .object_path_override = object_path,
             },
     };
@@ -3193,10 +3212,12 @@ static int s_test_s3_put_object_helper(
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .acl_public_read = acl_public_read,
             },
     };
@@ -3289,6 +3310,24 @@ static int s_test_s3_put_object_multiple_helper(
     };
     size_t content_length = MB_TO_BYTES(10);
 
+    /* Every upload has the same body, so one full-object checksum serves all of them. With it, S3 checks each
+     * assembled object against the source instead of the test only checking for a 200. */
+    struct aws_byte_buf encoded_checksum;
+    {
+        struct aws_byte_buf checksum_body;
+        aws_s3_create_test_buffer(allocator, content_length, &checksum_body);
+        struct aws_byte_cursor checksum_body_cursor = aws_byte_cursor_from_buf(&checksum_body);
+        struct aws_input_stream *checksum_stream = aws_input_stream_new_from_cursor(allocator, &checksum_body_cursor);
+        ASSERT_SUCCESS(
+            aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+        aws_input_stream_release(checksum_stream);
+        aws_byte_buf_clean_up(&checksum_body);
+    }
+    struct aws_s3_checksum_config checksum_config = {
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
+        .location = AWS_SCL_TRAILER,
+    };
+
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
         char object_path_buffer[128] = "";
@@ -3318,8 +3357,13 @@ static int s_test_s3_put_object_multiple_helper(
             messages[i] = aws_s3_test_put_object_request_new(
                 allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
         }
+        ASSERT_SUCCESS(aws_http_headers_set(
+            aws_http_message_get_headers(messages[i]),
+            aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
+            aws_byte_cursor_from_buf(&encoded_checksum)));
         options.message = messages[i];
         options.fio_opts = &fio_opts;
+        options.checksum_config = &checksum_config;
         ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results[i]));
 
         /* Trigger accelerating of our Put Object request. */
@@ -3356,6 +3400,7 @@ static int s_test_s3_put_object_multiple_helper(
         }
     }
 
+    aws_byte_buf_clean_up(&encoded_checksum);
     aws_string_destroy(host_name);
     host_name = NULL;
 
@@ -3519,10 +3564,12 @@ static int s_test_s3_put_object_less_than_part_size(struct aws_allocator *alloca
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 1,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -3556,10 +3603,12 @@ static int s_test_s3_put_object_buffer_pool_trim(struct aws_allocator *allocator
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 32,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -3640,6 +3689,7 @@ static int s_test_s3_put_object_less_than_part_size_with_content_encoding(struct
         .get_options =
             {
                 .object_path = object_path_cursor,
+                .verify_body_against_pattern = true,
             },
     };
 
@@ -3715,6 +3765,7 @@ static int s_test_s3_put_object_mpu_with_content_encoding(struct aws_allocator *
         .get_options =
             {
                 .object_path = object_path_cursor,
+                .verify_body_against_pattern = true,
             },
     };
 
@@ -3758,10 +3809,12 @@ static int s_test_s3_put_object_multipart_threshold(struct aws_allocator *alloca
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 5,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
     struct aws_s3_meta_request_test_results meta_request_test_results;
@@ -3819,10 +3872,12 @@ static int s_test_s3_put_object_multipart_threshold_less_than_part_size(struct a
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 6,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
     struct aws_s3_meta_request_test_results meta_request_test_results;
@@ -4114,9 +4169,11 @@ static int s_test_s3_put_object_small_reads(struct aws_allocator *allocator, voi
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .max_bytes_per_read = KB_TO_BYTES(1001), /* something that doesn't evenly divide into 8MB parts */
             },
     };
@@ -4362,11 +4419,13 @@ static int s_test_s3_put_object_sse_kms(struct aws_allocator *allocator, void *c
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .sse_type = AWS_S3_TESTER_SSE_KMS,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -4400,11 +4459,13 @@ static int s_test_s3_put_object_sse_kms_multipart(struct aws_allocator *allocato
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .sse_type = AWS_S3_TESTER_SSE_KMS,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -4438,11 +4499,13 @@ static int s_test_s3_put_object_sse_aes256(struct aws_allocator *allocator, void
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .sse_type = AWS_S3_TESTER_SSE_AES256,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -4476,11 +4539,13 @@ static int s_test_s3_put_object_sse_aes256_multipart(struct aws_allocator *alloc
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .sse_type = AWS_S3_TESTER_SSE_AES256,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -4523,11 +4588,13 @@ static int s_test_s3_put_object_sse_c_aes256_multipart(struct aws_allocator *all
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .sse_type = AWS_S3_TESTER_SSE_C_AES256,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .object_path_override = object_path,
             },
     };
@@ -5081,9 +5148,11 @@ static int s_test_s3_put_object_double_slashes(struct aws_allocator *allocator, 
     struct aws_s3_tester_meta_request_options options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .put_options =
             {
                 .object_size_mb = 1,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .object_path_override = object_path,
             },
     };
@@ -5345,6 +5414,7 @@ static int s_test_s3_round_trip_default_get_fc_helper(
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                 },
             .finish_callback = s_s3_test_validate_checksum,
             .headers_callback = s_s3_validate_headers_checksum_set,
@@ -5761,6 +5831,7 @@ static int s_test_s3_download_empty_file_with_checksum_helper(
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
         .object_size_hint =
@@ -5843,6 +5914,7 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
         .object_size_hint = &object_size_hint,
@@ -6554,6 +6626,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6585,6 +6658,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6617,6 +6691,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = false,
                 },
@@ -6740,6 +6815,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart_with_buffe
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6833,6 +6909,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6862,6 +6939,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6890,6 +6968,7 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             .get_options =
                 {
                     .object_path = object_path,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = false,
                 },
@@ -7001,6 +7080,7 @@ static int s_test_s3_chunked_then_unchunked(struct aws_allocator *allocator, voi
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
                 .object_path_override = chunked_object_path,
             },
     };
@@ -8444,10 +8524,12 @@ static int s_test_s3_put_object_clamp_part_size(struct aws_allocator *allocator,
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .client = client,
         .put_options =
             {
                 .object_size_mb = 10,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -8953,6 +9035,7 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
+                    .verify_body_against_pattern = true,
                 },
         };
 
@@ -8986,6 +9069,7 @@ static int s_test_s3_auto_ranged_get_file_sending_user_agent(struct aws_allocato
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
+                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                 },
         };
@@ -9088,6 +9172,7 @@ static int s_test_s3_default_sending_meta_request_user_agent(struct aws_allocato
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
+                    .verify_body_against_pattern = true,
                 },
         };
 
@@ -9246,6 +9331,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 .get_options =
                     {
                         .object_path = object_names[object_name_index],
+                        .verify_body_against_pattern = true,
                         .object_range = ranges[range_index],
                     },
                 .sse_type = object_sse_types[object_name_index],
@@ -9279,6 +9365,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 .get_options =
                     {
                         .object_path = object_names[object_name_index],
+                        .verify_body_against_pattern = true,
                         .object_range = ranges[range_index],
                     },
                 .sse_type = object_sse_types[object_name_index],
@@ -9416,6 +9503,7 @@ static int s_test_s3_range_requests_less_than_a_part(struct aws_allocator *alloc
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
+                    .verify_body_against_pattern = true,
                     .object_range = ranges[range_index],
                 },
         };
@@ -9567,6 +9655,7 @@ static int s_test_s3_empty_file_edge_case(struct aws_allocator *allocator, void 
                 {
                     .force_dynamic_part_size = true,
                     .object_path = g_pre_existing_empty_object,
+                    .verify_body_against_pattern = true,
                 },
         };
 
@@ -9669,6 +9758,32 @@ static int s_test_s3_copy_object_helper(
         expected_size,
         false,
         copy_source_uri));
+
+    if (expected_error_code == AWS_ERROR_SUCCESS) {
+        /* Download the copy and check it against the pattern the source fixture carries. The three copies above
+         * report size and status, which cannot tell a multipart copy whose parts were assembled in the wrong
+         * order from a correct one; only reading the bytes back can. */
+        char destination_path[1024];
+        snprintf(destination_path, sizeof(destination_path), "/" PRInSTR, AWS_BYTE_CURSOR_PRI(destination_key));
+        /* The copy helper URI-encodes the destination key when it sets the request path (so "@" travels as
+         * "%40"); the GET has to encode the same way or the special-character keys come back as 404. */
+        struct aws_byte_cursor unencoded_destination_path = aws_byte_cursor_from_c_str(destination_path);
+        struct aws_byte_buf encoded_destination_path;
+        aws_byte_buf_init(&encoded_destination_path, allocator, sizeof(destination_path));
+        ASSERT_SUCCESS(aws_byte_buf_append_encoding_uri_path(&encoded_destination_path, &unencoded_destination_path));
+        struct aws_s3_tester_meta_request_options get_options = {
+            .allocator = allocator,
+            .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+            .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+            .get_options =
+                {
+                    .object_path = aws_byte_cursor_from_buf(&encoded_destination_path),
+                    .verify_body_against_pattern = true,
+                },
+        };
+        ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
+        aws_byte_buf_clean_up(&encoded_destination_path);
+    }
 
     aws_s3_tester_clean_up(&tester);
     aws_byte_buf_clean_up(&encoded_path);
@@ -10178,6 +10293,7 @@ static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool mul
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
+                .verify_body_against_pattern = true,
             },
     };
 
@@ -10236,10 +10352,12 @@ static int s_s3_put_object_mrap_helper(struct aws_allocator *allocator, bool mul
         .client = client,
         .mrap_test = true,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
         .put_options =
             {
                 .object_size_mb = multipart ? 10 : 1,
+                .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
 
@@ -10647,6 +10765,8 @@ static int s_test_s3_put_pause_resume_helper(
             .get_options =
                 {
                     .object_path = destination_key,
+                    /* No verify_body_against_pattern: this object was uploaded from aws_s3_test_input_stream, not the
+                     * tester pattern. The body callback above compares the bytes against that stream's own content. */
                 },
         };
 
@@ -11322,6 +11442,8 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
         .get_options =
             {
                 .object_path = destination_key,
+                /* No verify_body_against_pattern: this object was uploaded from aws_s3_test_input_stream, not the
+                 * tester pattern. The body callback above compares the bytes against that stream's own content. */
             },
     };
     struct aws_s3_meta_request_test_results get_results;
@@ -11766,6 +11888,7 @@ static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *
         .get_options =
             {
                 .object_path = object_path,
+                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
     };
@@ -11968,6 +12091,7 @@ static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_
         .get_options =
             {
                 .object_path = g_pre_existing_object_10MB,
+                .verify_body_against_pattern = true,
             },
         .object_size_hint = &object_size_hint,
     };
@@ -12030,6 +12154,7 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
         .get_options =
             {
                 .object_path = g_pre_existing_object_10MB,
+                .verify_body_against_pattern = true,
             },
         .object_size_hint = &object_size_hint,
     };

@@ -1691,6 +1691,13 @@ static int s_verify_downloaded_bytes_against_pattern(
     return AWS_OP_SUCCESS;
 }
 
+int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_results *results) {
+    struct aws_s3_tester_meta_request_options verify_options = {
+        .get_options = {.verify_body_against_pattern = true},
+    };
+    return s_verify_downloaded_bytes_against_pattern(&verify_options, results);
+}
+
 int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_tester *tester,
     struct aws_s3_tester_meta_request_options *options,
@@ -2276,11 +2283,15 @@ int aws_s3_tester_send_get_object_meta_request(
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
     }
+    /* Every object this path downloads is either a tester upload or a pre-existing-* fixture, all of which carry the
+     * tester pattern, so a successful GET is always checked byte-for-byte against the source. */
+    out_results->verify_body_against_pattern = true;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
         ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, flags));
+        ASSERT_SUCCESS(aws_s3_tester_verify_body_against_pattern(out_results));
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -2481,7 +2492,13 @@ int aws_s3_tester_encoded_checksum_of_stream(
 
     struct aws_byte_buf data;
     aws_byte_buf_init(&data, allocator, (size_t)length);
-    ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data));
+    /* Read until the stream reports EOF rather than trusting one read to fill the buffer: a stream may hand
+     * back fewer bytes than asked for (the small_reads test relies on exactly that). */
+    struct aws_stream_status status = {.is_end_of_stream = false};
+    while (!status.is_end_of_stream && data.len < (size_t)length) {
+        ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data));
+        ASSERT_SUCCESS(aws_input_stream_get_status(input_stream, &status));
+    }
     ASSERT_UINT_EQUALS((size_t)length, data.len);
 
     int result = s_calculate_in_memory_checksum_helper(
