@@ -3310,24 +3310,6 @@ static int s_test_s3_put_object_multiple_helper(
     };
     size_t content_length = MB_TO_BYTES(10);
 
-    /* Every upload has the same body, so one full-object checksum serves all of them. With it, S3 checks each
-     * assembled object against the source instead of the test only checking for a 200. */
-    struct aws_byte_buf encoded_checksum;
-    {
-        struct aws_byte_buf checksum_body;
-        aws_s3_create_test_buffer(allocator, content_length, &checksum_body);
-        struct aws_byte_cursor checksum_body_cursor = aws_byte_cursor_from_buf(&checksum_body);
-        struct aws_input_stream *checksum_stream = aws_input_stream_new_from_cursor(allocator, &checksum_body_cursor);
-        ASSERT_SUCCESS(
-            aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
-        aws_input_stream_release(checksum_stream);
-        aws_byte_buf_clean_up(&checksum_body);
-    }
-    struct aws_s3_checksum_config checksum_config = {
-        .checksum_algorithm = AWS_SCA_CRC64NVME,
-        .location = AWS_SCL_TRAILER,
-    };
-
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_s3_meta_request_test_results_init(&meta_request_test_results[i], allocator);
         char object_path_buffer[128] = "";
@@ -3357,10 +3339,13 @@ static int s_test_s3_put_object_multiple_helper(
             messages[i] = aws_s3_test_put_object_request_new(
                 allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
         }
-        ASSERT_SUCCESS(aws_http_headers_set(
-            aws_http_message_get_headers(messages[i]),
-            aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
-            aws_byte_cursor_from_buf(&encoded_checksum)));
+        /* Full-object checksum (see s3_tester.h) over a second stream of the same body; the upload stream itself
+         * may already have been consumed into a file above. */
+        struct aws_input_stream *checksum_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
+        struct aws_s3_checksum_config checksum_config;
+        ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+            allocator, messages[i], checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
+        aws_input_stream_release(checksum_stream);
         options.message = messages[i];
         options.fio_opts = &fio_opts;
         options.checksum_config = &checksum_config;
@@ -3400,7 +3385,6 @@ static int s_test_s3_put_object_multiple_helper(
         }
     }
 
-    aws_byte_buf_clean_up(&encoded_checksum);
     aws_string_destroy(host_name);
     host_name = NULL;
 
@@ -11477,8 +11461,6 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
             {
                 .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 10,
-                /* S3 checks the assembled object against this; a part completed under the wrong number fails
-                 * CompleteMultipartUpload instead of passing with every per-part checksum intact. */
                 .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };
@@ -11673,9 +11655,7 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
             {
                 .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 39,
-                /* The pool above hands parts out in reverse order -- the exact condition behind the silent
-                 * corruption this checksum exists to catch. Per-part checksums cannot see it; only S3
-                 * comparing the assembled object against the source can. */
+                /* The pool above hands parts out in reverse order: the case a full-object checksum exists for. */
                 .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };

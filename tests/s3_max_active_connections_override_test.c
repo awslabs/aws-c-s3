@@ -220,22 +220,13 @@ TEST_CASE(s3_max_active_connections_override_enforced) {
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, test_object_path, g_test_body_content_type, input_stream, 0 /*flags*/);
 
-    /* 40 parts squeezed through 3 connections is a lot of reordering pressure. A full-object checksum makes S3
-     * verify the assembled object against the source, so the test also proves the parts landed in order. The
-     * test stream is sequential-only, so hash a second instance rather than the one being uploaded. */
-    struct aws_byte_buf encoded_checksum;
+    /* Full-object checksum (see s3_tester.h): 40 parts through 3 connections is heavy reordering pressure, so
+     * also prove the parts landed in order. The test stream cannot seek, so hash a second instance of it. */
     struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, object_size);
-    ASSERT_SUCCESS(
-        aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+    struct aws_s3_checksum_config checksum_config;
+    ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+        allocator, message, checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
     aws_input_stream_release(checksum_stream);
-    ASSERT_SUCCESS(aws_http_headers_set(
-        aws_http_message_get_headers(message),
-        aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
-        aws_byte_cursor_from_buf(&encoded_checksum)));
-    struct aws_s3_checksum_config checksum_config = {
-        .checksum_algorithm = AWS_SCA_CRC64NVME,
-        .location = AWS_SCL_TRAILER,
-    };
 
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -259,7 +250,6 @@ TEST_CASE(s3_max_active_connections_override_enforced) {
      */
     ASSERT_TRUE(peak == options.max_active_connections_override || peak == options.max_active_connections_override + 1);
 
-    aws_byte_buf_clean_up(&encoded_checksum);
     aws_input_stream_destroy(input_stream);
     aws_string_destroy(host_name);
     aws_byte_buf_clean_up(&path_buf);

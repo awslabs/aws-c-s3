@@ -616,23 +616,40 @@ int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offs
 /* CRC64NVME of the pattern over [object_offset, object_offset + length), computed without materializing it. */
 uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length);
 
-/* Base64-encoded checksum of everything `input_stream` produces from its current position to the end. The stream
- * is consumed and NOT rewound: hash a throwaway second instance of the same content, or seek back yourself if the
- * stream supports it (aws_s3_test_input_stream does not). This is the value to put in an x-amz-checksum-* header
- * as a full-object checksum: computed from the source, independent of how the client cuts the upload into parts,
- * so S3's check of the assembled object against it fails the upload if any part was stored under the wrong
- * number. */
 /* For tests that drive a GET themselves (own message, own wait) rather than through send_meta_request_with_options:
  * check the bytes the default body callback received against the tester pattern. The test must have set
  * results->verify_body_against_pattern = true BEFORE binding the meta request, so the callback keeps the running
  * CRC. Body-callback delivery only; downloads to a file are not read back here. */
 int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_results *results);
 
+/* Full-object checksums.
+ *
+ * Per-part checksums prove each part arrived intact; they say nothing about whether S3 assembled the parts in the
+ * right order, because a reordered object has every per-part checksum intact. A full-object checksum is computed
+ * over the whole source before the client touches it and sent in an x-amz-checksum-<algorithm> header, so S3
+ * compares the assembled object against the source and fails CompleteMultipartUpload (rather than returning 200)
+ * if any part landed under the wrong number. That is the silent-corruption class these tests exist to catch.
+ * Tests that upload via aws_s3_tester_send_meta_request_with_options get this from put_options.full_object_checksum;
+ * the two helpers below are for tests that build their own PutObject message. */
+
+/* Base64-encoded checksum of everything `input_stream` produces from its current position to the end. The stream
+ * is consumed and NOT rewound: hash a throwaway second instance of the same content, or seek back yourself if the
+ * stream supports it (aws_s3_test_input_stream does not). */
 int aws_s3_tester_encoded_checksum_of_stream(
     struct aws_allocator *allocator,
     struct aws_input_stream *input_stream,
     enum aws_s3_checksum_algorithm algorithm,
     struct aws_byte_buf *out_encoded_checksum);
+
+/* Put a full-object checksum on a hand-built PutObject `message`: hashes `source` (a stream with the same content
+ * the upload will send; consumed, not rewound, not released) into the x-amz-checksum-<algorithm> header and fills
+ * `out_checksum_config` with a matching trailer config to pass as aws_s3_meta_request_options.checksum_config. */
+int aws_s3_tester_set_full_object_checksum(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    struct aws_input_stream *source,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_s3_checksum_config *out_checksum_config);
 
 /* Create a file on disk based on the input stream. Return the file path */
 struct aws_string *aws_s3_tester_create_file(

@@ -193,23 +193,12 @@ static int s_s3express_put_object_request(
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, key_cursor, g_test_body_content_type, upload_stream, 0);
 
-    /* Full-object checksum, computed from the source before the client touches it. Without this the test only
-     * proves S3 returned 200; with it S3 compares the assembled object against the source, so a multipart upload
-     * whose parts were stored out of order fails CompleteMultipartUpload instead of passing. The test stream is
-     * sequential-only (no seek), so hash a second instance of the same content rather than the upload stream. */
-    struct aws_byte_buf encoded_checksum;
+    /* Full-object checksum (see s3_tester.h). The test stream cannot seek, so hash a second instance of it. */
     struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, content_length);
-    ASSERT_SUCCESS(
-        aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+    struct aws_s3_checksum_config checksum_config;
+    ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+        allocator, message, checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
     aws_input_stream_release(checksum_stream);
-    ASSERT_SUCCESS(aws_http_headers_set(
-        aws_http_message_get_headers(message),
-        aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
-        aws_byte_cursor_from_buf(&encoded_checksum)));
-    struct aws_s3_checksum_config checksum_config = {
-        .checksum_algorithm = AWS_SCA_CRC64NVME,
-        .location = AWS_SCL_TRAILER,
-    };
 
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
@@ -238,7 +227,6 @@ static int s_s3express_put_object_request(
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
-    aws_byte_buf_clean_up(&encoded_checksum);
     aws_http_message_release(message);
     aws_input_stream_release(upload_stream);
 
@@ -326,19 +314,6 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    /* Every upload has the same 10 MiB content, so one full-object checksum serves all of them. This is the
-     * closest test in the suite to the conditions that produced silent part misordering -- many concurrent
-     * multipart uploads on one client -- so make S3 validate each assembled object against the source. */
-    struct aws_byte_buf encoded_checksum;
-    struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
-    ASSERT_SUCCESS(
-        aws_s3_tester_encoded_checksum_of_stream(allocator, checksum_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
-    aws_input_stream_release(checksum_stream);
-    struct aws_s3_checksum_config checksum_config = {
-        .checksum_algorithm = AWS_SCA_CRC64NVME,
-        .location = AWS_SCL_TRAILER,
-    };
-
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         input_streams[i] = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
 
@@ -352,10 +327,13 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
             allocator, &request_host, key_cursor, g_test_body_content_type, input_streams[i], 0);
-        ASSERT_SUCCESS(aws_http_headers_set(
-            aws_http_message_get_headers(message),
-            aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
-            aws_byte_cursor_from_buf(&encoded_checksum)));
+        /* Full-object checksum (see s3_tester.h): many concurrent multipart uploads on one client is the closest
+         * this suite gets to the conditions behind silent part misordering, so each assembled object is checked. */
+        struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
+        struct aws_s3_checksum_config checksum_config;
+        ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+            allocator, message, checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
+        aws_input_stream_release(checksum_stream);
 
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
@@ -396,7 +374,6 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
     for (size_t i = 0; i < NUM_REQUESTS; ++i) {
         aws_input_stream_release(input_streams[i]);
     }
-    aws_byte_buf_clean_up(&encoded_checksum);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

@@ -1961,7 +1961,8 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream = aws_input_stream_release(input_stream);
             }
 
-            /* Put together a simple S3 Put Object request. */
+            /* Put together a simple S3 Put Object request. aws_s3_test_put_object_request_new predates the options
+             * struct and still takes the legacy flag bits, so the typed options are translated into those here. */
             uint32_t message_flags = (uint32_t)options->sse_type;
             if (options->put_options.acl_public_read) {
                 message_flags |= AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL;
@@ -2505,6 +2506,29 @@ int aws_s3_tester_encoded_checksum_of_stream(
         allocator, aws_byte_cursor_from_buf(&data), algorithm, out_encoded_checksum);
     aws_byte_buf_clean_up(&data);
     return result;
+}
+
+int aws_s3_tester_set_full_object_checksum(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    struct aws_input_stream *source,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_s3_checksum_config *out_checksum_config) {
+
+    struct aws_byte_buf encoded_checksum;
+    ASSERT_SUCCESS(aws_s3_tester_encoded_checksum_of_stream(allocator, source, algorithm, &encoded_checksum));
+    /* aws_http_headers copies the value, so the buffer can go once the header is set. */
+    int result = aws_http_headers_set(
+        aws_http_message_get_headers(message),
+        aws_get_http_header_name_from_checksum_algorithm(algorithm),
+        aws_byte_cursor_from_buf(&encoded_checksum));
+    aws_byte_buf_clean_up(&encoded_checksum);
+    ASSERT_SUCCESS(result);
+
+    AWS_ZERO_STRUCT(*out_checksum_config);
+    out_checksum_config->checksum_algorithm = algorithm;
+    out_checksum_config->location = AWS_SCL_TRAILER;
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length) {
