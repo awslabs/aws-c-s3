@@ -910,9 +910,10 @@ struct aws_s3_client *aws_s3_client_new(
         client->file_io_elg =
             aws_event_loop_group_new_default(client->allocator, num_file_io_threads, &file_io_elg_shutdown_options);
 
-        if (!client->file_io_elg) {
-            goto on_error;
-        }
+        /* Not handled as an error: creating the body streaming ELG just succeeded, and this one is created the same
+         * way, so there is no failure left to expect. Handling it would need the error path to tear down a live
+         * ELG, which only finishes asynchronously through the client's shutdown callbacks. */
+        AWS_FATAL_ASSERT(client->file_io_elg != NULL);
         client->synced_data.file_io_elg_allocated = true;
 
         AWS_LOGF_DEBUG(
@@ -1042,6 +1043,9 @@ on_error:
 
     aws_array_list_clean_up(&client->network_interface_names);
     client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
+    /* Still NULL when the failure came before it was set; otherwise the body streaming ELG failed, the only failure
+     * point after it. */
+    aws_retry_strategy_release(client->retry_strategy);
 
     aws_mem_release(client->allocator, client);
     return NULL;
