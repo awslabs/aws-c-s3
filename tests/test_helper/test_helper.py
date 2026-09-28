@@ -116,7 +116,12 @@ def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
     else:
         body = size_or_body
 
-    args = {'Bucket': bucket, 'Key': keyname, 'Body': body}
+    # Always attach a CRC32 checksum. aws-c-s3's test_s3_get_object_file_path_direct_io_multi_part downloads
+    # pre-existing-10MB with response-checksum validation on and asserts that validation happened with
+    # CRC32, so the fixture must carry one. boto3 >= 1.36 does this by default; older versions do not,
+    # and relying on the default would let a re-run of this script from an older environment silently
+    # break that test on every branch.
+    args = {'Bucket': bucket, 'Key': keyname, 'Body': body, 'ChecksumAlgorithm': 'CRC32'}
     if sse == 'aes256':
         args['ServerSideEncryption'] = 'AES256'
     elif sse == 'aes256-c':
