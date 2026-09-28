@@ -19,6 +19,7 @@
 #include <aws/common/environment.h>
 #include <aws/common/file.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/uuid.h>
 #include <aws/http/request_response.h>
 #include <aws/http/status_code.h>
 #include <aws/io/channel_bootstrap.h>
@@ -36,6 +37,57 @@ void s_s3_test_validate_checksum(
     struct aws_s3_meta_request *meta_request,
     const struct aws_s3_meta_request_result *result,
     void *user_data);
+
+/* The tester's pattern helpers are the oracle every content-verifying test in this file relies on, so check them
+ * against the generator they claim to mirror (stream_tester.h) before trusting them anywhere else. */
+AWS_TEST_CASE(test_s3_tester_pattern_helpers, s_test_s3_tester_pattern_helpers)
+static int s_test_s3_tester_pattern_helpers(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    /* Reference: what the tester's input stream actually uploads, regenerated the slow way from offset 0. */
+    const size_t reference_len = 3 * 1024 * 1024 + 12345; /* not a multiple of the pattern period */
+    struct aws_byte_buf reference;
+    s_byte_buf_init_autogenned(&reference, allocator, reference_len, AWS_AUTOGEN_LOREM_IPSUM);
+
+    /* pattern_append from an arbitrary offset must reproduce the reference at that offset exactly, including
+     * across period boundaries and for lengths shorter than one period. */
+    const uint64_t offsets[] = {0, 1, 445, 446, 447, 1024 * 1024, 2 * 1024 * 1024 + 777};
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(offsets); ++i) {
+        size_t offset = (size_t)offsets[i];
+        size_t lengths[] = {1, 100, 446, 4096, reference_len - offset};
+        for (size_t j = 0; j < AWS_ARRAY_SIZE(lengths); ++j) {
+            struct aws_byte_buf regenerated;
+            aws_byte_buf_init(&regenerated, allocator, 0);
+            ASSERT_SUCCESS(aws_s3_tester_pattern_append(&regenerated, offset, lengths[j]));
+            ASSERT_UINT_EQUALS(lengths[j], regenerated.len);
+            ASSERT_BIN_ARRAYS_EQUALS(reference.buffer + offset, lengths[j], regenerated.buffer, regenerated.len);
+
+            /* And the streaming CRC must agree with a CRC over the materialized bytes. */
+            uint64_t expected_crc = aws_checksums_crc64nvme_ex(reference.buffer + offset, lengths[j], 0);
+            ASSERT_UINT_EQUALS(expected_crc, aws_s3_tester_pattern_crc64nvme(offset, lengths[j]));
+            aws_byte_buf_clean_up(&regenerated);
+        }
+    }
+
+    /* The property the whole exercise depends on: swapping two power-of-two-aligned parts changes the bytes. */
+    const size_t part = 1024 * 1024;
+    ASSERT_FALSE(memcmp(reference.buffer, reference.buffer + part, part) == 0);
+    ASSERT_UINT_EQUALS(0, aws_s3_tester_pattern_crc64nvme(0, 0));
+
+    aws_byte_buf_clean_up(&reference);
+
+    /* Per-run upload prefix: populated on first use, unique-looking, and inside the lifecycle-managed folder. */
+    struct aws_byte_buf path;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(allocator, &path, aws_byte_cursor_from_c_str("/x.txt")));
+    struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path);
+    struct aws_byte_cursor upload_root = aws_byte_cursor_from_c_str("/upload/");
+    ASSERT_TRUE(aws_byte_cursor_starts_with(&path_cursor, &upload_root));
+    ASSERT_UINT_EQUALS(strlen("/upload/") + (AWS_UUID_STR_LEN - 1) + strlen("/x.txt"), path.len);
+    ASSERT_TRUE(aws_byte_cursor_starts_with(&g_put_object_prefix, &g_upload_folder));
+    aws_byte_buf_clean_up(&path);
+
+    return 0;
+}
 
 AWS_TEST_CASE(test_s3_client_create_destroy, s_test_s3_client_create_destroy)
 static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void *ctx) {
@@ -10569,7 +10621,10 @@ static int s_test_s3_put_pause_resume_happy_path(struct aws_allocator *allocator
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor destination_key = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume.txt");
+    struct aws_byte_buf destination_key_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &destination_key_buf, aws_byte_cursor_from_c_str("/test_pause_resume.txt")));
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(&destination_key_buf);
 
     struct put_object_pause_resume_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -10634,6 +10689,7 @@ static int s_test_s3_put_pause_resume_happy_path(struct aws_allocator *allocator
 
     aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
+    aws_byte_buf_clean_up(&destination_key_buf);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -10645,8 +10701,10 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor destination_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_all_parts_done.txt");
+    struct aws_byte_buf destination_key_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &destination_key_buf, aws_byte_cursor_from_c_str("/test_pause_resume_all_parts_done.txt")));
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(&destination_key_buf);
 
     struct put_object_pause_resume_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -10713,6 +10771,7 @@ static int s_test_s3_put_pause_resume_all_parts_done(struct aws_allocator *alloc
 
     aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
+    aws_byte_buf_clean_up(&destination_key_buf);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -10724,8 +10783,10 @@ static int s_test_s3_put_pause_resume_invalid_resume_data(struct aws_allocator *
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor destination_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_resume_data.txt");
+    struct aws_byte_buf destination_key_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &destination_key_buf, aws_byte_cursor_from_c_str("/test_pause_resume_resume_data.txt")));
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(&destination_key_buf);
 
     struct put_object_pause_resume_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -10791,6 +10852,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_data(struct aws_allocator *
 
     aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_destroy(resume_upload_stream);
+    aws_byte_buf_clean_up(&destination_key_buf);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -10802,8 +10864,10 @@ static int s_test_s3_put_pause_resume_invalid_resume_stream(struct aws_allocator
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor destination_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_bad_resume_stream.txt");
+    struct aws_byte_buf destination_key_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &destination_key_buf, aws_byte_cursor_from_c_str("/test_pause_resume_bad_resume_stream.txt")));
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(&destination_key_buf);
 
     struct put_object_pause_resume_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -10874,6 +10938,7 @@ static int s_test_s3_put_pause_resume_invalid_resume_stream(struct aws_allocator
 
     aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_release(resume_upload_stream);
+    aws_byte_buf_clean_up(&destination_key_buf);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -10885,8 +10950,10 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_byte_cursor destination_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_pause_resume_bad_resume_stream.txt");
+    struct aws_byte_buf destination_key_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &destination_key_buf, aws_byte_cursor_from_c_str("/test_pause_resume_bad_resume_stream.txt")));
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(&destination_key_buf);
 
     struct put_object_pause_resume_test_data test_data;
     AWS_ZERO_STRUCT(test_data);
@@ -10953,6 +11020,7 @@ static int s_test_s3_put_pause_resume_invalid_content_length(struct aws_allocato
 
     aws_s3_meta_request_resume_token_release(persistable_state);
     aws_input_stream_release(resume_upload_stream);
+    aws_byte_buf_clean_up(&destination_key_buf);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
@@ -11092,8 +11160,10 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
     aws_atomic_store_int(&test_data.pause_after_n_parts, 1); /* pause after 1st part completes */
     tester.user_data = &test_data;
 
-    struct aws_byte_cursor destination_key =
-        AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/test_put_async_pause_resume.txt");
+    struct aws_byte_buf destination_key_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &destination_key_buf, aws_byte_cursor_from_c_str("/test_put_async_pause_resume.txt")));
+    struct aws_byte_cursor destination_key = aws_byte_cursor_from_buf(&destination_key_buf);
 
     /* --- Pause leg --- */
     struct aws_s3_client_config client_config;
@@ -11216,6 +11286,7 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
 
     s_async_pause_test_data_clean_up(&test_data);
     s_async_pause_test_data_clean_up(&resume_data);
+    aws_byte_buf_clean_up(&destination_key_buf);
     aws_s3_tester_clean_up(&tester);
     return AWS_OP_SUCCESS;
 }
@@ -11227,13 +11298,17 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
     struct aws_s3_meta_request_test_results test_results;
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_10MB_CRC32.txt")));
+
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_10MB_CRC32.txt"),
+                .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 10,
             },
     };
@@ -11250,6 +11325,7 @@ static int s_test_s3_upload_review(struct aws_allocator *allocator, void *ctx) {
     ASSERT_STR_EQUALS("9J8ZNA==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
     ASSERT_STR_EQUALS("BNjxzQ==", aws_string_c_str(test_results.upload_review.part_checksums_array[1]));
 
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_meta_request_test_results_clean_up(&test_results);
     return 0;
 }
@@ -11271,6 +11347,10 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
         .memory_limit_in_bytes = MB_TO_BYTES(512),
     };
 
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_540MB_CRC32.txt")));
+
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -11278,7 +11358,7 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
         .client_options = &client_options,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_540MB_CRC32.txt"),
+                .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 540,
             },
     };
@@ -11301,6 +11381,7 @@ static int s_test_s3_upload_in_order_review(struct aws_allocator *allocator, voi
     ASSERT_STR_EQUALS("lsmwWw==", aws_string_c_str(test_results.upload_review.part_checksums_array[3]));
     ASSERT_STR_EQUALS("KCT+7w==", aws_string_c_str(test_results.upload_review.part_checksums_array[4]));
 
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_meta_request_test_results_clean_up(&test_results);
     return 0;
 }
@@ -11408,6 +11489,10 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
 
     struct aws_s3_tester_client_options client_options = {.buffer_pool_factory_fn = s_manual_pool_fn};
 
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_16MB_CRC32.txt")));
+
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -11415,7 +11500,7 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
         .client_options = &client_options,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_16MB_CRC32.txt"),
+                .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 39,
             },
     };
@@ -11438,6 +11523,7 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
     ASSERT_STR_EQUALS("a5Y5pw==", aws_string_c_str(test_results.upload_review.part_checksums_array[3]));
     ASSERT_STR_EQUALS("XkcCkw==", aws_string_c_str(test_results.upload_review.part_checksums_array[4]));
 
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_meta_request_test_results_clean_up(&test_results);
     return 0;
 }
@@ -11449,13 +11535,17 @@ static int s_test_s3_upload_review_no_content_length(struct aws_allocator *alloc
     struct aws_s3_meta_request_test_results test_results;
     aws_s3_meta_request_test_results_init(&test_results, allocator);
 
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_1MB_CRC32.txt")));
+
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .checksum_algorithm = AWS_SCA_CRC32,
         .put_options =
             {
-                .object_path_override = aws_byte_cursor_from_c_str("/upload/review_1MB_CRC32.txt"),
+                .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 1,
                 .skip_content_length = true,
             },
@@ -11470,6 +11560,7 @@ static int s_test_s3_upload_review_no_content_length(struct aws_allocator *alloc
     ASSERT_UINT_EQUALS(MB_TO_BYTES(1), test_results.upload_review.part_sizes_array[0]);
     ASSERT_STR_EQUALS("4hP4ig==", aws_string_c_str(test_results.upload_review.part_checksums_array[0]));
 
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_meta_request_test_results_clean_up(&test_results);
     return 0;
 }
@@ -11489,7 +11580,10 @@ static int s_upload_review_raise_canceled_error(
 AWS_TEST_CASE(test_s3_upload_review_rejection, s_test_s3_upload_review_rejection)
 static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_rejection.txt");
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_rejection.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&object_path_buf);
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -11554,6 +11648,7 @@ static int s_test_s3_upload_review_rejection(struct aws_allocator *allocator, vo
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_tester_clean_up(&tester);
     return 0;
 }
@@ -11564,7 +11659,10 @@ AWS_TEST_CASE(test_s3_upload_review_checksum_location_none, s_test_s3_upload_rev
 static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_10MB_no_CRC32.txt");
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_10MB_no_CRC32.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&object_path_buf);
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -11623,6 +11721,7 @@ static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_tester_clean_up(&tester);
     return 0;
 }
@@ -11631,7 +11730,10 @@ AWS_TEST_CASE(test_s3_upload_review_checksum_location_none_async, s_test_s3_uplo
 static int s_test_s3_upload_review_checksum_location_none_async(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_10MB_no_CRC32.txt");
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_10MB_no_CRC32.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&object_path_buf);
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -11664,6 +11766,7 @@ static int s_test_s3_upload_review_checksum_location_none_async(struct aws_alloc
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_tester_clean_up(&tester);
     return 0;
 }
@@ -11675,7 +11778,10 @@ AWS_TEST_CASE(
 static int s_test_s3_upload_review_checksum_location_none_async_noop_part(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/upload/review_10MB_no_CRC32.txt");
+    struct aws_byte_buf object_path_buf;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &object_path_buf, aws_byte_cursor_from_c_str("/review_10MB_no_CRC32.txt")));
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&object_path_buf);
 
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -11710,6 +11816,7 @@ static int s_test_s3_upload_review_checksum_location_none_async_noop_part(struct
 
     aws_s3_meta_request_test_results_clean_up(&test_results);
     aws_s3_client_release(client);
+    aws_byte_buf_clean_up(&object_path_buf);
     aws_s3_tester_clean_up(&tester);
     return 0;
 }

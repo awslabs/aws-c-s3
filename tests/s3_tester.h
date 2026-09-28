@@ -234,6 +234,14 @@ struct aws_s3_tester_meta_request_options {
          * body callback stops asserting each range continues the last one, and instead assembles the
          * object into out_results->received_body_content by range_start. */
         bool allow_out_of_order_body;
+        /* Check the downloaded bytes against the pattern every tester-uploaded object, and every
+         * pre-existing-* fixture, is made of (see aws_s3_tester_pattern_crc64nvme). The range to check
+         * comes from S3's own Content-Range / Content-Length response headers, never from the client,
+         * so this is independent of the client's checksum path: a part stored under the wrong offset
+         * passes did_validate (the checksum matches what S3 sent) and fails here. Works for body
+         * callback delivery (in order or not) and for file_on_disk downloads (implies
+         * capture_file_content). Not for the mock server, whose bodies are canned. */
+        bool verify_body_against_pattern;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -337,6 +345,12 @@ struct aws_s3_meta_request_test_results {
     /* True once a body arrived at an offset behind one already delivered. Without this a passing
      * out-of-order test could just as well have delivered everything in order. */
     bool body_arrived_out_of_order;
+
+    /* Set from get_options.verify_body_against_pattern. While set, the default body callback keeps a
+     * running CRC64NVME of every delivered byte in body_crc64nvme (only meaningful for in-order
+     * delivery; out-of-order verification hashes received_body_content instead). */
+    bool verify_body_against_pattern;
+    uint64_t body_crc64nvme;
 
     /* The range_start reported for the very first body chunk that arrived, and whether one arrived at
      * all. The documented contract on aws_s3_meta_request_receive_body_callback_fn is that this equals
@@ -585,11 +599,27 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     size_t length,
     enum aws_s3_test_stream_value stream_value);
 
-/* Add g_upload_folder to the file path to make sure we get all the non-pre-exist files in the same folder. */
+/* Build the S3 key for an object a test is about to upload: g_upload_folder followed by `file_path`. Every
+ * upload MUST go through this (or g_put_object_prefix) rather than a literal "/upload/..." path, so it lands
+ * in this run's private folder; see g_upload_folder. */
 int aws_s3_tester_upload_file_path_init(
     struct aws_allocator *allocator,
     struct aws_byte_buf *out_path_buffer,
     struct aws_byte_cursor file_path);
+
+/* The content of every object this harness works with. Objects the tester uploads are streamed from aws-c-io's
+ * aws_input_stream_tester with AWS_AUTOGEN_LOREM_IPSUM: the fixed "Lorem ipsum ..." text repeated from object
+ * offset 0. The pre-existing-* fixtures carry the same bytes (tests/test_helper/test_helper.py). So the expected
+ * byte at any object offset is a pure function of that offset, and a download of any object -- uploaded or
+ * pre-existing, whole or ranged, single part or multipart -- can be checked against a regenerated copy that
+ * never passed through the client under test. The text's period (446 = 2 * 223, prime) does not divide any
+ * power-of-two part size, so any two parts differ and a part stored at the wrong offset is always detectable. */
+
+/* Append `length` bytes of the pattern, as they appear starting at `object_offset` in such an object. */
+int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offset, size_t length);
+
+/* CRC64NVME of the pattern over [object_offset, object_offset + length), computed without materializing it. */
+uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length);
 
 /* Create a file on disk based on the input stream. Return the file path */
 struct aws_string *aws_s3_tester_create_file(
@@ -621,7 +651,12 @@ extern const struct aws_byte_cursor g_pre_existing_object_aes256_10MB;
 extern const struct aws_byte_cursor g_pre_existing_object_async_error_xml;
 extern const struct aws_byte_cursor g_pre_existing_empty_object;
 
-extern const struct aws_byte_cursor g_put_object_prefix;
+/* Per-process upload folder, "/upload/<uuid>", and the prefix most generated upload keys start with,
+ * "/upload/<uuid>/put-object-test". Populated on first use (aws_s3_tester_init or
+ * aws_s3_tester_upload_file_path_init); empty before that. Unique per test process so concurrent CI runs
+ * sharing the bucket never read each other's uploads. */
+extern struct aws_byte_cursor g_upload_folder;
+extern struct aws_byte_cursor g_put_object_prefix;
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 extern struct aws_byte_cursor g_test_bucket_name;

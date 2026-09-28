@@ -11,6 +11,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/checksums/crc.h>
 #include <aws/common/encoding.h>
 #include <aws/common/environment.h>
 #include <aws/common/system_info.h>
@@ -49,7 +50,9 @@ const struct aws_byte_cursor g_s3_sse_c_key_header =
 const struct aws_byte_cursor g_s3_sse_c_key_md5_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-md5");
 
-/* TODO populate these at the beginning of running tests with names that are unique to the test run. */
+/* The pre-existing-* objects are shared, read-only fixtures uploaded once by tests/test_helper/test_helper.py.
+ * Their names are deliberately fixed: every branch's CI and the language bindings read the same objects. Only
+ * the objects tests *write* get per-run names (see s_ensure_upload_prefix below). */
 
 const struct aws_byte_cursor g_pre_existing_object_1MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-1MB");
 const struct aws_byte_cursor g_pre_existing_object_10MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB");
@@ -61,8 +64,45 @@ const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FRO
 const struct aws_byte_cursor g_pre_existing_object_async_error_xml =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-async-error-xml");
 
-const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/put-object-test");
-const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
+/* Everything a test uploads lands under /upload/<run-token>/. The bucket is shared by every CI run of every
+ * branch of this repo (and by the language bindings), so with fixed keys a round-trip on one run could read back
+ * an object a concurrent run had just overwritten -- an intermittent failure that looks exactly like a data
+ * corruption bug. The token is a UUID generated once per process, on first use. The folder stays under upload/
+ * so it remains inside the bucket's 1-day expiry rule (tests/test_helper/README.md); nothing needs to delete it.
+ *
+ * These are populated lazily rather than at aws_s3_tester_init: a few tests build their object path before they
+ * have a tester (they hand NULL to aws_s3_tester_send_meta_request_with_options, which creates one). */
+static char s_upload_folder_storage[64] = "";
+static char s_put_object_prefix_storage[96] = "";
+struct aws_byte_cursor g_upload_folder = {0};
+struct aws_byte_cursor g_put_object_prefix = {0};
+
+static void s_ensure_upload_prefix(void) {
+    if (g_upload_folder.len != 0) {
+        return;
+    }
+
+    struct aws_uuid uuid;
+    AWS_FATAL_ASSERT(aws_uuid_init(&uuid) == AWS_OP_SUCCESS);
+    char uuid_str[AWS_UUID_STR_LEN] = "";
+    struct aws_byte_buf uuid_buf = aws_byte_buf_from_empty_array(uuid_str, sizeof(uuid_str));
+    AWS_FATAL_ASSERT(aws_uuid_to_str(&uuid, &uuid_buf) == AWS_OP_SUCCESS);
+
+    snprintf(
+        s_upload_folder_storage,
+        sizeof(s_upload_folder_storage),
+        "/upload/%.*s",
+        (int)uuid_buf.len,
+        (const char *)uuid_buf.buffer);
+    snprintf(
+        s_put_object_prefix_storage,
+        sizeof(s_put_object_prefix_storage),
+        "%s/put-object-test",
+        s_upload_folder_storage);
+
+    g_upload_folder = aws_byte_cursor_from_c_str(s_upload_folder_storage);
+    g_put_object_prefix = aws_byte_cursor_from_c_str(s_put_object_prefix_storage);
+}
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
@@ -134,6 +174,11 @@ static int s_s3_test_meta_request_body_callback(
     ++meta_request_test_results->body_chunk_count;
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
+    if (meta_request_test_results->verify_body_against_pattern) {
+        /* Bodies arrive on the meta request's delivery thread, one at a time, so a running CRC is safe here. */
+        meta_request_test_results->body_crc64nvme =
+            aws_checksums_crc64nvme_ex(body->ptr, body->len, meta_request_test_results->body_crc64nvme);
+    }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
         "Received range %" PRIu64 "-%" PRIu64 ". Expected range start: %" PRIu64,
@@ -484,6 +529,8 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
     }
 
     aws_s3_library_init(allocator);
+
+    s_ensure_upload_prefix();
 
     if (aws_mutex_init(&tester->synced_data.lock)) {
         return AWS_OP_ERR;
@@ -1582,6 +1629,68 @@ static int s_tester_check_client_thread_data(struct aws_s3_client *client) {
     return AWS_OP_SUCCESS;
 }
 
+/* Compare what a GET delivered against the pattern the object is made of. The range to check is taken from S3's
+ * response -- Content-Range when present (ranged and part-number GETs), else Content-Length -- so neither the
+ * expected bytes nor the expected range come from the client under test. */
+static int s_verify_downloaded_bytes_against_pattern(
+    const struct aws_s3_tester_meta_request_options *options,
+    struct aws_s3_meta_request_test_results *results) {
+
+    ASSERT_NOT_NULL(results->response_headers);
+
+    uint64_t object_offset = 0;
+    uint64_t length = 0;
+    if (aws_http_headers_has(results->response_headers, aws_byte_cursor_from_c_str("Content-Range"))) {
+        uint64_t range_end = 0;
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_range_response_header(results->response_headers, &object_offset, &range_end, NULL));
+        length = range_end - object_offset + 1;
+    } else {
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_length_response_header(results->allocator, results->response_headers, &length));
+    }
+
+    uint64_t actual_crc = 0;
+    if (options->get_options.file_on_disk) {
+        /* Where in the file this download's bytes start depends on how the file was opened. Anything before
+         * that offset was already in the file and is not ours to check. */
+        uint64_t file_offset = 0;
+        switch (options->get_options.recv_file_option) {
+            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
+                file_offset = options->get_options.recv_file_position;
+                break;
+            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+                file_offset = options->get_options.pre_exist_file_length;
+                break;
+            default:
+                break;
+        }
+        ASSERT_TRUE(
+            file_offset + length <= results->received_file_content.len,
+            "downloaded file is shorter than the range S3 reported: have %zu bytes, need %" PRIu64,
+            results->received_file_content.len,
+            file_offset + length);
+        actual_crc =
+            aws_checksums_crc64nvme_ex(results->received_file_content.buffer + (size_t)file_offset, (size_t)length, 0);
+    } else if (results->allow_out_of_order_body) {
+        ASSERT_UINT_EQUALS(length, results->received_body_content.len);
+        actual_crc =
+            aws_checksums_crc64nvme_ex(results->received_body_content.buffer, results->received_body_content.len, 0);
+    } else {
+        ASSERT_UINT_EQUALS(length, results->received_body_size);
+        actual_crc = results->body_crc64nvme;
+    }
+
+    uint64_t expected_crc = aws_s3_tester_pattern_crc64nvme(object_offset, length);
+    ASSERT_TRUE(
+        expected_crc == actual_crc,
+        "downloaded bytes for object range [%" PRIu64 ", %" PRIu64 ") do not match the expected pattern",
+        object_offset,
+        object_offset + length);
+
+    return AWS_OP_SUCCESS;
+}
+
 int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_tester *tester,
     struct aws_s3_tester_meta_request_options *options,
@@ -1954,6 +2063,7 @@ int aws_s3_tester_send_meta_request_with_options(
 
     out_results->algorithm = options->expected_validate_checksum_alg;
     out_results->allow_out_of_order_body = options->get_options.allow_out_of_order_body;
+    out_results->verify_body_against_pattern = options->get_options.verify_body_against_pattern;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -1979,7 +2089,8 @@ int aws_s3_tester_send_meta_request_with_options(
         FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
         ASSERT_NOT_NULL(file);
         ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
-        if (options->get_options.capture_file_content && out_results->received_file_size > 0) {
+        if ((options->get_options.capture_file_content || options->get_options.verify_body_against_pattern) &&
+            out_results->received_file_size > 0) {
             /* Hand the bytes to the test before the file is deleted at the end, so a test can check
              * where each part landed and not just how many bytes arrived. */
             size_t to_read = (size_t)out_results->received_file_size;
@@ -2021,6 +2132,9 @@ int aws_s3_tester_send_meta_request_with_options(
                 if (options->get_options.recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_REPLACE) {
                     ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
+            }
+            if (options->get_options.verify_body_against_pattern) {
+                ASSERT_SUCCESS(s_verify_downloaded_bytes_against_pattern(options, out_results));
             }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
@@ -2370,10 +2484,72 @@ int aws_s3_tester_upload_file_path_init(
     struct aws_byte_buf *out_path_buffer,
     struct aws_byte_cursor file_path) {
 
+    s_ensure_upload_prefix();
     ASSERT_SUCCESS(aws_byte_buf_init_copy_from_cursor(out_path_buffer, allocator, g_upload_folder));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(out_path_buffer, &file_path));
 
     return AWS_OP_SUCCESS;
+}
+
+/* One period of the pattern, copied out of stream_tester.h on first use. The period is measured rather than
+ * hardcoded: generate two periods' worth of text and find the first shift at which it repeats. That way a change
+ * to the literal in aws-c-io shows up here as a different period, not as a helper that silently regenerates the
+ * wrong bytes. */
+static uint8_t s_pattern_storage[4096];
+static struct aws_byte_cursor s_pattern_period = {0};
+
+static void s_ensure_pattern(void) {
+    if (s_pattern_period.len != 0) {
+        return;
+    }
+
+    struct aws_byte_buf sample;
+    s_byte_buf_init_autogenned(&sample, aws_default_allocator(), sizeof(s_pattern_storage), AWS_AUTOGEN_LOREM_IPSUM);
+
+    /* The smallest shift p at which the first half of the sample equals the same half shifted by p is the period:
+     * any smaller shift would make the text periodic with a shorter period, which this text is not. */
+    size_t half = sample.len / 2;
+    size_t period = 0;
+    for (size_t p = 1; p < half; ++p) {
+        if (memcmp(sample.buffer, sample.buffer + p, half) == 0) {
+            period = p;
+            break;
+        }
+    }
+    AWS_FATAL_ASSERT(period != 0 && "could not find the period of AWS_AUTOGEN_LOREM_IPSUM");
+
+    memcpy(s_pattern_storage, sample.buffer, period);
+    s_pattern_period = aws_byte_cursor_from_array(s_pattern_storage, period);
+    aws_byte_buf_clean_up(&sample);
+}
+
+int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offset, size_t length) {
+    s_ensure_pattern();
+
+    size_t phase = (size_t)(object_offset % s_pattern_period.len);
+    while (length > 0) {
+        size_t n = aws_min_size(length, s_pattern_period.len - phase);
+        struct aws_byte_cursor piece = aws_byte_cursor_from_array(s_pattern_period.ptr + phase, n);
+        ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &piece));
+        length -= n;
+        phase = 0;
+    }
+    return AWS_OP_SUCCESS;
+}
+
+uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length) {
+    s_ensure_pattern();
+
+    /* Walk the range one period at a time from the right phase; no allocation, no size limit. */
+    uint64_t crc = 0;
+    size_t phase = (size_t)(object_offset % s_pattern_period.len);
+    while (length > 0) {
+        size_t n = (size_t)aws_min_u64(length, s_pattern_period.len - phase);
+        crc = aws_checksums_crc64nvme_ex(s_pattern_period.ptr + phase, n, crc);
+        length -= n;
+        phase = 0;
+    }
+    return crc;
 }
 
 int aws_s3_tester_get_content_length(const struct aws_http_headers *headers, uint64_t *out_content_length) {
