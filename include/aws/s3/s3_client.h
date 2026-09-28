@@ -1030,6 +1030,9 @@ struct aws_s3_meta_request_options {
     /**
      * Set it to be true to delete the receive file on failure, otherwise, the file will be left as-is.
      * This only works with recv_filepath set.
+     * Cannot be used when writing into an existing file: meta request creation fails with
+     * AWS_ERROR_INVALID_ARGUMENT for AWS_S3_RECV_FILE_WRITE_TO_POSITION, and for AWS_S3_RECV_FILE_CREATE_OR_APPEND
+     * when the file already exists, since deleting would destroy content this transfer did not write.
      */
     bool recv_file_delete_on_failure;
 

@@ -2048,6 +2048,12 @@ int aws_s3_tester_send_meta_request_with_options(
                 ASSERT_TRUE(aws_path_exists(filepath_str));
             }
         }
+        if (filepath_str && options->get_options.file_on_disk &&
+            out_results->finished_error_code == AWS_ERROR_SUCCESS) {
+            /* Checked after shutdown, not just at finish: the file must survive meta request destroy
+             * too, whatever recv_file_delete_on_failure was set to. */
+            ASSERT_TRUE(aws_path_exists(filepath_str));
+        }
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
