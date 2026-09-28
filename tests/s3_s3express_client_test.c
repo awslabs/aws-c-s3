@@ -193,10 +193,26 @@ static int s_s3express_put_object_request(
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, key_cursor, g_test_body_content_type, upload_stream, 0);
 
+    /* Full-object checksum, computed from the source stream before the client touches it. Without this the
+     * test only proves S3 returned 200; with it S3 compares the assembled object against the source, so a
+     * multipart upload whose parts were stored out of order fails CompleteMultipartUpload instead of passing. */
+    struct aws_byte_buf encoded_checksum;
+    ASSERT_SUCCESS(
+        aws_s3_tester_encoded_checksum_of_stream(allocator, upload_stream, AWS_SCA_CRC64NVME, &encoded_checksum));
+    ASSERT_SUCCESS(aws_http_headers_set(
+        aws_http_message_get_headers(message),
+        aws_get_http_header_name_from_checksum_algorithm(AWS_SCA_CRC64NVME),
+        aws_byte_cursor_from_buf(&encoded_checksum)));
+    struct aws_s3_checksum_config checksum_config = {
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
+        .location = AWS_SCL_TRAILER,
+    };
+
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
     options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
     options.message = message;
+    options.checksum_config = &checksum_config;
     struct aws_signing_config_aws s3express_signing_config = {
         .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
         .service = g_s3express_service_name,
@@ -219,6 +235,7 @@ static int s_s3express_put_object_request(
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
+    aws_byte_buf_clean_up(&encoded_checksum);
     aws_http_message_release(message);
     aws_input_stream_release(upload_stream);
 

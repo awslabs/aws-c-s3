@@ -3146,7 +3146,7 @@ static int s_test_s3_get_object_part(struct aws_allocator *allocator, void *ctx)
 static int s_test_s3_put_object_helper(
     struct aws_allocator *allocator,
     enum aws_s3_client_tls_usage tls_usage,
-    uint32_t extra_meta_request_flag) {
+    bool acl_public_read) {
     struct aws_s3_tester tester;
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
@@ -3189,8 +3189,18 @@ static int s_test_s3_put_object_helper(
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(
-        &tester, client, 10, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS | extra_meta_request_flag, NULL));
+    /* 10 MiB with 5 MiB parts: a multipart upload. */
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .acl_public_read = acl_public_read,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     aws_string_destroy(endpoint);
 
@@ -3211,7 +3221,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_disabled, s_test_s3_put_object_tls_disabled
 static int s_test_s3_put_object_tls_disabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, 0));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DISABLED, false));
 
     return 0;
 }
@@ -3220,7 +3230,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_enabled, s_test_s3_put_object_tls_enabled)
 static int s_test_s3_put_object_tls_enabled(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, 0));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_ENABLED, false));
 
     return 0;
 }
@@ -3229,7 +3239,7 @@ AWS_TEST_CASE(test_s3_put_object_tls_default, s_test_s3_put_object_tls_default)
 static int s_test_s3_put_object_tls_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, 0));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, false));
 
     return 0;
 }
@@ -3238,7 +3248,7 @@ AWS_TEST_CASE(test_s3_multipart_put_object_with_acl, s_test_s3_multipart_put_obj
 static int s_test_s3_multipart_put_object_with_acl(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL));
+    ASSERT_SUCCESS(s_test_s3_put_object_helper(allocator, AWS_S3_TLS_DEFAULT, true));
 
     return 0;
 }
@@ -4695,7 +4705,22 @@ static int s_test_s3_put_object_content_md5_helper(
 
     ASSERT_TRUE(client != NULL);
 
-    ASSERT_SUCCESS(aws_s3_tester_send_put_object_meta_request(&tester, client, 10, flags, NULL));
+    /* 10 MiB: with the 5 MiB part size above it is a multipart upload, with 15 MiB a single PutObject. */
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .validate_type = (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS)
+                             ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS
+                             : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+        .put_options =
+            {
+                .object_size_mb = 10,
+                .valid_md5 = (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5) != 0,
+                .invalid_md5 = (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5) != 0,
+            },
+    };
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, NULL));
 
     client = aws_s3_client_release(client);
 
@@ -5288,8 +5313,11 @@ static int s_test_s3_round_trip_default_get_fc_helper(
                     .object_path_override = object_path,
                 },
         };
-        if (algorithm != AWS_SCA_SHA1 && algorithm != AWS_SCA_SHA256) {
-            /* Full object checksums doesn't support SHA. */
+        /* On a single PutObject a "full object checksum" is just the checksum of the body, which S3 accepts from
+         * any algorithm. On a multipart upload S3 derives it by combining the parts, so only the combinable
+         * CRCs qualify (aws_checksum_algorithm_is_combinable) and the SHA/XXHASH families must be skipped. */
+        bool is_multipart = MB_TO_BYTES((uint64_t)object_size_mb) > client_options.part_size;
+        if (!is_multipart || aws_checksum_algorithm_is_combinable(algorithm)) {
             put_options.put_options.full_object_checksum = full_object_checksum;
         }
 

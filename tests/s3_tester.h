@@ -259,8 +259,11 @@ struct aws_s3_tester_meta_request_options {
         bool eof_requires_extra_read;
         bool invalid_request;
         bool invalid_input_stream;
+        /* Add a Content-MD5 header: valid_md5 computes it over the body, invalid_md5 sends garbage. */
         bool valid_md5;
         bool invalid_md5;
+        /* Add the x-amz-acl header (the tester's fixed canned ACL), so the ACL code path is exercised. */
+        bool acl_public_read;
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
@@ -563,14 +566,6 @@ int aws_s3_tester_send_get_object_meta_request(
     uint32_t flags,
     struct aws_s3_meta_request_test_results *out_results);
 
-/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
-int aws_s3_tester_send_put_object_meta_request(
-    struct aws_s3_tester *tester,
-    struct aws_s3_client *client,
-    uint32_t object_size_mb,
-    uint32_t flags,
-    struct aws_s3_meta_request_test_results *out_results);
-
 int aws_s3_tester_validate_get_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags);
@@ -620,6 +615,16 @@ int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offs
 
 /* CRC64NVME of the pattern over [object_offset, object_offset + length), computed without materializing it. */
 uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length);
+
+/* Base64-encoded checksum of everything `input_stream` will produce, computed by reading it to memory and seeking
+ * back to the beginning. This is the value to put in an x-amz-checksum-* header as a full-object checksum: it is
+ * computed from the source, independent of how the client cuts the upload into parts, so S3's check of the
+ * assembled object against it fails the upload if any part was stored under the wrong number. */
+int aws_s3_tester_encoded_checksum_of_stream(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *input_stream,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *out_encoded_checksum);
 
 /* Create a file on disk based on the input stream. Return the file path */
 struct aws_string *aws_s3_tester_create_file(
