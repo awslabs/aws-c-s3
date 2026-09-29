@@ -66,8 +66,8 @@ const struct aws_byte_cursor g_pre_existing_object_async_error_xml =
 
 /* Everything a test uploads lands under /upload/<run-token>/. The bucket is shared by every CI run of every
  * branch of this repo (and by the language bindings), so with fixed keys a round-trip on one run could read back
- * an object a concurrent run had just overwritten -- an intermittent failure that looks exactly like a data
- * corruption bug. The token is a UUID generated once per process, on first use. The folder stays under upload/
+ * an object a concurrent run had just overwritten and fail intermittently. The token is a UUID generated once per
+ * process, on first use. The folder stays under upload/
  * so it remains inside the bucket's 1-day expiry rule (tests/test_helper/README.md); nothing needs to delete it.
  *
  * These are populated lazily rather than at aws_s3_tester_init: a few tests build their object path before they

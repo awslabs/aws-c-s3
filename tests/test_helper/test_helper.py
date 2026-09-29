@@ -69,10 +69,10 @@ ASYNC_ERROR_XML = (
 # same text for the pre-existing fixtures means a single verifier in the C tests can regenerate the
 # expected bytes for any object (uploaded or pre-existing) and compare a download against them.
 #
-# The bytes are deliberately NOT zeros: an all-zero object cannot reveal parts written out of order,
-# because every reordering of zeros is still zeros. This pattern is 446 bytes = 2 * 223 (223 is prime),
-# so its period never divides a power-of-two size; every MiB/KiB-aligned part boundary falls at a
-# different phase of the text and any part swap changes the byte sequence.
+# The bytes are deliberately NOT zeros: a uniform body cannot show where each byte ended up, only how many
+# arrived. This pattern is 446 bytes = 2 * 223 (223 is prime), so its period never divides a power-of-two
+# size; every MiB/KiB-aligned part boundary falls at a different phase of the text and no two parts of an
+# object are identical.
 #
 # If the literal in stream_tester.h ever changes, the pre-existing-object verification tests in
 # aws-c-s3 fail, which is the intended way to catch drift between the two copies.

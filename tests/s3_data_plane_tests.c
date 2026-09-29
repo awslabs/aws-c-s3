@@ -1897,7 +1897,7 @@ static int s_test_s3_get_object_range_parallel_write_content_verify(struct aws_a
      * (4 MiB, which no fixture has) and cannot be affected by a fixture refresh. The content is the same
      * pattern the fixtures carry; what matters is that it is not all one byte value, since a checksum over
      * uniform bytes cannot tell data that was written from a hole that never was, and a hole while the file
-     * still looks the right length is exactly what an out-of-order write bug produces. */
+     * still looks the right length is the case this test is about. */
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
@@ -9748,8 +9748,7 @@ static int s_test_s3_copy_object_helper(
 
     if (expected_error_code == AWS_ERROR_SUCCESS) {
         /* Download the copy and check it against the pattern the source fixture carries. The three copies above
-         * report size and status, which cannot tell a multipart copy whose parts were assembled in the wrong
-         * order from a correct one; only reading the bytes back can. */
+         * only report size and status; reading the bytes back is what shows the copy matches the source. */
         char destination_path[1024];
         snprintf(destination_path, sizeof(destination_path), "/" PRInSTR, AWS_BYTE_CURSOR_PRI(destination_key));
         /* The copy helper URI-encodes the destination key when it sets the request path (so "@" travels as
@@ -11659,7 +11658,6 @@ static int s_test_s3_upload_out_of_order_review(struct aws_allocator *allocator,
             {
                 .object_path_override = aws_byte_cursor_from_buf(&object_path_buf),
                 .object_size_mb = 39,
-                /* The pool above hands parts out in reverse order: the case a full-object checksum exists for. */
                 .full_object_checksum = AWS_TEST_FOC_HEADER,
             },
     };

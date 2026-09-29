@@ -240,10 +240,10 @@ struct aws_s3_tester_meta_request_options {
         /* Check the downloaded bytes against the pattern every tester-uploaded object, and every
          * pre-existing-* fixture, is made of (see aws_s3_tester_pattern_crc64nvme). The range to check
          * comes from S3's own Content-Range / Content-Length response headers, never from the client,
-         * so this is independent of the client's checksum path: a part stored under the wrong offset
-         * passes did_validate (the checksum matches what S3 sent) and fails here. Works for body
-         * callback delivery (in order or not) and for file_on_disk downloads (implies
-         * capture_file_content). Not for the mock server, whose bodies are canned. */
+         * so this is independent of the client's checksum path: did_validate proves the bytes match what
+         * S3 sent, this proves they match the source. Works for body callback delivery (in order or not)
+         * and for file_on_disk downloads (implies capture_file_content). Not for the mock server, whose
+         * bodies are canned. */
         bool verify_body_against_pattern;
     } get_options;
 
@@ -611,7 +611,8 @@ int aws_s3_tester_upload_file_path_init(
  * byte at any object offset is a pure function of that offset, and a download of any object -- uploaded or
  * pre-existing, whole or ranged, single part or multipart -- can be checked against a regenerated copy that
  * never passed through the client under test. The text's period (446 = 2 * 223, prime) does not divide any
- * power-of-two part size, so any two parts differ and a part stored at the wrong offset is always detectable. */
+ * power-of-two part size, so no two parts of an object are identical and the check is sensitive to where each
+ * byte landed, not just to how many arrived. */
 
 /* Append `length` bytes of the pattern, as they appear starting at `object_offset` in such an object. */
 int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offset, size_t length);
@@ -627,13 +628,11 @@ int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_re
 
 /* Full-object checksums.
  *
- * Per-part checksums prove each part arrived intact; they say nothing about whether S3 assembled the parts in the
- * right order, because a reordered object has every per-part checksum intact. A full-object checksum is computed
- * over the whole source before the client touches it and sent in an x-amz-checksum-<algorithm> header, so S3
- * compares the assembled object against the source and fails CompleteMultipartUpload (rather than returning 200)
- * if any part landed under the wrong number. That is the silent-corruption class these tests exist to catch.
- * Tests that upload via aws_s3_tester_send_meta_request_with_options get this from put_options.full_object_checksum;
- * the two helpers below are for tests that build their own PutObject message. */
+ * Per-part checksums cover each part on its own; a full-object checksum covers the object S3 assembles from them.
+ * It is computed over the whole source before the client touches it and sent in an x-amz-checksum-<algorithm>
+ * header, so S3 compares the assembled object against the source and fails CompleteMultipartUpload (rather than
+ * returning 200) if they differ. Tests that upload via aws_s3_tester_send_meta_request_with_options get this from
+ * put_options.full_object_checksum; the two helpers below are for tests that build their own PutObject message. */
 
 /* Base64-encoded checksum of everything `input_stream` produces from its current position to the end. The stream
  * is consumed and NOT rewound: hash a throwaway second instance of the same content, or seek back yourself if the

@@ -327,8 +327,8 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
             allocator, &request_host, key_cursor, g_test_body_content_type, input_streams[i], 0);
-        /* Full-object checksum (see s3_tester.h): many concurrent multipart uploads on one client is the closest
-         * this suite gets to the conditions behind silent part misordering, so each assembled object is checked. */
+        /* Full-object checksum (see s3_tester.h), so S3 checks each of the concurrent assembled objects against its
+         * source. */
         struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
         struct aws_s3_checksum_config checksum_config;
         ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
