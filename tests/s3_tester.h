@@ -44,6 +44,9 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 = 0x00000040,
     AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 = 0x00000080,
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_C_AES256 = 0x00000100,
+    /* aws_s3_tester_send_get_object_meta_request checks the downloaded bytes against the tester pattern by
+     * default; set this when the object is not pattern content (the async-error-xml fixture). */
+    AWS_S3_TESTER_SEND_META_REQUEST_SKIP_PATTERN_VERIFY = 0x00000200,
 };
 
 enum aws_s3_tester_sse_type {

@@ -2284,15 +2284,18 @@ int aws_s3_tester_send_get_object_meta_request(
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
     }
-    /* Every object this path downloads is either a tester upload or a pre-existing-* fixture, all of which carry the
-     * tester pattern, so a successful GET is always checked byte-for-byte against the source. */
-    out_results->verify_body_against_pattern = true;
+    /* The objects this path downloads are tester uploads or pre-existing-* fixtures carrying the tester pattern,
+     * so a successful GET is checked byte-for-byte against the source unless the caller opts out. */
+    bool verify_pattern = (flags & AWS_S3_TESTER_SEND_META_REQUEST_SKIP_PATTERN_VERIFY) == 0;
+    out_results->verify_body_against_pattern = verify_pattern;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
         ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, flags));
-        ASSERT_SUCCESS(aws_s3_tester_verify_body_against_pattern(out_results));
+        if (verify_pattern) {
+            ASSERT_SUCCESS(aws_s3_tester_verify_body_against_pattern(out_results));
+        }
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);

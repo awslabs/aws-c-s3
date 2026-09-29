@@ -2735,7 +2735,10 @@ static int s_test_s3_get_object_looks_like_async_error_xml(struct aws_allocator 
     (void)ctx;
 
     return s_test_s3_get_object_helper(
-        allocator, AWS_S3_TLS_ENABLED, 0 /*extra_meta_request_flag*/, g_pre_existing_object_async_error_xml);
+        allocator,
+        AWS_S3_TLS_ENABLED,
+        AWS_S3_TESTER_SEND_META_REQUEST_SKIP_PATTERN_VERIFY /* the fixture is XML, not the tester pattern */,
+        g_pre_existing_object_async_error_xml);
 }
 
 /* Same as above, but send the "GetObject" via AWS_S3_META_REQUEST_TYPE_DEFAULT
@@ -10277,7 +10280,8 @@ static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool mul
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                .verify_body_against_pattern = true,
+                /* No verify_body_against_pattern: the MRAP fronts buckets that test_helper.py does not manage
+                 * (see tests/test_helper/README.md), so their fixture content is not under this suite's control. */
             },
     };
 
