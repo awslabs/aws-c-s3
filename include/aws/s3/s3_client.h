@@ -1037,6 +1037,31 @@ struct aws_s3_meta_request_options {
     bool recv_file_delete_on_failure;
 
     /**
+     * Optional. In-memory download destination (zero-copy).
+     * If set, received object data is written directly into this caller-owned buffer -- no
+     * intermediate scratch buffer, no copy -- and `body_callback` is NOT invoked. buffer[0] holds
+     * the first byte of the requested range (object byte 0 for a full-object GET), and each part
+     * is written at its offset within that range.
+     *
+     * The capacity must hold the whole requested range; if the discovered range is larger, the
+     * meta request fails with AWS_ERROR_SHORT_BUFFER. Because the first part is received before
+     * the object size is known, the capacity must also be at least one part (part_size, or
+     * *object_size_hint if smaller); otherwise the meta request is not created and
+     * AWS_ERROR_SHORT_BUFFER is raised.
+     *
+     * The caller owns the memory: it must remain valid and unmoved until the finish callback
+     * fires; the client neither allocates nor frees it.
+     *
+     * Writing always starts at buffer[0]; any existing `len` is ignored. On success, `len` is set
+     * to the number of bytes downloaded (the requested range, clipped to the object size), so the
+     * data occupies [buffer, buffer + len). On failure, `len` is left unchanged and the buffer's
+     * contents are undefined.
+     *
+     * Mutually exclusive with recv_filepath and body_callback(_ex). Download (GET) only.
+     */
+    struct aws_byte_buf *recv_buffer;
+
+    /**
      * Optional.
      * Per-request override of the client's `out_of_order_delivery`. See that field for what the setting
      * means and what each sink defaults to.
