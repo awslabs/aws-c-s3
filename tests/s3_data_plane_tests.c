@@ -9743,8 +9743,14 @@ static int s_test_s3_copy_object_helper(
         struct aws_byte_buf encoded_destination_path;
         aws_byte_buf_init(&encoded_destination_path, allocator, sizeof(destination_path));
         ASSERT_SUCCESS(aws_byte_buf_append_encoding_uri_path(&encoded_destination_path, &unencoded_destination_path));
+        /* Smallest allowed buffer pool: two 2 GiB downloads at the default 1 GiB pool run concurrently in CI and
+         * OOM the TSan job. */
+        struct aws_s3_tester_client_options get_client_options = {
+            .memory_limit_in_bytes = MB_TO_BYTES(256),
+        };
         struct aws_s3_tester_meta_request_options get_options = {
             .allocator = allocator,
+            .client_options = &get_client_options,
             .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
             .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
             .get_options =
