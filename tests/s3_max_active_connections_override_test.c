@@ -220,8 +220,7 @@ TEST_CASE(s3_max_active_connections_override_enforced) {
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, test_object_path, g_test_body_content_type, input_stream, 0 /*flags*/);
 
-    /* Full-object checksum (see s3_tester.h), so the 40-part upload is also checked against its source. The test
-     * stream cannot seek, so hash a second instance of it. */
+    /* Full-object checksum; the test stream cannot seek, so hash a second instance. */
     struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, object_size);
     struct aws_s3_checksum_config checksum_config;
     ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(

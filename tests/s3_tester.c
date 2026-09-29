@@ -50,9 +50,7 @@ const struct aws_byte_cursor g_s3_sse_c_key_header =
 const struct aws_byte_cursor g_s3_sse_c_key_md5_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-md5");
 
-/* The pre-existing-* objects are shared, read-only fixtures uploaded once by tests/test_helper/test_helper.py.
- * Their names are deliberately fixed: every branch's CI and the language bindings read the same objects. Only
- * the objects tests *write* get per-run names (see s_ensure_upload_prefix below). */
+/* Fixed names: shared read-only fixtures from tests/test_helper/test_helper.py, read by every branch and binding. */
 
 const struct aws_byte_cursor g_pre_existing_object_1MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-1MB");
 const struct aws_byte_cursor g_pre_existing_object_10MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB");
@@ -64,14 +62,9 @@ const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FRO
 const struct aws_byte_cursor g_pre_existing_object_async_error_xml =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-async-error-xml");
 
-/* Everything a test uploads lands under /upload/<run-token>/. The bucket is shared by every CI run of every
- * branch of this repo (and by the language bindings), so with fixed keys a round-trip on one run could read back
- * an object a concurrent run had just overwritten and fail intermittently. The token is a UUID generated once per
- * process, on first use. The folder stays under upload/
- * so it remains inside the bucket's 1-day expiry rule (tests/test_helper/README.md); nothing needs to delete it.
- *
- * These are populated lazily rather than at aws_s3_tester_init: a few tests build their object path before they
- * have a tester (they hand NULL to aws_s3_tester_send_meta_request_with_options, which creates one). */
+/* Uploads go under /upload/<uuid>/ so concurrent CI runs sharing the bucket never read each other's objects; still
+ * under upload/ for the bucket's 1-day expiry rule. Populated lazily: some tests build their object path before
+ * they have a tester. */
 static char s_upload_folder_storage[64] = "";
 static char s_put_object_prefix_storage[96] = "";
 struct aws_byte_cursor g_upload_folder = {0};
@@ -175,7 +168,7 @@ static int s_s3_test_meta_request_body_callback(
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
     if (meta_request_test_results->verify_body_against_pattern) {
-        /* Bodies arrive on the meta request's delivery thread, one at a time, so a running CRC is safe here. */
+        /* Bodies arrive one at a time on the delivery thread, so a running CRC is safe. */
         meta_request_test_results->body_crc64nvme =
             aws_checksums_crc64nvme_ex(body->ptr, body->len, meta_request_test_results->body_crc64nvme);
     }
@@ -1629,9 +1622,8 @@ static int s_tester_check_client_thread_data(struct aws_s3_client *client) {
     return AWS_OP_SUCCESS;
 }
 
-/* Compare what a GET delivered against the pattern the object is made of. The range to check is taken from S3's
- * response -- Content-Range when present (ranged and part-number GETs), else Content-Length -- so neither the
- * expected bytes nor the expected range come from the client under test. */
+/* Compare a GET's bytes with the pattern over the range S3 reported (Content-Range, else Content-Length), so
+ * nothing expected comes from the client under test. */
 static int s_verify_downloaded_bytes_against_pattern(
     const struct aws_s3_tester_meta_request_options *options,
     struct aws_s3_meta_request_test_results *results) {
@@ -1652,8 +1644,7 @@ static int s_verify_downloaded_bytes_against_pattern(
 
     uint64_t actual_crc = 0;
     if (options->get_options.file_on_disk) {
-        /* Where in the file this download's bytes start depends on how the file was opened. Anything before
-         * that offset was already in the file and is not ours to check. */
+        /* Bytes before the write offset were already in the file and are not ours to check. */
         uint64_t file_offset = 0;
         switch (options->get_options.recv_file_option) {
             case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
@@ -1961,8 +1952,7 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream = aws_input_stream_release(input_stream);
             }
 
-            /* Put together a simple S3 Put Object request. aws_s3_test_put_object_request_new predates the options
-             * struct and still takes the legacy flag bits, so the typed options are translated into those here. */
+            /* Put together a simple S3 Put Object request. The message helper still takes legacy flag bits. */
             uint32_t message_flags = (uint32_t)options->sse_type;
             if (options->put_options.acl_public_read) {
                 message_flags |= AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL;
@@ -1977,8 +1967,7 @@ int aws_s3_tester_send_meta_request_with_options(
             }
 
             if (options->put_options.valid_md5) {
-                /* The body is the tester pattern from offset 0 (see aws_s3_tester_pattern_append), so the MD5 S3
-                 * will check the upload against can be computed from a regenerated copy. */
+                /* The body is the pattern from offset 0, so compute the MD5 over a regenerated copy. */
                 ASSERT_NOT_NULL(input_stream);
                 struct aws_byte_buf body_copy;
                 aws_byte_buf_init(&body_copy, allocator, upload_size_bytes);
@@ -2284,8 +2273,7 @@ int aws_s3_tester_send_get_object_meta_request(
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
     }
-    /* The objects this path downloads are tester uploads or pre-existing-* fixtures carrying the tester pattern,
-     * so a successful GET is checked byte-for-byte against the source unless the caller opts out. */
+    /* Everything this path fetches is pattern content unless the caller says otherwise. */
     bool verify_pattern = (flags & AWS_S3_TESTER_SEND_META_REQUEST_SKIP_PATTERN_VERIFY) == 0;
     out_results->verify_body_against_pattern = verify_pattern;
 
@@ -2424,10 +2412,8 @@ int aws_s3_tester_upload_file_path_init(
     return AWS_OP_SUCCESS;
 }
 
-/* One period of the pattern, copied out of stream_tester.h on first use. The period is measured rather than
- * hardcoded: generate two periods' worth of text and find the first shift at which it repeats. That way a change
- * to the literal in aws-c-io shows up here as a different period, not as a helper that silently regenerates the
- * wrong bytes. */
+/* One period of the pattern, measured from stream_tester.h output rather than hardcoded, so a change to the
+ * aws-c-io literal shows up as a different period instead of wrong bytes. */
 static uint8_t s_pattern_storage[4096];
 static struct aws_byte_cursor s_pattern_period = {0};
 
@@ -2439,8 +2425,7 @@ static void s_ensure_pattern(void) {
     struct aws_byte_buf sample;
     s_byte_buf_init_autogenned(&sample, aws_default_allocator(), sizeof(s_pattern_storage), AWS_AUTOGEN_LOREM_IPSUM);
 
-    /* The smallest shift p at which the first half of the sample equals the same half shifted by p is the period:
-     * any smaller shift would make the text periodic with a shorter period, which this text is not. */
+    /* The period is the smallest shift at which the sample repeats. */
     size_t half = sample.len / 2;
     size_t period = 0;
     for (size_t p = 1; p < half; ++p) {
@@ -2473,7 +2458,7 @@ int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offs
 uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length) {
     s_ensure_pattern();
 
-    /* Walk the range one period at a time from the right phase; no allocation, no size limit. */
+    /* One period at a time from the right phase; no allocation. */
     uint64_t crc = 0;
     size_t phase = (size_t)(object_offset % s_pattern_period.len);
     while (length > 0) {
@@ -2496,8 +2481,7 @@ int aws_s3_tester_encoded_checksum_of_stream(
 
     struct aws_byte_buf data;
     aws_byte_buf_init(&data, allocator, (size_t)length);
-    /* Read until the stream reports EOF rather than trusting one read to fill the buffer: a stream may hand
-     * back fewer bytes than asked for (the small_reads test relies on exactly that). */
+    /* A stream may return fewer bytes than asked for (small_reads), so read until EOF. */
     struct aws_stream_status status = {.is_end_of_stream = false};
     while (!status.is_end_of_stream && data.len < (size_t)length) {
         ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data));

@@ -77,9 +77,7 @@ static int s_test_s3_many_async_uploads_without_data(struct aws_allocator *alloc
         /* Erase content-length header, because Mountpoint always uploads with unknown content-length */
         aws_http_headers_erase(aws_http_message_get_headers(message), g_content_length_header_name);
 
-        /* No full-object checksum here: the content length is unknown up front (that is the point of this
-         * test), so the whole body cannot be hashed before the upload starts. A trailing per-request checksum
-         * is what is available on this path. */
+        /* Content length is unknown up front, so no full-object checksum; trailer checksum only. */
         struct aws_s3_checksum_config checksum_config = {
             .checksum_algorithm = AWS_SCA_CRC64NVME,
             .location = AWS_SCL_TRAILER,

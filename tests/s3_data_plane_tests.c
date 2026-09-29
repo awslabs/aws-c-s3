@@ -38,19 +38,17 @@ void s_s3_test_validate_checksum(
     const struct aws_s3_meta_request_result *result,
     void *user_data);
 
-/* The tester's pattern helpers are the oracle every content-verifying test in this file relies on, so check them
- * against the generator they claim to mirror (stream_tester.h) before trusting them anywhere else. */
+/* The pattern helpers are the oracle for every content check in this file; check them against stream_tester.h. */
 AWS_TEST_CASE(test_s3_tester_pattern_helpers, s_test_s3_tester_pattern_helpers)
 static int s_test_s3_tester_pattern_helpers(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-    /* Reference: what the tester's input stream actually uploads, regenerated the slow way from offset 0. */
+    /* Reference: what the tester's input stream uploads, generated from offset 0. */
     const size_t reference_len = 3 * 1024 * 1024 + 12345; /* not a multiple of the pattern period */
     struct aws_byte_buf reference;
     s_byte_buf_init_autogenned(&reference, allocator, reference_len, AWS_AUTOGEN_LOREM_IPSUM);
 
-    /* pattern_append from an arbitrary offset must reproduce the reference at that offset exactly, including
-     * across period boundaries and for lengths shorter than one period. */
+    /* Arbitrary offsets and lengths, including across period boundaries and shorter than one period. */
     const uint64_t offsets[] = {0, 1, 445, 446, 447, 1024 * 1024, 2 * 1024 * 1024 + 777};
     for (size_t i = 0; i < AWS_ARRAY_SIZE(offsets); ++i) {
         size_t offset = (size_t)offsets[i];
@@ -62,21 +60,21 @@ static int s_test_s3_tester_pattern_helpers(struct aws_allocator *allocator, voi
             ASSERT_UINT_EQUALS(lengths[j], regenerated.len);
             ASSERT_BIN_ARRAYS_EQUALS(reference.buffer + offset, lengths[j], regenerated.buffer, regenerated.len);
 
-            /* And the streaming CRC must agree with a CRC over the materialized bytes. */
+            /* The streaming CRC must match a CRC over the materialized bytes. */
             uint64_t expected_crc = aws_checksums_crc64nvme_ex(reference.buffer + offset, lengths[j], 0);
             ASSERT_UINT_EQUALS(expected_crc, aws_s3_tester_pattern_crc64nvme(offset, lengths[j]));
             aws_byte_buf_clean_up(&regenerated);
         }
     }
 
-    /* The property the whole exercise depends on: swapping two power-of-two-aligned parts changes the bytes. */
+    /* Aligned parts must differ. */
     const size_t part = 1024 * 1024;
     ASSERT_FALSE(memcmp(reference.buffer, reference.buffer + part, part) == 0);
     ASSERT_UINT_EQUALS(0, aws_s3_tester_pattern_crc64nvme(0, 0));
 
     aws_byte_buf_clean_up(&reference);
 
-    /* Per-run upload prefix: populated on first use, unique-looking, and inside the lifecycle-managed folder. */
+    /* Upload prefix: /upload/<uuid>/... */
     struct aws_byte_buf path;
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(allocator, &path, aws_byte_cursor_from_c_str("/x.txt")));
     struct aws_byte_cursor path_cursor = aws_byte_cursor_from_buf(&path);
@@ -1893,11 +1891,9 @@ static int s_test_s3_get_object_range_parallel_write_content_verify(struct aws_a
     struct aws_byte_buf expected_buf;
     s_byte_buf_init_autogenned(&expected_buf, allocator, (size_t)range_start + range_length, AWS_AUTOGEN_LOREM_IPSUM);
 
-    /* Upload a fresh object rather than reading a pre-existing-* fixture, so the test controls the exact size
-     * (4 MiB, which no fixture has) and cannot be affected by a fixture refresh. The content is the same
-     * pattern the fixtures carry; what matters is that it is not all one byte value, since a checksum over
-     * uniform bytes cannot tell data that was written from a hole that never was, and a hole while the file
-     * still looks the right length is the case this test is about. */
+    /* Upload a fresh 4 MiB object (no fixture has that size). Its content must not be uniform: a checksum over
+     * uniform bytes cannot tell written data from a hole, and a hole in a right-length file is what this test
+     * is about. */
     struct aws_byte_buf path_buf;
     AWS_ZERO_STRUCT(path_buf);
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
@@ -2910,7 +2906,7 @@ static int s_test_s3_get_object_backpressure_helper(
 
     struct aws_s3_meta_request_test_results meta_request_test_results;
     aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-    /* Backpressure changes when bodies are delivered, never what is in them: check the bytes too. */
+    /* Backpressure changes when bodies arrive, not what is in them. */
     meta_request_test_results.verify_body_against_pattern = true;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&tester, &options, &meta_request_test_results));
@@ -3211,7 +3207,6 @@ static int s_test_s3_put_object_helper(
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    /* 10 MiB with 5 MiB parts: a multipart upload. */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -3342,8 +3337,7 @@ static int s_test_s3_put_object_multiple_helper(
             messages[i] = aws_s3_test_put_object_request_new(
                 allocator, &host_cur, test_object_path, g_test_body_content_type, input_streams[i], 0);
         }
-        /* Full-object checksum (see s3_tester.h) over a second stream of the same body; the upload stream itself
-         * may already have been consumed into a file above. */
+        /* Full-object checksum over a second stream; the upload stream may already be consumed into a file. */
         struct aws_input_stream *checksum_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
         struct aws_s3_checksum_config checksum_config;
         ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
@@ -4759,7 +4753,6 @@ static int s_test_s3_put_object_content_md5_helper(
 
     ASSERT_TRUE(client != NULL);
 
-    /* 10 MiB: with the 5 MiB part size above it is a multipart upload, with 15 MiB a single PutObject. */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -5174,8 +5167,6 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
-    /* Checksum on the way up so S3 validates what it stored against the source, and pattern verification
-     * on the way down so the test checks the bytes it got back rather than just how many arrived. */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -5236,8 +5227,6 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
 
     struct aws_byte_cursor object_path = aws_byte_cursor_from_buf(&path_buf);
 
-    /* Checksum on the way up so S3 validates what it stored against the source, and pattern verification
-     * on the way down so the test checks the bytes it got back rather than just how many arrived. */
     struct aws_s3_tester_meta_request_options put_options = {
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
@@ -5379,9 +5368,8 @@ static int s_test_s3_round_trip_default_get_fc_helper(
                     .object_path_override = object_path,
                 },
         };
-        /* On a single PutObject a "full object checksum" is just the checksum of the body, which S3 accepts from
-         * any algorithm. On a multipart upload S3 derives it by combining the parts, so only the combinable
-         * CRCs qualify (aws_checksum_algorithm_is_combinable) and the SHA/XXHASH families must be skipped. */
+        /* Single PutObject: any algorithm works as a full-object checksum. Multipart: S3 combines the part
+         * checksums, so only combinable CRCs qualify. */
         bool is_multipart = MB_TO_BYTES((uint64_t)object_size_mb) > client_options.part_size;
         if (!is_multipart || aws_checksum_algorithm_is_combinable(algorithm)) {
             put_options.put_options.full_object_checksum = full_object_checksum;
@@ -9747,12 +9735,10 @@ static int s_test_s3_copy_object_helper(
         copy_source_uri));
 
     if (expected_error_code == AWS_ERROR_SUCCESS) {
-        /* Download the copy and check it against the pattern the source fixture carries. The three copies above
-         * only report size and status; reading the bytes back is what shows the copy matches the source. */
+        /* Read the copy back; size and status alone do not show it matches the source. */
         char destination_path[1024];
         snprintf(destination_path, sizeof(destination_path), "/" PRInSTR, AWS_BYTE_CURSOR_PRI(destination_key));
-        /* The copy helper URI-encodes the destination key when it sets the request path (so "@" travels as
-         * "%40"); the GET has to encode the same way or the special-character keys come back as 404. */
+        /* Encode like the copy helper did, or the "@" keys 404. */
         struct aws_byte_cursor unencoded_destination_path = aws_byte_cursor_from_c_str(destination_path);
         struct aws_byte_buf encoded_destination_path;
         aws_byte_buf_init(&encoded_destination_path, allocator, sizeof(destination_path));
@@ -10279,8 +10265,7 @@ static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool mul
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                /* No verify_body_against_pattern: the MRAP fronts buckets that test_helper.py does not manage
-                 * (see tests/test_helper/README.md), so their fixture content is not under this suite's control. */
+                /* No pattern check: the MRAP buckets are not managed by test_helper.py. */
             },
     };
 
@@ -10752,8 +10737,7 @@ static int s_test_s3_put_pause_resume_helper(
             .get_options =
                 {
                     .object_path = destination_key,
-                    /* No verify_body_against_pattern: this object was uploaded from aws_s3_test_input_stream, not the
-                     * tester pattern. The body callback above compares the bytes against that stream's own content. */
+                    /* No pattern check: uploaded from aws_s3_test_input_stream; the body callback checks the bytes. */
                 },
         };
 
@@ -11429,8 +11413,7 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
         .get_options =
             {
                 .object_path = destination_key,
-                /* No verify_body_against_pattern: this object was uploaded from aws_s3_test_input_stream, not the
-                 * tester pattern. The body callback above compares the bytes against that stream's own content. */
+                /* No pattern check: uploaded from aws_s3_test_input_stream; the body callback checks the bytes. */
             },
     };
     struct aws_s3_meta_request_test_results get_results;

@@ -193,7 +193,7 @@ static int s_s3express_put_object_request(
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, key_cursor, g_test_body_content_type, upload_stream, 0);
 
-    /* Full-object checksum (see s3_tester.h). The test stream cannot seek, so hash a second instance of it. */
+    /* Full-object checksum; the test stream cannot seek, so hash a second instance. */
     struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, content_length);
     struct aws_s3_checksum_config checksum_config;
     ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
@@ -327,8 +327,7 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
             allocator, &request_host, key_cursor, g_test_body_content_type, input_streams[i], 0);
-        /* Full-object checksum (see s3_tester.h), so S3 checks each of the concurrent assembled objects against its
-         * source. */
+        /* Full-object checksum; the test stream cannot seek, so hash a second instance. */
         struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
         struct aws_s3_checksum_config checksum_config;
         ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(

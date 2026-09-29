@@ -64,18 +64,11 @@ ASYNC_ERROR_XML = (
 )
 
 
-# Content of every sized pre-existing object. This is the exact AWS_AUTOGEN_LOREM_IPSUM literal from
-# aws-c-io's <aws/testing/stream_tester.h>, which is what the C tester streams for uploads. Using the
-# same text for the pre-existing fixtures means a single verifier in the C tests can regenerate the
-# expected bytes for any object (uploaded or pre-existing) and compare a download against them.
-#
-# The bytes are deliberately NOT zeros: a uniform body cannot show where each byte ended up, only how many
-# arrived. This pattern is 446 bytes = 2 * 223 (223 is prime), so its period never divides a power-of-two
-# size; every MiB/KiB-aligned part boundary falls at a different phase of the text and no two parts of an
-# object are identical.
-#
-# If the literal in stream_tester.h ever changes, the pre-existing-object verification tests in
-# aws-c-s3 fail, which is the intended way to catch drift between the two copies.
+# Content of every sized pre-existing object: the AWS_AUTOGEN_LOREM_IPSUM literal from aws-c-io's
+# <aws/testing/stream_tester.h>, the same text the C tester uploads, so one verifier covers uploaded and
+# pre-existing objects. Not zeros, because a uniform body only shows how many bytes arrived, not where.
+# Its period, 446 = 2 * 223, divides no power-of-two size, so no two parts of an object are identical.
+# If the literal in stream_tester.h changes, the C verification tests fail; that is the drift check.
 PATTERN = (
     'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore '
     'et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut '
@@ -116,11 +109,8 @@ def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
     else:
         body = size_or_body
 
-    # Always attach a CRC32 checksum. aws-c-s3's test_s3_get_object_file_path_direct_io_multi_part downloads
-    # pre-existing-10MB with response-checksum validation on and asserts that validation happened with
-    # CRC32, so the fixture must carry one. boto3 >= 1.36 does this by default; older versions do not,
-    # and relying on the default would let a re-run of this script from an older environment silently
-    # break that test on every branch.
+    # test_s3_get_object_file_path_direct_io_multi_part asserts CRC32 validation on pre-existing-10MB, so the
+    # fixture must carry one. boto3 >= 1.36 adds it by default; older versions do not, so be explicit.
     args = {'Bucket': bucket, 'Key': keyname, 'Body': body, 'ChecksumAlgorithm': 'CRC32'}
     if sse == 'aes256':
         args['ServerSideEncryption'] = 'AES256'
