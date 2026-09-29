@@ -19,6 +19,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/file.h>
+#include <aws/common/math.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/io/async_stream.h>
@@ -405,16 +406,17 @@ static int s_s3_meta_request_init_recv_file(
     if (file_opened) {
         fclose(init_file);
         init_file = NULL;
+
+        /* Armed as soon as this meta request has opened -- and so possibly created or truncated -- the file, and
+         * before anything after the open can fail, so that failure is cleaned up too. Arming it before the open
+         * would let an init failure that never touched the file, such as CREATE_NEW finding one already there,
+         * delete a file this transfer does not own. */
+        meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
     }
 
     if (!file_opened || file_length_read_failed) {
         return AWS_OP_ERR;
     }
-
-    /* Armed only now that this meta request has opened -- and so possibly created or truncated --
-     * the file. Arming it earlier would let an init failure that never touched the file, such as
-     * CREATE_NEW finding one already there, delete a file this transfer does not own. */
-    meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
 
     /* Additional init-time fallback checks for O_DIRECT */
     if (direct_io && !aws_file_direct_io_is_supported()) {
@@ -2874,8 +2876,10 @@ static int s_s3_recv_file_offset(
     }
 
     /* Ahead of the origin there is no file to map onto: the subtraction would wrap and the write would
-     * land somewhere far past the end of the file. */
-    if (object_range_start < meta_request->recv_file_object_range_origin) {
+     * land somewhere far past the end of the file. The checked subtraction is the guard, so the check and
+     * the value it protects cannot drift apart. */
+    uint64_t offset_from_base = 0;
+    if (aws_sub_u64_checked(object_range_start, meta_request->recv_file_object_range_origin, &offset_from_base)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Object range start %" PRIu64 " precedes the range origin %" PRIu64 ", so it has no place in the "
@@ -2883,11 +2887,24 @@ static int s_s3_recv_file_offset(
             (void *)meta_request,
             object_range_start,
             meta_request->recv_file_object_range_origin);
+        /* Replaces the overflow error the checked subtraction raised: a range ahead of the origin is a state this
+         * code should never reach, not an arithmetic accident. */
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    *out_file_offset =
-        meta_request->recv_file_base_offset + (object_range_start - meta_request->recv_file_object_range_origin);
+    /* A large base offset, such as a WRITE_TO_POSITION recv_file_position, can wrap the sum around to a small
+     * offset, which would overwrite the start of the file without any error. */
+    if (aws_add_u64_checked(meta_request->recv_file_base_offset, offset_from_base, out_file_offset)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: File offset for object range start %" PRIu64 " overflows: base offset %" PRIu64 " plus %" PRIu64
+            " does not fit in 64 bits.",
+            (void *)meta_request,
+            object_range_start,
+            meta_request->recv_file_base_offset,
+            offset_from_base);
+        return AWS_OP_ERR;
+    }
     return AWS_OP_SUCCESS;
 }
 
@@ -3398,8 +3415,11 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
         /* END CRITICAL SECTION */
     }
 
-    /* Releases the buffer ticket, which is what frees this part's pool memory. */
+    /* Order matters: the destroy below releases this task's meta request reference, which may be the last one and
+     * take the client's last reference with it, after which the client can be freed at any moment. So the client
+     * must be used before the destroy, never after. */
     aws_s3_client_schedule_process_work(client);
+    /* Releases the buffer ticket, which is what frees this part's pool memory. */
     s_s3_body_write_task_args_destroy(body_write);
 }
 
