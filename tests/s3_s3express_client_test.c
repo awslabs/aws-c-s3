@@ -193,10 +193,18 @@ static int s_s3express_put_object_request(
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, key_cursor, g_test_body_content_type, upload_stream, 0);
 
+    /* Full-object checksum; the test stream cannot seek, so hash a second instance. */
+    struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, content_length);
+    struct aws_s3_checksum_config checksum_config;
+    ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+        allocator, message, checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
+    aws_input_stream_release(checksum_stream);
+
     struct aws_s3_meta_request_options options;
     AWS_ZERO_STRUCT(options);
     options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
     options.message = message;
+    options.checksum_config = &checksum_config;
     struct aws_signing_config_aws s3express_signing_config = {
         .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
         .service = g_s3express_service_name,
@@ -319,11 +327,18 @@ TEST_CASE(s3express_client_put_object_multipart_multiple) {
 
         struct aws_http_message *message = aws_s3_test_put_object_request_new(
             allocator, &request_host, key_cursor, g_test_body_content_type, input_streams[i], 0);
+        /* Full-object checksum; the test stream cannot seek, so hash a second instance. */
+        struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, MB_TO_BYTES(10));
+        struct aws_s3_checksum_config checksum_config;
+        ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+            allocator, message, checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
+        aws_input_stream_release(checksum_stream);
 
         struct aws_s3_meta_request_options options;
         AWS_ZERO_STRUCT(options);
         options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
         options.message = message;
+        options.checksum_config = &checksum_config;
         struct aws_signing_config_aws s3express_signing_config = {
             .algorithm = AWS_SIGNING_ALGORITHM_V4_S3EXPRESS,
             .service = g_s3express_service_name,

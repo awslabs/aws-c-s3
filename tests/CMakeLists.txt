@@ -28,6 +28,7 @@ add_test_case(test_s3_get_source_object_size_message_new)
 
 add_net_test_case(test_s3_put_object_custom_md5)
 
+add_test_case(test_s3_tester_pattern_helpers)
 add_net_test_case(test_s3_client_create_destroy)
 add_net_test_case(test_s3_client_create_error)
 add_net_test_case(test_s3_client_create_error_with_invalid_memory_limit_config)

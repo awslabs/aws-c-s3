@@ -64,8 +64,36 @@ ASYNC_ERROR_XML = (
 )
 
 
+# Content of every sized pre-existing object: the AWS_AUTOGEN_LOREM_IPSUM literal from aws-c-io's
+# <aws/testing/stream_tester.h>, the same text the C tester uploads, so one verifier covers uploaded and
+# pre-existing objects. Not zeros, because a uniform body only shows how many bytes arrived, not where.
+# Its period, 446 = 2 * 223, divides no power-of-two size, so no two parts of an object are identical.
+# If the literal in stream_tester.h changes, the C verification tests fail; that is the drift check.
+PATTERN = (
+    'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore '
+    'et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut '
+    'aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse '
+    'cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa '
+    'qui officia deserunt mollit anim id est laborum. '
+).encode('ascii')
+
+
 def create_bytes(size):
-    return bytes(size)
+    """Return `size` bytes of PATTERN repeated, starting at phase 0.
+
+    Built by copying a large tile whose length is a multiple of len(PATTERN), so the pattern stays in
+    phase across tile boundaries and peak memory stays near `size` even for the multi-GB fixtures.
+    """
+    if size == 0:
+        return b''
+    tile_len = (64 * MB // len(PATTERN)) * len(PATTERN)
+    tile = PATTERN * (tile_len // len(PATTERN))
+    body = bytearray(size)
+    view = memoryview(body)
+    for offset in range(0, size, tile_len):
+        n = min(tile_len, size - offset)
+        view[offset:offset + n] = tile[:n]
+    return bytes(body)
 
 
 def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
@@ -81,7 +109,9 @@ def put_pre_existing_objects(size_or_body, keyname, bucket=BUCKET_NAME_BASE,
     else:
         body = size_or_body
 
-    args = {'Bucket': bucket, 'Key': keyname, 'Body': body}
+    # test_s3_get_object_file_path_direct_io_multi_part asserts CRC32 validation on pre-existing-10MB, so the
+    # fixture must carry one. boto3 >= 1.36 adds it by default; older versions do not, so be explicit.
+    args = {'Bucket': bucket, 'Key': keyname, 'Body': body, 'ChecksumAlgorithm': 'CRC32'}
     if sse == 'aes256':
         args['ServerSideEncryption'] = 'AES256'
     elif sse == 'aes256-c':
