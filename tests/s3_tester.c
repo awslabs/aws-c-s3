@@ -1683,9 +1683,8 @@ static int s_verify_downloaded_bytes_against_pattern(
 }
 
 int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_results *results) {
-    struct aws_s3_tester_meta_request_options verify_options = {
-        .get_options = {.verify_body_against_pattern = true},
-    };
+    struct aws_s3_tester_meta_request_options verify_options;
+    AWS_ZERO_STRUCT(verify_options);
     return s_verify_downloaded_bytes_against_pattern(&verify_options, results);
 }
 
@@ -2068,7 +2067,11 @@ int aws_s3_tester_send_meta_request_with_options(
 
     out_results->algorithm = options->expected_validate_checksum_alg;
     out_results->allow_out_of_order_body = options->get_options.allow_out_of_order_body;
-    out_results->verify_body_against_pattern = options->get_options.verify_body_against_pattern;
+    bool is_get = meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
+                  (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
+                   options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET);
+    bool verify_pattern = is_get && !options->mock_server && !options->get_options.skip_pattern_verify;
+    out_results->verify_body_against_pattern = verify_pattern;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -2094,8 +2097,7 @@ int aws_s3_tester_send_meta_request_with_options(
         FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
         ASSERT_NOT_NULL(file);
         ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
-        if ((options->get_options.capture_file_content || options->get_options.verify_body_against_pattern) &&
-            out_results->received_file_size > 0) {
+        if ((options->get_options.capture_file_content || verify_pattern) && out_results->received_file_size > 0) {
             /* Hand the bytes to the test before the file is deleted at the end, so a test can check
              * where each part landed and not just how many bytes arrived. */
             size_t to_read = (size_t)out_results->received_file_size;
@@ -2138,7 +2140,7 @@ int aws_s3_tester_send_meta_request_with_options(
                     ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
             }
-            if (options->get_options.verify_body_against_pattern) {
+            if (verify_pattern) {
                 ASSERT_SUCCESS(s_verify_downloaded_bytes_against_pattern(options, out_results));
             }
             break;

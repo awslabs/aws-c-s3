@@ -1499,7 +1499,6 @@ static int s_test_s3_get_object_multiple_serial(struct aws_allocator *allocator,
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
     };
 
@@ -1547,7 +1546,6 @@ static int s_test_s3_get_object_file_path(struct aws_allocator *allocator, void 
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -1637,7 +1635,6 @@ static int s_test_s3_get_object_file_path_append(struct aws_allocator *allocator
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
                 .pre_exist_file_length = pre_exist_file_length,
@@ -1740,7 +1737,6 @@ static int s_test_s3_get_object_file_path_direct_io(struct aws_allocator *alloca
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -2345,7 +2341,6 @@ static int s_test_s3_get_object_file_path_direct_io_append_unaligned_fallback(
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND,
                 .pre_exist_file_length = 10,
@@ -2398,7 +2393,6 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_unaligned_
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
                 .recv_file_position = 100,
@@ -2454,7 +2448,6 @@ static int s_test_s3_get_object_file_path_direct_io_write_to_position_aligned(
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
                 .recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION,
                 .recv_file_position = 4096,
@@ -2509,7 +2502,6 @@ static int s_test_s3_get_object_file_path_direct_io_multi_part(struct aws_alloca
         .get_options =
             {
                 .object_path = g_pre_existing_object_10MB,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -2563,7 +2555,6 @@ static int s_test_s3_get_object_file_path_direct_io_unaligned_part_size_fallback
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -2760,6 +2751,8 @@ static int s_test_s3_default_get_object_looks_like_async_error_xml(struct aws_al
         .get_options =
             {
                 .object_path = g_pre_existing_object_async_error_xml,
+                /* The fixture is XML, not the tester pattern. */
+                .skip_pattern_verify = true,
             },
     };
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(NULL, &options, NULL));
@@ -3670,7 +3663,6 @@ static int s_test_s3_put_object_less_than_part_size_with_content_encoding(struct
         .get_options =
             {
                 .object_path = object_path_cursor,
-                .verify_body_against_pattern = true,
             },
     };
 
@@ -3746,7 +3738,6 @@ static int s_test_s3_put_object_mpu_with_content_encoding(struct aws_allocator *
         .get_options =
             {
                 .object_path = object_path_cursor,
-                .verify_body_against_pattern = true,
             },
     };
 
@@ -5192,7 +5183,6 @@ static int s_test_s3_round_trip(struct aws_allocator *allocator, void *ctx) {
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
     };
 
@@ -5252,7 +5242,6 @@ static int s_test_s3_round_trip_default_get(struct aws_allocator *allocator, voi
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .default_type_options =
             {
@@ -5389,7 +5378,6 @@ static int s_test_s3_round_trip_default_get_fc_helper(
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                 },
             .finish_callback = s_s3_test_validate_checksum,
             .headers_callback = s_s3_validate_headers_checksum_set,
@@ -5474,7 +5462,6 @@ static int s_test_s3_round_trip_multipart_get_fc_helper(struct aws_allocator *al
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
         .headers_callback = s_s3_validate_headers_checksum_set,
@@ -5593,7 +5580,6 @@ static int s_test_s3_multipart_get_full_object_checksum_helper(
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                 },
             .finish_callback = s_s3_test_validate_checksum,
         };
@@ -5706,7 +5692,6 @@ static int s_test_s3_round_trip_mpu_multipart_get_fc_helper(
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
     };
@@ -5806,7 +5791,6 @@ static int s_test_s3_download_empty_file_with_checksum_helper(
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
         .object_size_hint =
@@ -5889,7 +5873,6 @@ static int s_test_s3_download_single_part_file_with_checksum(struct aws_allocato
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
         .object_size_hint = &object_size_hint,
@@ -5994,7 +5977,6 @@ static int s_test_s3_download_multipart_file_with_checksum(struct aws_allocator 
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .object_size_hint = &object_size_hint,
     };
@@ -6145,7 +6127,6 @@ static int s_test_s3_round_trip_mpu_multipart_get_with_list_algorithm_fc(struct 
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_no_validate_checksum,
     };
@@ -6214,7 +6195,6 @@ static int s_test_s3_round_trip_mpu_default_get_fc(struct aws_allocator *allocat
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .default_type_options =
             {
@@ -6304,7 +6284,6 @@ static int s_test_s3_round_trip_with_filepath_helper(
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
                 .file_on_disk = true,
             },
     };
@@ -6601,7 +6580,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6633,7 +6611,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6666,7 +6643,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart(struct aws
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = false,
                 },
@@ -6790,7 +6766,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_multipart_with_buffe
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6884,7 +6859,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6914,7 +6888,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = true,
                 },
@@ -6943,7 +6916,6 @@ static int s_test_s3_round_trip_dynamic_range_size_download_single_part(struct a
             .get_options =
                 {
                     .object_path = object_path,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                     .force_dynamic_part_size = false,
                 },
@@ -9010,7 +8982,6 @@ static int s_test_s3_auto_ranged_get_sending_user_agent(struct aws_allocator *al
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
-                    .verify_body_against_pattern = true,
                 },
         };
 
@@ -9044,7 +9015,6 @@ static int s_test_s3_auto_ranged_get_file_sending_user_agent(struct aws_allocato
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
-                    .verify_body_against_pattern = true,
                     .file_on_disk = true,
                 },
         };
@@ -9147,7 +9117,6 @@ static int s_test_s3_default_sending_meta_request_user_agent(struct aws_allocato
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
-                    .verify_body_against_pattern = true,
                 },
         };
 
@@ -9306,7 +9275,6 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 .get_options =
                     {
                         .object_path = object_names[object_name_index],
-                        .verify_body_against_pattern = true,
                         .object_range = ranges[range_index],
                     },
                 .sse_type = object_sse_types[object_name_index],
@@ -9340,7 +9308,6 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
                 .get_options =
                     {
                         .object_path = object_names[object_name_index],
-                        .verify_body_against_pattern = true,
                         .object_range = ranges[range_index],
                     },
                 .sse_type = object_sse_types[object_name_index],
@@ -9478,7 +9445,6 @@ static int s_test_s3_range_requests_less_than_a_part(struct aws_allocator *alloc
             .get_options =
                 {
                     .object_path = g_pre_existing_object_1MB,
-                    .verify_body_against_pattern = true,
                     .object_range = ranges[range_index],
                 },
         };
@@ -9630,7 +9596,6 @@ static int s_test_s3_empty_file_edge_case(struct aws_allocator *allocator, void 
                 {
                     .force_dynamic_part_size = true,
                     .object_path = g_pre_existing_empty_object,
-                    .verify_body_against_pattern = true,
                 },
         };
 
@@ -9756,7 +9721,6 @@ static int s_test_s3_copy_object_helper(
             .get_options =
                 {
                     .object_path = aws_byte_cursor_from_buf(&encoded_destination_path),
-                    .verify_body_against_pattern = true,
                 },
         };
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, NULL));
@@ -10112,6 +10076,7 @@ static int s_test_s3_copy_object_properties_helper(
                 .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
                 .operation_name = aws_byte_cursor_from_c_str("HeadObject"),
             },
+        .get_options = {.skip_pattern_verify = true}, /* HEAD has no body. */
     };
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&head_tester, &head_options, &head_results));
@@ -10175,6 +10140,7 @@ static int s_test_s3_copy_object_properties_helper(
                     .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
                     .operation_name = aws_byte_cursor_from_c_str("GetObjectTagging"),
                 },
+            .get_options = {.skip_pattern_verify = true}, /* The body is the tag set XML. */
         };
 
         ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tag_tester, &tag_options, &tag_results));
@@ -10271,7 +10237,8 @@ static int s_s3_get_object_mrap_helper(struct aws_allocator *allocator, bool mul
         .get_options =
             {
                 .object_path = g_pre_existing_object_1MB,
-                /* No pattern check: the MRAP buckets are not managed by test_helper.py. */
+                /* The MRAP buckets are not managed by test_helper.py. */
+                .skip_pattern_verify = true,
             },
     };
 
@@ -10743,7 +10710,8 @@ static int s_test_s3_put_pause_resume_helper(
             .get_options =
                 {
                     .object_path = destination_key,
-                    /* No pattern check: uploaded from aws_s3_test_input_stream; the body callback checks the bytes. */
+                    /* Uploaded from aws_s3_test_input_stream; the body callback checks the bytes. */
+                    .skip_pattern_verify = true,
                 },
         };
 
@@ -11419,7 +11387,8 @@ static int s_test_s3_put_pause_resume_async_happy_path(struct aws_allocator *all
         .get_options =
             {
                 .object_path = destination_key,
-                /* No pattern check: uploaded from aws_s3_test_input_stream; the body callback checks the bytes. */
+                /* Uploaded from aws_s3_test_input_stream; the body callback checks the bytes. */
+                .skip_pattern_verify = true,
             },
     };
     struct aws_s3_meta_request_test_results get_results;
@@ -11859,7 +11828,6 @@ static int s_test_s3_upload_review_checksum_location_none(struct aws_allocator *
         .get_options =
             {
                 .object_path = object_path,
-                .verify_body_against_pattern = true,
             },
         .finish_callback = s_s3_test_validate_checksum,
     };
@@ -12062,7 +12030,6 @@ static int s_test_s3_get_object_size_hint_sizes_first_request_buffer(struct aws_
         .get_options =
             {
                 .object_path = g_pre_existing_object_10MB,
-                .verify_body_against_pattern = true,
             },
         .object_size_hint = &object_size_hint,
     };
@@ -12125,7 +12092,6 @@ static int s_test_s3_get_object_size_hint_too_small_falls_back_to_ranged_get(
         .get_options =
             {
                 .object_path = g_pre_existing_object_10MB,
-                .verify_body_against_pattern = true,
             },
         .object_size_hint = &object_size_hint,
     };

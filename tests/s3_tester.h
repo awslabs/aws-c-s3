@@ -236,10 +236,10 @@ struct aws_s3_tester_meta_request_options {
          * body callback stops asserting each range continues the last one, and instead assembles the
          * object into out_results->received_body_content by range_start. */
         bool allow_out_of_order_body;
-        /* Compare the downloaded bytes with the tester pattern (see aws_s3_tester_pattern_crc64nvme) over the
-         * range S3 reports in Content-Range / Content-Length; independent of the client's checksum path.
-         * Implies capture_file_content for file_on_disk. Not for the mock server. */
-        bool verify_body_against_pattern;
+        /* A successful GET is checked against the tester pattern (see aws_s3_tester_pattern_crc64nvme) over the
+         * range S3 reports, independent of the client's checksum path. Set this when the object is not pattern
+         * content. Always skipped for the mock server. */
+        bool skip_pattern_verify;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -347,7 +347,7 @@ struct aws_s3_meta_request_test_results {
      * out-of-order test could just as well have delivered everything in order. */
     bool body_arrived_out_of_order;
 
-    /* Mirrors get_options.verify_body_against_pattern; body_crc64nvme is the running CRC of in-order body
+    /* Whether the pattern check runs for this request; body_crc64nvme is the running CRC of in-order body
      * callbacks (out-of-order delivery is checked from received_body_content instead). */
     bool verify_body_against_pattern;
     uint64_t body_crc64nvme;
