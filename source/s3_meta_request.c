@@ -724,21 +724,13 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
         }
-        /* The first part is written before the object size is known, so the buffer must hold at
-         * least one part up front. If the caller gave a size hint smaller than a part, that's
-         * the most the first part can be. */
-        uint64_t min_capacity = part_size;
-        if (options->object_size_hint != NULL && *options->object_size_hint < min_capacity) {
-            min_capacity = *options->object_size_hint;
-        }
-        if (options->recv_buffer->capacity < min_capacity) {
+        /* A buffer smaller than a part is fine: the first request is sized down to fit it. An empty
+         * buffer can't hold even that first request. */
+        if (options->recv_buffer->capacity == 0) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
-                "id=%p Cannot create meta request: recv_buffer capacity %zu is smaller than the first part "
-                "(%" PRIu64 " bytes).",
-                (void *)meta_request,
-                options->recv_buffer->capacity,
-                min_capacity);
+                "id=%p Cannot create meta request: recv_buffer has no capacity.",
+                (void *)meta_request);
             aws_raise_error(AWS_ERROR_SHORT_BUFFER);
             goto error;
         }

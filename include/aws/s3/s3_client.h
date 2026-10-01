@@ -1044,10 +1044,10 @@ struct aws_s3_meta_request_options {
      * is written at its offset within that range.
      *
      * The capacity must hold the whole requested range; if the discovered range is larger, the
-     * meta request fails with AWS_ERROR_SHORT_BUFFER. Because the first part is received before
-     * the object size is known, the capacity must also be at least one part (part_size, or
-     * *object_size_hint if smaller); otherwise the meta request is not created and
-     * AWS_ERROR_SHORT_BUFFER is raised.
+     * meta request fails with AWS_ERROR_SHORT_BUFFER. The buffer may be smaller than part_size:
+     * the first request is then sized down to the buffer's capacity, so an object that fits is
+     * downloaded in that one request. A buffer with zero capacity is rejected at creation with
+     * AWS_ERROR_SHORT_BUFFER.
      *
      * The caller owns the memory: it must remain valid and unmoved until the finish callback
      * fires; the client neither allocates nor frees it.
