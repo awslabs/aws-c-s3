@@ -2563,7 +2563,7 @@ void s_acquire_mem_and_prepare_request(
          * or delivered. (Capacity is checked at creation and against the discovered range in
          * auto_ranged_get; the bounds check below is the backstop.) */
         struct aws_s3_meta_request *mr = request->meta_request;
-        if (mr->recv_buffer != NULL && mr->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+        if (mr->recv_buffer != NULL) {
             size_t part_buf_size = aws_min_size(request->buffer_size, request_size);
 
             /* Place the part relative to the start of the requested range, not the object. */
