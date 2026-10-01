@@ -99,6 +99,10 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 
+/* Eight threads is enough to saturate most disk setups. Mirroring the full event-loop count on a
+ * large host (e.g. 192 vCPUs) wastes threads and file descriptors without improving throughput. */
+static const uint16_t s_default_max_num_file_io_threads = 8;
+
 /* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
  * object order. Consulted below both the request and the client setting, so it changes the default rather
  * than overruling a caller. See `aws_s3_client.out_of_order_delivery_env`. */
@@ -895,7 +899,8 @@ struct aws_s3_client *aws_s3_client_new(
 
     /* Set up file I/O ELG.
      * Priority: config field (non-zero) > env var > default.
-     * 0 means "not set" at every level. Default is min(8, bootstrap ELG loop count). */
+     * 0 means "not set" at every level.
+     * Default is min(s_default_max_num_file_io_threads, bootstrap ELG loop count). */
     {
         uint16_t num_event_loops =
             (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
@@ -926,9 +931,10 @@ struct aws_s3_client *aws_s3_client_new(
         }
 
         if (num_file_io_threads == 0) {
-            /* Default: min(8, elg_count). Eight threads is enough to saturate most disk setups;
-             * mirroring the full ELG count on a large host wastes threads and file descriptors. */
-            num_file_io_threads = num_event_loops < 8 ? num_event_loops : 8;
+            /* Default: min(s_default_max_num_file_io_threads, elg_count).
+             * See the constant definition for the rationale. */
+            num_file_io_threads =
+                num_event_loops < s_default_max_num_file_io_threads ? num_event_loops : s_default_max_num_file_io_threads;
             if (num_file_io_threads < 1) {
                 num_file_io_threads = 1;
             }

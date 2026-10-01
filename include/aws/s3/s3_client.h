@@ -828,7 +828,8 @@ struct aws_s3_client_config {
      * This config field takes priority over the env var; the env var is only consulted
      * when this field is 0 (default).
      *
-     * Defaults to min(8, number of event loops in the client bootstrap's event loop group).
+     * Defaults to min(s_default_max_num_file_io_threads, number of event loops in the client
+     * bootstrap's event loop group).
      */
     uint16_t num_file_io_threads;
 };

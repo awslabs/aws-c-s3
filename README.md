@@ -123,7 +123,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    ```
 
    **Default Behavior**:
-   When neither the config field nor the environment variable is set, the default is `min(8, N)` where N is the number of event loops in the client bootstrap's event loop group. Eight threads is enough to saturate most disk setups; mirroring the full event-loop count on a large host (e.g. 192 vCPUs) would waste threads and file descriptors.
+   When neither the config field nor the environment variable is set, the default is `min(DEFAULT_MAX, N)` where DEFAULT_MAX is currently 8 (see `s_default_max_num_file_io_threads` in `s3_client.c`) and N is the number of event loops in the client bootstrap's event loop group.
 
    **Notes**:
    * The `num_file_io_threads` config field takes priority. The environment variable is only consulted when the config field is 0 (the default).
