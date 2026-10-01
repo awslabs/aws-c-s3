@@ -82,6 +82,7 @@ struct aws_s3_endpoint *aws_s3_endpoint_new(
     AWS_ZERO_STRUCT(host_resolver_config);
     host_resolver_config.impl = aws_default_dns_resolve;
     host_resolver_config.max_ttl = options->dns_host_address_ttl_seconds;
+    host_resolver_config.resolve_frequency_ns = options->dns_resolve_frequency_ns;
     host_resolver_config.impl_data = NULL;
 
     if (aws_host_resolver_resolve_host(
