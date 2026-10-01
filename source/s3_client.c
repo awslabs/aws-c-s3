@@ -933,8 +933,9 @@ struct aws_s3_client *aws_s3_client_new(
         if (num_file_io_threads == 0) {
             /* Default: min(s_default_max_num_file_io_threads, elg_count).
              * See the constant definition for the rationale. */
-            num_file_io_threads =
-                num_event_loops < s_default_max_num_file_io_threads ? num_event_loops : s_default_max_num_file_io_threads;
+            num_file_io_threads = num_event_loops < s_default_max_num_file_io_threads
+                                      ? num_event_loops
+                                      : s_default_max_num_file_io_threads;
             if (num_file_io_threads < 1) {
                 num_file_io_threads = 1;
             }
