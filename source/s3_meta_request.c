@@ -714,6 +714,16 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
         }
+        /* The default buffer pool places parts in recv_buffer. A custom pool doesn't know about it and
+         * would silently allocate its own memory instead, so reject the combination. */
+        if (client != NULL && client->uses_custom_buffer_pool) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is not supported with a custom buffer pool.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
         /* The first part is written before the object size is known, so the buffer must hold at
          * least one part up front. If the caller gave a size hint smaller than a part, that's
          * the most the first part can be. */

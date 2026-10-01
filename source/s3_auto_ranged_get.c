@@ -1257,7 +1257,7 @@ update_synced_data:
             /* Zero-copy destination: the caller's recv_buffer must hold the whole delivered
              * range. Fail here, before further parts are dispatched, if it is too small. (The
              * first part already fits: init_base rejects a recv_buffer smaller than one part, and
-             * s_acquire_mem_and_prepare_request bounds-checks every part as a backstop.) */
+             * the default buffer pool bounds-checks every part as a backstop.) */
             if (meta_request->recv_buffer != NULL && !auto_ranged_get->initial_message_has_start_range) {
                 /* Suffix range (bytes=-N): the range start is only known now, from the HEAD, and no
                  * GET part has been dispatched yet, so parts created after this see the right base. */
