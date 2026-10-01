@@ -107,6 +107,7 @@ static const char *s_ordered_delivery_env_var = "AWS_CRT_S3_ORDERED_DELIVERY";
 /* Set to anything non-empty and every download requests its parts in object order instead of spreading
  * them across far-apart regions of the object. See `aws_s3_client.force_sequential_requests`. */
 static const char *s_force_sequential_requests_env_var = "AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS";
+static const char *s_num_file_io_threads_env_var = "AWS_CRT_S3_NUM_FILE_IO_THREADS";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -892,14 +893,45 @@ struct aws_s3_client *aws_s3_client_new(
         client->synced_data.body_streaming_elg_allocated = true;
     }
 
-    /* Set up file I/O ELG */
+    /* Set up file I/O ELG.
+     * Priority: config field (non-zero) > env var > default.
+     * 0 means "not set" at every level. Default is min(8, bootstrap ELG loop count). */
     {
+        uint16_t num_event_loops =
+            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
         uint16_t num_file_io_threads = client_config->num_file_io_threads;
 
+        /* Env var is consulted only when the config field was not explicitly set. */
         if (num_file_io_threads == 0) {
-            /* Default to one thread per bootstrap event loop, matching the body streaming ELG. */
-            num_file_io_threads =
-                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+            struct aws_string *env_val = aws_get_env_nonempty(allocator, s_num_file_io_threads_env_var);
+            if (env_val != NULL) {
+                uint64_t parsed = 0;
+                if (!aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(env_val), &parsed) && parsed > 0 &&
+                    parsed <= UINT16_MAX) {
+                    num_file_io_threads = (uint16_t)parsed;
+                    AWS_LOGF_INFO(
+                        AWS_LS_S3_CLIENT,
+                        "id=%p %s=%u sets file I/O thread count.",
+                        (void *)client,
+                        s_num_file_io_threads_env_var,
+                        (unsigned)num_file_io_threads);
+                } else {
+                    AWS_LOGF_WARN(
+                        AWS_LS_S3_CLIENT,
+                        "Ignoring invalid %s value (must be 1..65535).",
+                        s_num_file_io_threads_env_var);
+                }
+                aws_string_destroy(env_val);
+            }
+        }
+
+        if (num_file_io_threads == 0) {
+            /* Default: min(8, elg_count). Eight threads is enough to saturate most disk setups;
+             * mirroring the full ELG count on a large host wastes threads and file descriptors. */
+            num_file_io_threads = num_event_loops < 8 ? num_event_loops : 8;
+            if (num_file_io_threads < 1) {
+                num_file_io_threads = 1;
+            }
         }
 
         struct aws_shutdown_callback_options file_io_elg_shutdown_options = {

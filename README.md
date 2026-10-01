@@ -112,7 +112,36 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    * Setting it makes an interrupted download's file size bound how many of its bytes are valid, and makes resuming cheaper, because there are no gaps for the download to be ahead of.
    * Read once per client, when the client is created.
 
-5. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
+5. **File I/O Threads - `AWS_CRT_S3_NUM_FILE_IO_THREADS`**
+
+   Sets the number of threads dedicated to file I/O (reading files for upload, writing files for download). These threads keep blocking disk operations off the client's networking and callback threads.
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_NUM_FILE_IO_THREADS=16
+   ```
+
+   **Default Behavior**:
+   When neither the config field nor the environment variable is set, the default is `min(8, N)` where N is the number of event loops in the client bootstrap's event loop group. Eight threads is enough to saturate most disk setups; mirroring the full event-loop count on a large host (e.g. 192 vCPUs) would waste threads and file descriptors.
+
+   **Notes**:
+   * The `num_file_io_threads` config field takes priority. The environment variable is only consulted when the config field is 0 (the default).
+   * The value must be a positive integer (1–65535). Invalid or zero values are ignored with a warning, and the default is used.
+   * The thread count is also the number of file descriptors a single parallel download can keep open at once (one per write worker), and the number of parts that can be in flight to disk simultaneously.
+   * Raising it past the point where the disk saturates buys nothing and costs threads. Lowering it below the disk's concurrency leaves throughput on the table.
+   * Read once per client, when the client is created.
+
+> [!TIP]
+> You can also control this in code using the client config:
+> ```c
+>    struct aws_s3_client_config config = {
+>        .num_file_io_threads = 16,
+>        // ... other configuration
+>    };
+> ```
+
+6. **Test Bucket - `CRT_S3_TEST_BUCKET_NAME`**
 
    The S3 bucket name used for running unit tests. See the [test_helper documentation](./tests/test_helper/) for setup instructions.
 
