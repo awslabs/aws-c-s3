@@ -323,6 +323,14 @@ static bool s_s3_auto_ranged_get_update(
                             (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0)
                                 ? aws_min_u64(auto_ranged_get->object_size_hint, meta_request->part_size) - 1
                                 : meta_request->part_size - 1;
+                        if (s_recv_buffer_smaller_than_part(meta_request)) {
+                            /* Also reserve no more than the caller's recv_buffer holds (this path is still taken
+                             * for an empty object's retry). A part 1 bigger than that is cancelled before its
+                             * body arrives, as above, and the size check then fails the request if the object
+                             * doesn't fit. */
+                            request->part_range_end =
+                                aws_min_u64(request->part_range_end, meta_request->recv_buffer->capacity - 1);
+                        }
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
                         break;

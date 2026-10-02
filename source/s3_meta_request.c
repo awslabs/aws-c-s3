@@ -3057,6 +3057,16 @@ static int s_deliver_body_to_sink(
     uint64_t delivery_range_start,
     struct aws_s3_request *request) {
 
+    if (meta_request->recv_buffer != NULL) {
+        /* The body was received straight into the caller's recv_buffer, so there is nothing to deliver.
+         * The caller gets no body callbacks to open the read window from, so open it here, as the file
+         * path does; otherwise a client with read backpressure would stop requesting parts. */
+        if (meta_request->client->enable_read_backpressure) {
+            aws_s3_meta_request_increment_read_window(meta_request, body->len);
+        }
+        return AWS_OP_SUCCESS;
+    }
+
     if (meta_request->recv_filepath != NULL) {
         uint64_t file_offset = 0;
         if (s_s3_recv_file_offset(meta_request, delivery_range_start, &file_offset) != AWS_OP_SUCCESS) {
