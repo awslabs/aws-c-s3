@@ -467,6 +467,18 @@ struct aws_s3_meta_request {
      * aws_s3_meta_request_options at creation time. Immutable after init. */
     uint32_t feature_ids;
 
+    /* Optional caller-provided in-memory download destination (zero-copy).
+     * Non-NULL means each part is written directly into this buffer at
+     * (part offset - recv_buffer_base_offset); the client neither allocates nor frees it.
+     * See aws_s3_meta_request_options.recv_buffer. */
+    struct aws_byte_buf *recv_buffer;
+    /* Object offset that maps to recv_buffer->buffer[0]: 0 for a full-object GET, the range
+     * start for a ranged GET. Set at creation, or after the HEAD for a suffix range (bytes=-N). */
+    uint64_t recv_buffer_base_offset;
+    /* Number of bytes the download will write into recv_buffer (the discovered range length; 0 for an
+     * empty object). Copied into recv_buffer->len when the meta request succeeds. */
+    uint64_t recv_buffer_expected_len;
+
     /* Destination path for a download. The file itself is created or truncated once at init through a
      * short-lived stdio handle; received bytes are written only through the descriptors in
      * `recv_file_write_fd_slots` and `recv_file_ordered_fds`. */

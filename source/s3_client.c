@@ -2530,6 +2530,61 @@ static void s_on_pool_buffer_reserved(void *user_data) {
     return;
 }
 
+/* ---- Zero-copy download destination ticket ----
+ * A lightweight aws_s3_buffer_ticket that hands back a VIEW into the caller-provided
+ * recv_buffer at a part's offset within the requested range, instead of allocating from the
+ * pool. The client neither allocates nor frees the underlying memory; release only frees the
+ * ticket bookkeeping. */
+struct aws_s3_recv_buffer_ticket_impl {
+    struct aws_allocator *allocator;
+    uint8_t *base; /* recv_buffer->buffer + (part offset - recv_buffer_base_offset) */
+    size_t size;   /* this part's buffer size */
+};
+
+static struct aws_byte_buf s_recv_buffer_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_recv_buffer_ticket_impl *impl = ticket->impl;
+    struct aws_byte_buf buf;
+    AWS_ZERO_STRUCT(buf);
+    buf.buffer = impl->base; /* view into the caller's buffer at the part's final offset */
+    buf.len = 0;
+    buf.capacity = impl->size;
+    buf.allocator = NULL; /* not owned -- never freed by the client */
+    return buf;
+}
+
+static void s_recv_buffer_ticket_destroy(void *data) {
+    struct aws_s3_buffer_ticket *ticket = data;
+    struct aws_s3_recv_buffer_ticket_impl *impl = ticket->impl;
+    struct aws_allocator *allocator = impl->allocator;
+    aws_mem_release(allocator, impl); /* frees only bookkeeping; recv_buffer is the caller's */
+    aws_mem_release(allocator, ticket);
+}
+
+static struct aws_s3_buffer_ticket_vtable s_recv_buffer_ticket_vtable = {
+    .claim = s_recv_buffer_ticket_claim,
+    .acquire = NULL, /* NULL -> ref_count fallback */
+    .release = NULL,
+};
+
+static struct aws_s3_buffer_ticket *s_recv_buffer_ticket_new(
+    struct aws_allocator *allocator,
+    struct aws_byte_buf *dest,
+    uint64_t offset,
+    size_t size) {
+
+    struct aws_s3_recv_buffer_ticket_impl *impl =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_recv_buffer_ticket_impl));
+    impl->allocator = allocator;
+    impl->base = dest->buffer + offset;
+    impl->size = size;
+
+    struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+    ticket->impl = impl;
+    ticket->vtable = &s_recv_buffer_ticket_vtable;
+    aws_ref_count_init(&ticket->ref_count, ticket, s_recv_buffer_ticket_destroy);
+    return ticket;
+}
+
 void s_acquire_mem_and_prepare_request(
     struct aws_s3_client *client,
     struct aws_s3_request *request,
@@ -2540,6 +2595,50 @@ void s_acquire_mem_and_prepare_request(
     AWS_ASSERT(request_size != 0); /* Note: 0 request size is invalid in all cases. */
 
     if (request->ticket == NULL && request->should_allocate_buffer_from_pool && request_size > 0) {
+
+        /* Zero-copy download: if the caller supplied recv_buffer, skip the pool and give the
+         * request a ticket that views recv_buffer at this part's offset within the requested
+         * range. The part body is received directly into the caller's buffer; nothing is copied
+         * or delivered. (Capacity is checked at creation and against the discovered range in
+         * auto_ranged_get; the bounds check below is the backstop.) */
+        struct aws_s3_meta_request *mr = request->meta_request;
+        if (mr->recv_buffer != NULL) {
+            size_t part_buf_size = aws_min_size(request->buffer_size, request_size);
+
+            /* Place the part relative to the start of the requested range, not the object. */
+            bool in_bounds = request->part_range_start >= mr->recv_buffer_base_offset;
+            uint64_t offset = in_bounds ? request->part_range_start - mr->recv_buffer_base_offset : 0;
+            in_bounds = in_bounds && offset + part_buf_size <= mr->recv_buffer->capacity;
+
+            if (!in_bounds) {
+                /* Backstop: never create a view past the end of the caller's buffer. Fail the
+                 * meta request the same way a pool-reservation error does. */
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p recv_buffer out of bounds for part at object offset %" PRIu64 " (%zu bytes, base %" PRIu64
+                    ", capacity %zu).",
+                    (void *)mr,
+                    request->part_range_start,
+                    part_buf_size,
+                    mr->recv_buffer_base_offset,
+                    mr->recv_buffer->capacity);
+
+                /* BEGIN CRITICAL SECTION */
+                aws_s3_meta_request_lock_synced_data(mr);
+                aws_s3_meta_request_set_fail_synced(mr, request, AWS_ERROR_SHORT_BUFFER);
+                aws_s3_meta_request_unlock_synced_data(mr);
+                /* END CRITICAL SECTION */
+
+                if (callback != NULL) {
+                    callback(mr, request, AWS_ERROR_SHORT_BUFFER, user_data);
+                }
+                return;
+            }
+
+            request->ticket = s_recv_buffer_ticket_new(request->allocator, mr->recv_buffer, offset, part_buf_size);
+            aws_s3_meta_request_prepare_request(mr, request, callback, user_data);
+            return;
+        }
 
         if (request->send_data.metrics) {
             struct aws_s3_request_metrics *metric = request->send_data.metrics;

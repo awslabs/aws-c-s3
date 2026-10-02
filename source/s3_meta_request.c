@@ -692,6 +692,49 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
+    /* Optional in-memory download destination (zero-copy). Mutually exclusive with recv_filepath
+     * and body callbacks: parts are written directly into the caller's buffer instead of being
+     * delivered/copied. */
+    if (options->recv_buffer != NULL) {
+        if (options->recv_filepath.len > 0 || options->body_callback != NULL || options->body_callback_ex != NULL) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is mutually exclusive with recv_filepath and "
+                "body_callback(_ex).",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* recv_buffer is a download destination only. */
+        if (options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is only supported for GET_OBJECT.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* The first part is written before the object size is known, so the buffer must hold at
+         * least one part up front. If the caller gave a size hint smaller than a part, that's
+         * the most the first part can be. */
+        uint64_t min_capacity = part_size;
+        if (options->object_size_hint != NULL && *options->object_size_hint < min_capacity) {
+            min_capacity = *options->object_size_hint;
+        }
+        if (options->recv_buffer->capacity < min_capacity) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer capacity %zu is smaller than the first part "
+                "(%" PRIu64 " bytes).",
+                (void *)meta_request,
+                options->recv_buffer->capacity,
+                min_capacity);
+            aws_raise_error(AWS_ERROR_SHORT_BUFFER);
+            goto error;
+        }
+        meta_request->recv_buffer = options->recv_buffer;
+    }
+
     if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
         goto error;
     }
@@ -3988,6 +4031,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */
         s_validate_meta_request_checksum_on_finish(meta_request, &finish_result);
+    }
+
+    /* Zero-copy download: report how many bytes were written into the caller's buffer. Done after
+     * checksum validation, which can still fail the request. On failure, len is left untouched. */
+    if (meta_request->recv_buffer != NULL && finish_result.error_code == AWS_ERROR_SUCCESS) {
+        meta_request->recv_buffer->len = (size_t)meta_request->recv_buffer_expected_len;
     }
 
     if (meta_request->finish_callback != NULL) {

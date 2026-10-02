@@ -119,6 +119,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
                 (void *)auto_ranged_get);
             goto on_error;
         }
+        /* recv_buffer[0] maps to the start of the requested range. For a suffix range
+         * (bytes=-N) the start isn't known yet; it's set once the HEAD discovers the object size. */
+        if (auto_ranged_get->base.recv_buffer != NULL && auto_ranged_get->initial_message_has_start_range) {
+            auto_ranged_get->base.recv_buffer_base_offset = auto_ranged_get->initial_range_start;
+        }
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
 
@@ -1249,6 +1254,30 @@ update_synced_data:
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
+            /* Zero-copy destination: the caller's recv_buffer must hold the whole delivered
+             * range. Fail here, before further parts are dispatched, if it is too small. (The
+             * first part already fits: init_base rejects a recv_buffer smaller than one part, and
+             * s_acquire_mem_and_prepare_request bounds-checks every part as a backstop.) */
+            if (meta_request->recv_buffer != NULL && !auto_ranged_get->initial_message_has_start_range) {
+                /* Suffix range (bytes=-N): the range start is only known now, from the HEAD, and no
+                 * GET part has been dispatched yet, so parts created after this see the right base. */
+                meta_request->recv_buffer_base_offset = object_range_start;
+            }
+            if (meta_request->recv_buffer != NULL && error_code == AWS_ERROR_SUCCESS && object_size != 0) {
+                uint64_t needed = object_range_end + 1 - object_range_start;
+                if (needed > meta_request->recv_buffer->capacity) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p recv_buffer too small for object: need %" PRIu64 " bytes, capacity %zu.",
+                        (void *)meta_request,
+                        needed,
+                        meta_request->recv_buffer->capacity);
+                    error_code = AWS_ERROR_SHORT_BUFFER;
+                } else {
+                    /* Reported to the caller as recv_buffer->len on success. */
+                    meta_request->recv_buffer_expected_len = needed;
+                }
+            }
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);
