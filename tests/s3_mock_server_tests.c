@@ -327,27 +327,66 @@ static int s_validate_abort_multipart_upload_metrics(struct aws_s3_request_metri
     return AWS_OP_SUCCESS;
 }
 
-static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list, uint32_t expected_length) {
-    /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
-     * upload parts and one complete MPU */
-    ASSERT_UINT_EQUALS(expected_length, aws_array_list_length(metrics_list));
-    struct aws_s3_request_metrics *metrics = NULL;
+/* Validate the metrics of a multipart upload that succeeded: one CreateMultipartUpload, `expected_num_parts`
+ * UploadParts and one CompleteMultipartUpload, each of which succeeded exactly once.
+ *
+ * Any request may also have failed attempts before its successful one -- e.g. a slow mock server under parallel test
+ * load can trip the connection throughput monitor and force a retry. Each attempt records its own metrics, so the list
+ * can be longer than the number of requests. A failed attempt is accepted only if a later attempt of the same request
+ * follows it, so a request that failed for good still fails the check. */
+static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list, uint32_t expected_num_parts) {
+    size_t num_metrics = aws_array_list_length(metrics_list);
+    uint32_t num_create_succeeded = 0;
+    uint32_t num_parts_succeeded = 0;
+    uint32_t num_complete_succeeded = 0;
 
-    /* First metrics should be the CreateMPU */
-    aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
-    ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
-
-    /* All of the middle should be Upload Parts*/
-    for (size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i++) {
-        metrics = NULL;
+    for (size_t i = 0; i < num_metrics; i++) {
+        struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(metrics_list, (void **)&metrics, i);
-        ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true)); /* assuming all requests were success */
+
+        if (metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS) {
+            /* A failed attempt must be followed by the next attempt of the same request. */
+            struct aws_s3_request_metrics *next_attempt = NULL;
+            for (size_t j = i + 1; j < num_metrics && next_attempt == NULL; j++) {
+                struct aws_s3_request_metrics *candidate = NULL;
+                aws_array_list_get_at(metrics_list, (void **)&candidate, j);
+                if (candidate->crt_info_metrics.request_ptr == metrics->crt_info_metrics.request_ptr) {
+                    next_attempt = candidate;
+                }
+            }
+            ASSERT_NOT_NULL(next_attempt);
+            ASSERT_UINT_EQUALS(
+                metrics->crt_info_metrics.retry_attempt + 1, next_attempt->crt_info_metrics.retry_attempt);
+            ASSERT_INT_EQUALS(
+                metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns,
+                next_attempt->time_metrics.s3_request_first_attempt_start_timestamp_ns);
+            ASSERT_SUCCESS(s_validate_time_metrics(metrics, false /*is_last_attempt*/));
+            continue;
+        }
+
+        switch (metrics->req_resp_info_metrics.request_type) {
+            case AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD:
+                ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
+                ++num_create_succeeded;
+                break;
+            case AWS_S3_REQUEST_TYPE_UPLOAD_PART:
+                ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true /*is_last_attempt*/));
+                ++num_parts_succeeded;
+                break;
+            case AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD:
+                ASSERT_SUCCESS(s_validate_complete_multipart_upload_metrics(metrics));
+                /* CompleteMultipartUpload can only start once every part is done, so it is the last attempt. */
+                ASSERT_UINT_EQUALS(num_metrics - 1, i);
+                ++num_complete_succeeded;
+                break;
+            default:
+                ASSERT_TRUE(false, "unexpected request type %d", (int)metrics->req_resp_info_metrics.request_type);
+        }
     }
 
-    /* Last metrics should be CompleteMPU*/
-    metrics = NULL;
-    aws_array_list_get_at(metrics_list, (void **)&metrics, aws_array_list_length(metrics_list) - 1);
-    ASSERT_SUCCESS(s_validate_complete_multipart_upload_metrics(metrics));
+    ASSERT_UINT_EQUALS(1, num_create_succeeded);
+    ASSERT_UINT_EQUALS(expected_num_parts, num_parts_succeeded);
+    ASSERT_UINT_EQUALS(1, num_complete_succeeded);
 
     return AWS_OP_SUCCESS;
 }
@@ -469,8 +508,7 @@ TEST_CASE(multipart_upload_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(
-        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 2 /*expected_num_parts*/));
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -517,8 +555,7 @@ TEST_CASE(multipart_upload_meta_request_part_size_over_memory_limit_mock_server)
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(
-        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 2 /*expected_num_parts*/));
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -838,8 +875,7 @@ TEST_CASE(multipart_upload_unsigned_with_trailer_checksum_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(
-        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 2 /*expected_num_parts*/));
 
     /**
      * Check the recorded headers.
@@ -1012,17 +1048,19 @@ TEST_CASE(request_metrics_http_manager_metrics_mock_server) {
     ASSERT_UINT_EQUALS(0, first_manager_metrics.available_concurrency);
     ASSERT_UINT_EQUALS(0, first_manager_metrics.pending_concurrency_acquires);
 
-    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: with only 1 connection allowed, each of these
-     * had to wait for the prior request's connection to be released back to the idle pool before it could
-     * proceed, so each should see that single connection sitting idle and available, not leased. */
+    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: by now the single allowed connection is open. The
+     * client frees the previous request's slot before returning its connection to the pool, so the next request
+     * can take its snapshot either before or after that release -- the connection may show as leased or idle. */
     for (size_t i = 1; i < num_requests; i++) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(&results.synced_data.metrics, &metrics, i);
 
         struct aws_http_manager_metrics manager_metrics;
         aws_s3_request_metrics_get_http_manager_metrics(metrics, &manager_metrics);
-        ASSERT_UINT_EQUALS(0, manager_metrics.leased_concurrency);
-        ASSERT_UINT_EQUALS(1, manager_metrics.available_concurrency);
+        /* Leased or idle, but never more than the 1 connection the client is limited to. */
+        ASSERT_UINT_EQUALS(1, manager_metrics.leased_concurrency + manager_metrics.available_concurrency);
+        /* Taken before this request's own acquire, so that acquire is never counted as pending. */
+        ASSERT_UINT_EQUALS(0, manager_metrics.pending_concurrency_acquires);
     }
 
     aws_s3_meta_request_test_results_clean_up(&results);

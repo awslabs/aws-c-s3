@@ -20,7 +20,17 @@ TIMEOUT = 120  # this must be higher than any response's "delay" setting
 
 VERBOSE = False
 
-RETRY_REQUEST_COUNT = 0
+# The server is shared by every test process at once (ctest -j), so no state may be global to the
+# server. State that has to outlive one HTTP request -- such as how many times a request has been
+# attempted, when the retry lands on a new connection -- is keyed by the meta request it belongs to.
+# The tester tags every message it builds for the mock server with this header, carrying a UUID that
+# is unique per meta request. A retry resends the same message, so every attempt carries the same id.
+MOCK_REQUEST_ID_HEADER = "x-mock-request-id"
+
+# Attempts seen per meta request on /get_object_checksum_retry, keyed by MOCK_REQUEST_ID_HEADER.
+# Never pruned: the entry must survive for every retry of the request, and there is one small entry
+# per run of that test, so growth over the server's lifetime is negligible.
+CHECKSUM_RETRY_ATTEMPTS = {}
 
 
 base_dir = os.path.dirname(os.path.realpath(__file__))
@@ -420,16 +430,21 @@ def handle_get_object_modified(start_range, end_range, request):
 
 
 def handle_get_object(wrapper, request, parsed_path, head_request=False):
-    global RETRY_REQUEST_COUNT
     response_config = ResponseConfig(parsed_path.path)
     if parsed_path.path == "/get_object_checksum_retry" and not head_request:
-        RETRY_REQUEST_COUNT = RETRY_REQUEST_COUNT + 1
+        # Fail only the first attempt of this meta request, so its retry is what reaches the checksum
+        # validation. Keyed by request id: a counter shared across requests would be reset or advanced
+        # by other tests running against the server at the same time.
+        request_id = get_request_header_value(request, MOCK_REQUEST_ID_HEADER)
+        if request_id is None:
+            raise ValueError(
+                f"{parsed_path.path} needs the {MOCK_REQUEST_ID_HEADER} header to count attempts")
+        attempts = CHECKSUM_RETRY_ATTEMPTS.get(request_id, 0) + 1
+        CHECKSUM_RETRY_ATTEMPTS[request_id] = attempts
 
-        if RETRY_REQUEST_COUNT == 1:
+        if attempts == 1:
             wrapper.info("Force retry on the request")
             response_config.force_retry = True
-    else:
-        RETRY_REQUEST_COUNT = 0
 
     if (parsed_path.path == "/get_object_invalid_response_missing_content_range" or
         parsed_path.path == "/get_object_invalid_response_missing_etags" or
