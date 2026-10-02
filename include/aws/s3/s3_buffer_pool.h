@@ -64,6 +64,10 @@ struct aws_s3_buffer_pool_reserve_meta {
      * once it completes. A pool that defers must guarantee every deferred reservation is eventually
      * resolved. */
     bool can_block;
+
+    /* Object offset of the first byte of the part this buffer is for. Lets a pool place the part
+     * directly in caller-provided memory (see aws_s3_meta_request_options.recv_buffer). */
+    uint64_t range_start;
 };
 
 struct aws_s3_buffer_ticket;

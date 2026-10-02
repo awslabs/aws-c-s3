@@ -630,6 +630,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->buffer_pool_factory_fn) {
         client->buffer_pool =
             client_config->buffer_pool_factory_fn(allocator, buffer_pool_config, client_config->buffer_pool_user_data);
+        client->uses_custom_buffer_pool = true;
     } else {
 
         client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
@@ -2554,6 +2555,7 @@ void s_acquire_mem_and_prepare_request(
             .client = client,
             .meta_request = meta_request,
             .size = aws_min_size(request->buffer_size, request_size),
+            .range_start = request->part_range_start,
         };
 
         struct aws_s3_reserve_memory_payload *payload =

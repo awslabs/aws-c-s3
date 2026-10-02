@@ -4,6 +4,7 @@
  */
 
 #include <aws/s3/private/s3_default_buffer_pool.h>
+#include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/private/s3_util.h>
 
 #include <aws/common/process.h>
@@ -808,3 +809,141 @@ static int s_test_s3_buffer_pool_trim_reserved_but_unallocated(struct aws_alloca
     return 0;
 }
 AWS_TEST_CASE(test_s3_buffer_pool_trim_reserved_but_unallocated, s_test_s3_buffer_pool_trim_reserved_but_unallocated)
+
+/* ---- recv_buffer: the pool hands out views into a caller-provided buffer ---- */
+
+/* Reserve `size` bytes for a part at object offset `range_start`, for a meta request whose recv_buffer is
+ * `recv_buffer` and whose base offset is `base`. */
+static struct aws_future_s3_buffer_ticket *s_reserve_for_recv_buffer(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_meta_request *meta_request,
+    uint64_t range_start,
+    size_t size) {
+    return aws_s3_default_buffer_pool_reserve(
+        pool,
+        (struct aws_s3_buffer_pool_reserve_meta){
+            .meta_request = meta_request,
+            .size = size,
+            .range_start = range_start,
+        });
+}
+
+static int s_check_usage_is_zero(struct aws_s3_buffer_pool *pool) {
+    struct aws_s3_default_buffer_pool_usage_stats usage = aws_s3_default_buffer_pool_get_usage(pool);
+    ASSERT_UINT_EQUALS(0, usage.primary_used);
+    ASSERT_UINT_EQUALS(0, usage.primary_reserved);
+    ASSERT_UINT_EQUALS(0, usage.secondary_used);
+    ASSERT_UINT_EQUALS(0, usage.secondary_reserved);
+    return AWS_OP_SUCCESS;
+}
+
+/* A part that fits gets a view at buffer + (range_start - base), ready immediately, and the caller's
+ * memory never counts against the pool. */
+AWS_TEST_CASE(test_s3_buffer_pool_recv_buffer_view, s_test_s3_buffer_pool_recv_buffer_view)
+static int s_test_s3_buffer_pool_recv_buffer_view(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    uint8_t mem[1024];
+    struct aws_byte_buf recv_buffer = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+    struct aws_s3_meta_request *meta_request = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request));
+    meta_request->recv_buffer = &recv_buffer;
+
+    struct {
+        uint64_t base;
+        uint64_t range_start;
+        size_t size;
+        size_t expected_offset;
+    } cases[] = {
+        {0, 0, 256, 0},         /* full-object GET, first part */
+        {0, 512, 256, 512},     /* full-object GET, later part */
+        {0, 768, 256, 768},     /* ends exactly at capacity */
+        {1000, 1200, 100, 200}, /* ranged GET: relative to the range start */
+        {1000, 1000, 1024, 0},  /* ranged GET filling the whole buffer */
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(cases); ++i) {
+        meta_request->recv_buffer_base_offset = cases[i].base;
+        struct aws_future_s3_buffer_ticket *future =
+            s_reserve_for_recv_buffer(pool, meta_request, cases[i].range_start, cases[i].size);
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+        ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, aws_future_s3_buffer_ticket_get_error(future));
+        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+        struct aws_byte_buf view = aws_s3_buffer_ticket_claim(ticket);
+        ASSERT_PTR_EQUALS(mem + cases[i].expected_offset, view.buffer);
+        ASSERT_UINT_EQUALS(cases[i].size, view.capacity);
+        ASSERT_UINT_EQUALS(0, view.len);
+        ASSERT_NULL(view.allocator); /* not owned: the client never frees it */
+        ASSERT_SUCCESS(s_check_usage_is_zero(pool));
+        aws_s3_buffer_ticket_release(ticket);
+        aws_future_s3_buffer_ticket_release(future);
+        ASSERT_SUCCESS(s_check_usage_is_zero(pool));
+    }
+
+    aws_mem_release(allocator, meta_request);
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}
+
+/* A part that doesn't fit fails the reservation with AWS_ERROR_SHORT_BUFFER instead of handing out a
+ * view past the end of the buffer (or before its start). */
+AWS_TEST_CASE(test_s3_buffer_pool_recv_buffer_out_of_bounds, s_test_s3_buffer_pool_recv_buffer_out_of_bounds)
+static int s_test_s3_buffer_pool_recv_buffer_out_of_bounds(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    uint8_t mem[1024];
+    struct aws_byte_buf recv_buffer = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+    struct aws_s3_meta_request *meta_request = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request));
+    meta_request->recv_buffer = &recv_buffer;
+
+    struct {
+        uint64_t base;
+        uint64_t range_start;
+        size_t size;
+    } cases[] = {
+        {0, 900, 256},     /* runs past the end */
+        {0, 1024, 1},      /* starts at the end */
+        {0, 0, 1025},      /* bigger than the whole buffer */
+        {1000, 100, 10},   /* starts before the range start */
+        {1000, 1900, 200}, /* past the end, relative to the base */
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(cases); ++i) {
+        meta_request->recv_buffer_base_offset = cases[i].base;
+        struct aws_future_s3_buffer_ticket *future =
+            s_reserve_for_recv_buffer(pool, meta_request, cases[i].range_start, cases[i].size);
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+        ASSERT_INT_EQUALS(AWS_ERROR_SHORT_BUFFER, aws_future_s3_buffer_ticket_get_error(future));
+        aws_future_s3_buffer_ticket_release(future);
+        ASSERT_SUCCESS(s_check_usage_is_zero(pool));
+    }
+
+    aws_mem_release(allocator, meta_request);
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}
+
+/* A meta request without a recv_buffer still gets pool memory as before. */
+AWS_TEST_CASE(test_s3_buffer_pool_recv_buffer_not_set, s_test_s3_buffer_pool_recv_buffer_not_set)
+static int s_test_s3_buffer_pool_recv_buffer_not_set(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+    struct aws_s3_meta_request *meta_request = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_meta_request));
+
+    struct aws_future_s3_buffer_ticket *future = s_reserve_for_recv_buffer(pool, meta_request, 0, MB_TO_BYTES(8));
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, aws_future_s3_buffer_ticket_get_error(future));
+    struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+    struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
+    ASSERT_NOT_NULL(buf.buffer);
+    struct aws_s3_default_buffer_pool_usage_stats usage = aws_s3_default_buffer_pool_get_usage(pool);
+    ASSERT_TRUE(usage.primary_used + usage.secondary_used >= MB_TO_BYTES(8));
+
+    aws_s3_buffer_ticket_release(ticket);
+    aws_future_s3_buffer_ticket_release(future);
+    aws_mem_release(allocator, meta_request);
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}

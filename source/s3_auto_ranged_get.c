@@ -119,6 +119,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
                 (void *)auto_ranged_get);
             goto on_error;
         }
+        /* recv_buffer[0] maps to the start of the requested range. For a suffix range
+         * (bytes=-N) the start isn't known yet; it's set once the HEAD discovers the object size. */
+        if (auto_ranged_get->base.recv_buffer != NULL && auto_ranged_get->initial_message_has_start_range) {
+            auto_ranged_get->base.recv_buffer_base_offset = auto_ranged_get->initial_range_start;
+        }
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
 
@@ -168,6 +173,12 @@ static bool s_should_validate_whole_download(const struct aws_s3_meta_request *m
     }
 }
 
+/* True if the caller's recv_buffer is smaller than one part. The first request is then sized down to
+ * the buffer's capacity, so it always fits. */
+static bool s_recv_buffer_smaller_than_part(const struct aws_s3_meta_request *meta_request) {
+    return meta_request->recv_buffer != NULL && meta_request->recv_buffer->capacity < meta_request->part_size;
+}
+
 /*
  * This function returns the type of first request which we will also use to discover overall object size.
  */
@@ -205,8 +216,11 @@ static enum aws_s3_auto_ranged_get_request_type s_s3_get_request_type_for_discov
     /* If the object_size_hint indicates that it fits in a single part, try to get the file directly.
      * This avoids a HEAD request and sizes the buffer reservation to the hint rather than full part_size.
      * If the hint is wrong and the object is larger, the request will be cancelled and retried with ranged gets. */
+    /* Not for a recv_buffer smaller than a part: S3 decides how big part 1 is, so it can't be sized down to
+     * fit. A ranged GET is used instead. */
     if (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0 &&
-        auto_ranged_get->object_size_hint <= meta_request->part_size) {
+        auto_ranged_get->object_size_hint <= meta_request->part_size &&
+        !s_recv_buffer_smaller_than_part(meta_request)) {
         return AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1;
     }
 
@@ -309,6 +323,14 @@ static bool s_s3_auto_ranged_get_update(
                             (auto_ranged_get->object_size_hint_available && auto_ranged_get->object_size_hint > 0)
                                 ? aws_min_u64(auto_ranged_get->object_size_hint, meta_request->part_size) - 1
                                 : meta_request->part_size - 1;
+                        if (s_recv_buffer_smaller_than_part(meta_request)) {
+                            /* Also reserve no more than the caller's recv_buffer holds (this path is still taken
+                             * for an empty object's retry). A part 1 bigger than that is cancelled before its
+                             * body arrives, as above, and the size check then fails the request if the object
+                             * doesn't fit. */
+                            request->part_range_end =
+                                aws_min_u64(request->part_range_end, meta_request->recv_buffer->capacity - 1);
+                        }
                         ++auto_ranged_get->synced_data.num_parts_requested;
 
                         break;
@@ -336,6 +358,12 @@ static bool s_s3_auto_ranged_get_update(
                                     auto_ranged_get->initial_range_end - auto_ranged_get->initial_range_start + 1);
                             }
 
+                            auto_ranged_get->synced_data.first_part_size = first_part_size;
+                        }
+                        if (s_recv_buffer_smaller_than_part(meta_request)) {
+                            /* Size the first request down to what the caller's buffer holds. If the object
+                             * turns out to be bigger, the size check fails the request after this one. */
+                            first_part_size = aws_min_u64(first_part_size, meta_request->recv_buffer->capacity);
                             auto_ranged_get->synced_data.first_part_size = first_part_size;
                         }
                         AWS_LOGF_INFO(
@@ -1249,6 +1277,30 @@ update_synced_data:
 
         /* If the object range was found, then record it. */
         if (found_object_size) {
+            /* Zero-copy destination: the caller's recv_buffer must hold the whole delivered
+             * range. Fail here, before further parts are dispatched, if it is too small. (The
+             * first request already fits: it is sized down to the buffer's capacity when the buffer is
+             * smaller than a part, and the default buffer pool bounds-checks every part as a backstop.) */
+            if (meta_request->recv_buffer != NULL && !auto_ranged_get->initial_message_has_start_range) {
+                /* Suffix range (bytes=-N): the range start is only known now, from the HEAD, and no
+                 * GET part has been dispatched yet, so parts created after this see the right base. */
+                meta_request->recv_buffer_base_offset = object_range_start;
+            }
+            if (meta_request->recv_buffer != NULL && error_code == AWS_ERROR_SUCCESS && object_size != 0) {
+                uint64_t needed = object_range_end + 1 - object_range_start;
+                if (needed > meta_request->recv_buffer->capacity) {
+                    AWS_LOGF_ERROR(
+                        AWS_LS_S3_META_REQUEST,
+                        "id=%p recv_buffer too small for object: need %" PRIu64 " bytes, capacity %zu.",
+                        (void *)meta_request,
+                        needed,
+                        meta_request->recv_buffer->capacity);
+                    error_code = AWS_ERROR_SHORT_BUFFER;
+                } else {
+                    /* Reported to the caller as recv_buffer->len on success. */
+                    meta_request->recv_buffer_expected_len = needed;
+                }
+            }
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
             auto_ranged_get->synced_data.object_range_known = true;
             auto_ranged_get->synced_data.object_range_empty = (object_size == 0);

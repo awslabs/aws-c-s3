@@ -9,6 +9,7 @@
 #include <aws/common/ref_count.h>
 #include <aws/common/system_info.h>
 #include <aws/io/future.h>
+#include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/private/s3_util.h>
 
 #include <inttypes.h>
@@ -682,6 +683,80 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     return ticket;
 }
 
+/* ---- Zero-copy download destination (aws_s3_meta_request_options.recv_buffer) ----
+ * When a meta request has a recv_buffer, its parts are not allocated from the pool. The ticket is
+ * a view into the caller's buffer at the part's offset within the requested range. That memory is
+ * the caller's, so it doesn't count against the pool's memory limit, and releasing the ticket only
+ * frees the ticket's bookkeeping. */
+struct aws_s3_recv_buffer_ticket_impl {
+    struct aws_allocator *allocator;
+    uint8_t *base; /* recv_buffer->buffer + (range_start - recv_buffer_base_offset) */
+    size_t size;
+};
+
+static struct aws_byte_buf s_recv_buffer_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_recv_buffer_ticket_impl *impl = ticket->impl;
+    struct aws_byte_buf buf;
+    AWS_ZERO_STRUCT(buf);
+    buf.buffer = impl->base;
+    buf.capacity = impl->size;
+    buf.allocator = NULL; /* not owned: never freed by the client */
+    return buf;
+}
+
+static void s_recv_buffer_ticket_destroy(void *data) {
+    struct aws_s3_buffer_ticket *ticket = data;
+    struct aws_s3_recv_buffer_ticket_impl *impl = ticket->impl;
+    struct aws_allocator *allocator = impl->allocator;
+    aws_mem_release(allocator, impl);
+    aws_mem_release(allocator, ticket);
+}
+
+static struct aws_s3_buffer_ticket_vtable s_recv_buffer_ticket_vtable = {.claim = s_recv_buffer_ticket_claim};
+
+static struct aws_future_s3_buffer_ticket *s_reserve_from_recv_buffer(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+
+    struct aws_s3_meta_request *meta_request = meta.meta_request;
+    struct aws_byte_buf *recv_buffer = meta_request->recv_buffer;
+    struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(allocator);
+
+    /* Place the part relative to the start of the requested range, and never past the end of the
+     * caller's buffer. Capacity is also checked at creation and against the discovered range. */
+    bool in_bounds = meta.range_start >= meta_request->recv_buffer_base_offset;
+    uint64_t offset = in_bounds ? meta.range_start - meta_request->recv_buffer_base_offset : 0;
+    in_bounds = in_bounds && offset + meta.size <= recv_buffer->capacity;
+
+    if (!in_bounds) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p recv_buffer out of bounds for part at object offset %" PRIu64 " (%zu bytes, base %" PRIu64
+            ", capacity %zu).",
+            (void *)meta_request,
+            meta.range_start,
+            meta.size,
+            meta_request->recv_buffer_base_offset,
+            recv_buffer->capacity);
+        aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_SHORT_BUFFER);
+        return future;
+    }
+
+    struct aws_s3_recv_buffer_ticket_impl *impl =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_recv_buffer_ticket_impl));
+    impl->allocator = allocator;
+    impl->base = recv_buffer->buffer + offset;
+    impl->size = meta.size;
+
+    struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+    ticket->impl = impl;
+    ticket->vtable = &s_recv_buffer_ticket_vtable;
+    aws_ref_count_init(&ticket->ref_count, ticket, s_recv_buffer_ticket_destroy);
+
+    aws_future_s3_buffer_ticket_set_result_by_move(future, &ticket);
+    return future;
+}
+
 struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
@@ -690,6 +765,11 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     AWS_FATAL_ASSERT(meta.size != 0);
+
+    /* Zero-copy download: the part goes straight into the caller's recv_buffer, not pool memory. */
+    if (meta.meta_request != NULL && meta.meta_request->recv_buffer != NULL) {
+        return s_reserve_from_recv_buffer(buffer_pool->base_allocator, meta);
+    }
 
     /* A reservation bigger than the pool's usable limit can never be satisfied: even releasing
      * every outstanding buffer would not make room. s_try_reserve_synced would return NULL and

@@ -692,6 +692,51 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
+    /* Optional in-memory download destination (zero-copy). Mutually exclusive with recv_filepath
+     * and body callbacks: parts are written directly into the caller's buffer instead of being
+     * delivered/copied. */
+    if (options->recv_buffer != NULL) {
+        if (options->recv_filepath.len > 0 || options->body_callback != NULL || options->body_callback_ex != NULL) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is mutually exclusive with recv_filepath and "
+                "body_callback(_ex).",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* recv_buffer is a download destination only. */
+        if (options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is only supported for GET_OBJECT.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* The default buffer pool places parts in recv_buffer. A custom pool doesn't know about it and
+         * would silently allocate its own memory instead, so reject the combination. */
+        if (client != NULL && client->uses_custom_buffer_pool) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is not supported with a custom buffer pool.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* A buffer smaller than a part is fine: the first request is sized down to fit it. An empty
+         * buffer can't hold even that first request. */
+        if (options->recv_buffer->capacity == 0) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer has no capacity.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_SHORT_BUFFER);
+            goto error;
+        }
+        meta_request->recv_buffer = options->recv_buffer;
+    }
+
     if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
         goto error;
     }
@@ -3012,6 +3057,16 @@ static int s_deliver_body_to_sink(
     uint64_t delivery_range_start,
     struct aws_s3_request *request) {
 
+    if (meta_request->recv_buffer != NULL) {
+        /* The body was received straight into the caller's recv_buffer, so there is nothing to deliver.
+         * The caller gets no body callbacks to open the read window from, so open it here, as the file
+         * path does; otherwise a client with read backpressure would stop requesting parts. */
+        if (meta_request->client->enable_read_backpressure) {
+            aws_s3_meta_request_increment_read_window(meta_request, body->len);
+        }
+        return AWS_OP_SUCCESS;
+    }
+
     if (meta_request->recv_filepath != NULL) {
         uint64_t file_offset = 0;
         if (s_s3_recv_file_offset(meta_request, delivery_range_start, &file_offset) != AWS_OP_SUCCESS) {
@@ -3988,6 +4043,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */
         s_validate_meta_request_checksum_on_finish(meta_request, &finish_result);
+    }
+
+    /* Zero-copy download: report how many bytes were written into the caller's buffer. Done after
+     * checksum validation, which can still fail the request. On failure, len is left untouched. */
+    if (meta_request->recv_buffer != NULL && finish_result.error_code == AWS_ERROR_SUCCESS) {
+        meta_request->recv_buffer->len = (size_t)meta_request->recv_buffer_expected_len;
     }
 
     if (meta_request->finish_callback != NULL) {

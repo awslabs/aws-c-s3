@@ -1042,6 +1042,36 @@ struct aws_s3_meta_request_options {
     bool recv_file_delete_on_failure;
 
     /**
+     * Optional. In-memory download destination (zero-copy).
+     * If set, received object data is written directly into this caller-owned buffer -- no
+     * intermediate scratch buffer, no copy -- and `body_callback` is NOT invoked. buffer[0] holds
+     * the first byte of the requested range (object byte 0 for a full-object GET), and each part
+     * is written at its offset within that range.
+     *
+     * The capacity must hold the whole requested range; if the discovered range is larger, the
+     * meta request fails with AWS_ERROR_SHORT_BUFFER. The buffer may be smaller than part_size:
+     * the first request is then sized down to the buffer's capacity, so an object that fits is
+     * downloaded in that one request. A buffer with zero capacity is rejected at creation with
+     * AWS_ERROR_SHORT_BUFFER.
+     *
+     * The caller owns the memory: it must remain valid and unmoved until the finish callback
+     * fires; the client neither allocates nor frees it.
+     *
+     * Writing always starts at buffer[0]; any existing `len` is ignored. On success, `len` is set
+     * to the number of bytes downloaded (the requested range, clipped to the object size), so the
+     * data occupies [buffer, buffer + len). On failure, `len` is left unchanged and the buffer's
+     * contents are undefined.
+     *
+     * Downloads can't be resumed from a resume token, but a paused download can be continued
+     * manually: the first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of
+     * the buffer are valid, so issue a ranged GET starting at object_range_start + that count, with a
+     * recv_buffer that views the rest of the same buffer from that offset.
+     *
+     * Mutually exclusive with recv_filepath and body_callback(_ex). Download (GET) only.
+     */
+    struct aws_byte_buf *recv_buffer;
+
+    /**
      * Optional.
      * Per-request override of the client's `out_of_order_delivery`. See that field for what the setting
      * means and what each sink defaults to.
