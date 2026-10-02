@@ -75,6 +75,7 @@ struct rb_env_options {
     uint64_t part_size;
     uint64_t backpressure_window; /* 0 = backpressure off */
     aws_s3_buffer_pool_factory_fn *buffer_pool_factory_fn;
+    uint32_t max_active_connections; /* 0 = client default */
 };
 
 static int s_rb_env_init(struct aws_allocator *allocator, struct rb_env *env, const struct rb_env_options *opts) {
@@ -89,6 +90,7 @@ static int s_rb_env_init(struct aws_allocator *allocator, struct rb_env *env, co
         config.enable_read_backpressure = true;
         config.initial_read_window = (size_t)opts->backpressure_window;
     }
+    config.max_active_connections_override = opts->max_active_connections;
     ASSERT_SUCCESS(aws_s3_tester_bind_client(
         &env->tester, &config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
     env->client = aws_s3_client_new(allocator, &config);
@@ -731,6 +733,134 @@ static int s_test_s3_recv_buffer_cancel(struct aws_allocator *allocator, void *c
     aws_s3_tester_wait_for_meta_request_shutdown(&env.tester);
     aws_s3_meta_request_test_results_clean_up(&results);
     aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    s_rb_env_clean_up(&env);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------------------------------
+ * Pause, then resume manually
+ * ------------------------------------------------------------------------------------------------ */
+
+/* aws-c-s3 can't resume a download from a token, but the token's continuous_downloaded_bytes tells the
+ * caller how much of the buffer already holds correct data. The caller resumes with a ranged GET from
+ * that offset into a recv_buffer that views the rest of the same array. */
+static struct {
+    struct aws_mutex mutex;
+    uint64_t bytes_seen;
+    bool pause_requested;
+    bool pause_completed;
+    int pause_error_code;
+    struct aws_s3_meta_request_resume_token *token;
+} s_rb_pause;
+
+static void s_rb_pause_complete(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_meta_request_resume_token *resume_token,
+    int error_code,
+    void *user_data) {
+    (void)meta_request;
+    (void)user_data;
+    aws_mutex_lock(&s_rb_pause.mutex);
+    s_rb_pause.pause_completed = true;
+    s_rb_pause.pause_error_code = error_code;
+    if (resume_token != NULL) {
+        s_rb_pause.token = aws_s3_meta_request_resume_token_acquire(resume_token);
+    }
+    aws_mutex_unlock(&s_rb_pause.mutex);
+}
+
+/* Pause once a couple of MiB have arrived. */
+static void s_rb_pause_progress(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_progress *progress,
+    void *user_data) {
+    (void)user_data;
+    aws_mutex_lock(&s_rb_pause.mutex);
+    s_rb_pause.bytes_seen += progress->bytes_transferred;
+    bool pause_now = !s_rb_pause.pause_requested && s_rb_pause.bytes_seen >= MB_TO_BYTES(2);
+    if (pause_now) {
+        s_rb_pause.pause_requested = true;
+    }
+    aws_mutex_unlock(&s_rb_pause.mutex);
+    if (pause_now) {
+        aws_s3_meta_request_pause_async(meta_request, s_rb_pause_complete, NULL);
+    }
+}
+
+AWS_TEST_CASE(test_s3_recv_buffer_pause_then_resume_with_range, s_test_s3_recv_buffer_pause_then_resume_with_range)
+static int s_test_s3_recv_buffer_pause_then_resume_with_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    const size_t object_size = MB_TO_BYTES(10);
+
+    AWS_ZERO_STRUCT(s_rb_pause);
+    aws_mutex_init(&s_rb_pause.mutex);
+
+    /* One connection, so the pause lands partway through. */
+    struct rb_env_options opts = {.part_size = MB_TO_BYTES(1), .max_active_connections = 1};
+    struct rb_env env;
+    ASSERT_SUCCESS(s_rb_env_init(allocator, &env, &opts));
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+    struct rb_buffer b;
+    s_rb_buffer_init(allocator, &b, object_size);
+
+    /* --- First download, paused partway --- */
+    struct rb_get get = {.key = g_pre_existing_object_10MB};
+    struct aws_http_message *message = s_rb_get_message(allocator, host_name, &get);
+    struct aws_s3_meta_request_options options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+        .recv_buffer = &b.buf,
+    };
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&env.tester, &options, &results));
+    options.body_callback = NULL;
+    options.progress_callback = s_rb_pause_progress;
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(env.client, &options);
+    ASSERT_NOT_NULL(meta_request);
+    aws_s3_tester_wait_for_meta_request_finish(&env.tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_PAUSED, results.finished_error_code);
+    ASSERT_UINT_EQUALS(0, b.buf.len); /* len is only set on success */
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&env.tester);
+    aws_s3_meta_request_test_results_clean_up(&results);
+    aws_http_message_release(message);
+
+    aws_mutex_lock(&s_rb_pause.mutex);
+    ASSERT_TRUE(s_rb_pause.pause_completed);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, s_rb_pause.pause_error_code);
+    ASSERT_NOT_NULL(s_rb_pause.token);
+    struct aws_s3_meta_request_resume_token *token = s_rb_pause.token;
+    aws_mutex_unlock(&s_rb_pause.mutex);
+
+    uint64_t range_start = aws_s3_meta_request_resume_token_object_range_start(token);
+    uint64_t done = aws_s3_meta_request_resume_token_continuous_downloaded_bytes(token);
+    ASSERT_UINT_EQUALS(0, range_start);
+    ASSERT_UINT_EQUALS(object_size - 1, aws_s3_meta_request_resume_token_object_range_end(token));
+    ASSERT_TRUE(done > 0 && done < object_size, "pause should land partway (done=%" PRIu64 ")", done);
+    /* What the token says is done really is in the buffer. */
+    ASSERT_SUCCESS(s_rb_check_pattern(b.mem, range_start, (size_t)done));
+
+    /* --- Resume: ranged GET for the rest, into a view of the rest of the same array --- */
+    char range[64];
+    snprintf(range, sizeof(range), "bytes=%" PRIu64 "-", range_start + done);
+    struct rb_get rest = {.key = g_pre_existing_object_10MB, .range = range};
+    struct aws_byte_buf rest_view = aws_byte_buf_from_empty_array(b.mem + done, object_size - (size_t)done);
+    struct rb_get_result result;
+    ASSERT_SUCCESS(s_rb_download(allocator, &env, &rest, &rest_view, &result));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result.error_code);
+    ASSERT_UINT_EQUALS(object_size - done, rest_view.len);
+
+    /* The whole array now holds the whole object, and nothing past it was written. */
+    ASSERT_SUCCESS(s_rb_check_pattern(b.mem, 0, object_size));
+    ASSERT_SUCCESS(s_rb_check_untouched(&b, object_size));
+
+    aws_s3_meta_request_resume_token_release(token);
+    aws_mutex_clean_up(&s_rb_pause.mutex);
+    s_rb_buffer_clean_up(&b);
     aws_string_destroy(host_name);
     s_rb_env_clean_up(&env);
     return 0;

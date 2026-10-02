@@ -1057,6 +1057,11 @@ struct aws_s3_meta_request_options {
      * data occupies [buffer, buffer + len). On failure, `len` is left unchanged and the buffer's
      * contents are undefined.
      *
+     * Downloads can't be resumed from a resume token, but a paused download can be continued
+     * manually: the first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of
+     * the buffer are valid, so issue a ranged GET starting at object_range_start + that count, with a
+     * recv_buffer that views the rest of the same buffer from that offset.
+     *
      * Mutually exclusive with recv_filepath and body_callback(_ex). Download (GET) only.
      */
     struct aws_byte_buf *recv_buffer;
