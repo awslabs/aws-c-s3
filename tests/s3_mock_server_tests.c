@@ -1012,17 +1012,19 @@ TEST_CASE(request_metrics_http_manager_metrics_mock_server) {
     ASSERT_UINT_EQUALS(0, first_manager_metrics.available_concurrency);
     ASSERT_UINT_EQUALS(0, first_manager_metrics.pending_concurrency_acquires);
 
-    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: with only 1 connection allowed, each of these
-     * had to wait for the prior request's connection to be released back to the idle pool before it could
-     * proceed, so each should see that single connection sitting idle and available, not leased. */
+    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: by now the single allowed connection is open. The
+     * client frees the previous request's slot before returning its connection to the pool, so the next request
+     * can take its snapshot either before or after that release -- the connection may show as leased or idle. */
     for (size_t i = 1; i < num_requests; i++) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(&results.synced_data.metrics, &metrics, i);
 
         struct aws_http_manager_metrics manager_metrics;
         aws_s3_request_metrics_get_http_manager_metrics(metrics, &manager_metrics);
-        ASSERT_UINT_EQUALS(0, manager_metrics.leased_concurrency);
-        ASSERT_UINT_EQUALS(1, manager_metrics.available_concurrency);
+        /* Leased or idle, but never more than the 1 connection the client is limited to. */
+        ASSERT_UINT_EQUALS(1, manager_metrics.leased_concurrency + manager_metrics.available_concurrency);
+        /* Taken before this request's own acquire, so that acquire is never counted as pending. */
+        ASSERT_UINT_EQUALS(0, manager_metrics.pending_concurrency_acquires);
     }
 
     aws_s3_meta_request_test_results_clean_up(&results);
