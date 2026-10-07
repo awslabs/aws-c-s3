@@ -470,10 +470,9 @@ struct aws_s3_meta_request {
     /* Optional caller-provided in-memory download destination (zero-copy).
      * Non-NULL means each part is written directly into this buffer at
      * (part range start - recv_object_range_origin); the client neither allocates nor frees it.
+     * Set only once it has been added to the client's buffer pool, so destroy removes it then.
      * See aws_s3_meta_request_options.recv_buffer. */
     struct aws_byte_buf *recv_buffer;
-    /* Whether recv_buffer was added to the client's buffer pool, so destroy removes it. */
-    bool recv_buffer_registered;
     /* Number of bytes the download will write into recv_buffer (the discovered range length; 0 for an
      * empty object). Copied into recv_buffer->len when the meta request succeeds. */
     uint64_t recv_buffer_expected_len;

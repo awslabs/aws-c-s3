@@ -734,10 +734,10 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_SHORT_BUFFER);
             goto error;
         }
-        meta_request->recv_buffer = options->recv_buffer;
 
         /* Parts are placed in recv_buffer by the client's buffer pool. A pool that doesn't support
-         * pre-allocated buffers can't serve this request. */
+         * pre-allocated buffers can't serve this request. recv_buffer is set only once the pool has
+         * it, so destroy removes it from the pool exactly when it was added. */
         if (client == NULL) {
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
@@ -752,7 +752,7 @@ int aws_s3_meta_request_init_base(
                 aws_error_str(aws_last_error_or_unknown()));
             goto error;
         }
-        meta_request->recv_buffer_registered = true;
+        meta_request->recv_buffer = options->recv_buffer;
     }
 
     if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
@@ -1055,7 +1055,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
         if (meta_request->buffer_pool_optimized) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
-        if (meta_request->recv_buffer_registered) {
+        if (meta_request->recv_buffer != NULL) {
             /* Every part is done with recv_buffer by now, and the pool must not keep a mapping for a
              * meta request that is going away. */
             aws_s3_buffer_pool_remove_preallocated_buffer(meta_request->client->buffer_pool, meta_request);
