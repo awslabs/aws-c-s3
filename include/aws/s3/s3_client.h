@@ -1037,32 +1037,31 @@ struct aws_s3_meta_request_options {
     bool recv_file_delete_on_failure;
 
     /**
-     * Optional. In-memory download destination (zero-copy).
-     * If set, received object data is written directly into this caller-owned buffer -- no
-     * intermediate scratch buffer, no copy -- and `body_callback` is NOT invoked. buffer[0] holds
-     * the first byte of the requested range (object byte 0 for a full-object GET), and each part
-     * is written at its offset within that range.
+     * Optional. Download the object straight into this caller-owned buffer, without copying.
+     * buffer[0] holds the first byte of the requested range (object byte 0 for a full-object GET).
+     * On success, `len` is set to the number of bytes downloaded (the requested range, cut short at
+     * the end of the object), so the data is [buffer, buffer + len). On failure, `len` stays 0 and the
+     * buffer's contents are undefined.
      *
-     * The capacity must hold the whole requested range; if the discovered range is larger, the
-     * meta request fails with AWS_ERROR_SHORT_BUFFER. The buffer may be smaller than part_size:
-     * the first request is then sized down to the buffer's capacity, so an object that fits is
-     * downloaded in that one request. A buffer with zero capacity is rejected at creation with
-     * AWS_ERROR_SHORT_BUFFER.
+     * With other options:
+     * - With read backpressure enabled, the client opens the window itself as data lands.
+     * - Resume tokens can't resume this download, but a paused one can be continued manually: the
+     *   first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of the buffer are
+     *   valid, so issue a ranged GET for the rest of the range into a recv_buffer that views the
+     *   rest of the same buffer.
      *
-     * The caller owns the memory: it must remain valid and unmoved until the finish callback
-     * fires; the client neither allocates nor frees it.
-     *
-     * Writing always starts at buffer[0]; any existing `len` is ignored. On success, `len` is set
-     * to the number of bytes downloaded (the requested range, clipped to the object size), so the
-     * data occupies [buffer, buffer + len). On failure, `len` is left unchanged and the buffer's
-     * contents are undefined.
-     *
-     * Downloads can't be resumed from a resume token, but a paused download can be continued
-     * manually: the first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of
-     * the buffer are valid, so issue a ranged GET starting at object_range_start + that count, with a
-     * recv_buffer that views the rest of the same buffer from that offset.
-     *
-     * Mutually exclusive with recv_filepath and body_callback(_ex). Download (GET) only.
+     * Requirements:
+     * - GET_OBJECT only, and not combined with body_callback, body_callback_ex, or recv_filepath.
+     *   Otherwise creation fails with AWS_ERROR_INVALID_ARGUMENT.
+     * - `len` must be 0 (reset it to reuse a buffer). Otherwise creation fails with
+     *   AWS_ERROR_INVALID_ARGUMENT.
+     * - The capacity must hold the whole requested range. Otherwise the meta request fails with
+     *   AWS_ERROR_SHORT_BUFFER once the object's size is known.
+     * - The client's buffer pool must support pre-allocated buffers. The default pool does; a custom
+     *   pool must implement add_preallocated_buffer. Otherwise creation fails with
+     *   AWS_ERROR_UNSUPPORTED_OPERATION.
+     * - The memory must stay valid and in place until the finish callback fires. The client never
+     *   allocates or frees it.
      */
     struct aws_byte_buf *recv_buffer;
 
