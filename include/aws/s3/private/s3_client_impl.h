@@ -214,10 +214,6 @@ struct aws_s3_client {
 
     struct aws_s3_buffer_pool *buffer_pool;
 
-    /* True if buffer_pool came from aws_s3_client_config.buffer_pool_factory_fn rather than the
-     * default pool. A custom pool doesn't know about recv_buffer, so recv_buffer is rejected. */
-    bool uses_custom_buffer_pool;
-
     struct aws_s3_client_vtable *vtable;
 
     struct aws_ref_count ref_count;

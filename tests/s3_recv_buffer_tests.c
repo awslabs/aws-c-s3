@@ -230,13 +230,91 @@ static int s_rb_expect(
  * Rejected at creation
  * ------------------------------------------------------------------------------------------------ */
 
-static struct aws_s3_buffer_pool *s_rb_custom_pool_factory(
+/* A custom buffer pool that wraps the default pool. It talks to the client only through the pool
+ * interface (the vtable, including add/remove_preallocated_buffer), the way a customer's pool
+ * would, and comes in two variants: one without pre-allocated buffer
+ * support, which can't serve recv_buffer, and one that supports it by passing the calls through. */
+struct rb_wrapper_pool {
+    struct aws_allocator *allocator;
+    struct aws_s3_buffer_pool *inner;
+};
+
+static struct aws_future_s3_buffer_ticket *s_rb_wrapper_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+    struct rb_wrapper_pool *impl = pool->impl;
+    return aws_s3_buffer_pool_reserve(impl->inner, meta);
+}
+
+static void s_rb_wrapper_trim(struct aws_s3_buffer_pool *pool) {
+    struct rb_wrapper_pool *impl = pool->impl;
+    aws_s3_buffer_pool_trim(impl->inner);
+}
+
+static int s_rb_wrapper_add_preallocated(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer) {
+    struct rb_wrapper_pool *impl = pool->impl;
+    return aws_s3_buffer_pool_add_preallocated_buffer(impl->inner, meta_request, buffer);
+}
+
+static void s_rb_wrapper_remove_preallocated(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_meta_request *meta_request) {
+    struct rb_wrapper_pool *impl = pool->impl;
+    aws_s3_buffer_pool_remove_preallocated_buffer(impl->inner, meta_request);
+}
+
+static void s_rb_wrapper_destroy(void *data) {
+    struct aws_s3_buffer_pool *pool = data;
+    struct rb_wrapper_pool *impl = pool->impl;
+    struct aws_allocator *allocator = impl->allocator;
+    aws_s3_buffer_pool_release(impl->inner);
+    aws_mem_release(allocator, impl);
+    aws_mem_release(allocator, pool);
+}
+
+static struct aws_s3_buffer_pool_vtable s_rb_wrapper_vtable_no_preallocated = {
+    .reserve = s_rb_wrapper_reserve,
+    .trim = s_rb_wrapper_trim,
+};
+
+static struct aws_s3_buffer_pool_vtable s_rb_wrapper_vtable_preallocated = {
+    .reserve = s_rb_wrapper_reserve,
+    .trim = s_rb_wrapper_trim,
+    .add_preallocated_buffer = s_rb_wrapper_add_preallocated,
+    .remove_preallocated_buffer = s_rb_wrapper_remove_preallocated,
+};
+
+static struct aws_s3_buffer_pool *s_rb_wrapper_pool_new(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    struct aws_s3_buffer_pool_vtable *vtable) {
+    struct aws_s3_buffer_pool *pool = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_pool));
+    struct rb_wrapper_pool *impl = aws_mem_calloc(allocator, 1, sizeof(struct rb_wrapper_pool));
+    impl->allocator = allocator;
+    impl->inner = aws_s3_default_buffer_pool_new(allocator, config);
+    pool->impl = impl;
+    pool->vtable = vtable;
+    aws_ref_count_init(&pool->ref_count, pool, s_rb_wrapper_destroy);
+    return pool;
+}
+
+static struct aws_s3_buffer_pool *s_rb_custom_pool_without_preallocated(
     struct aws_allocator *allocator,
     struct aws_s3_buffer_pool_config config,
     void *user_data) {
     (void)user_data;
-    /* Any factory-made pool counts as custom, even one that is really the default pool underneath. */
-    return aws_s3_default_buffer_pool_new(allocator, config);
+    return s_rb_wrapper_pool_new(allocator, config, &s_rb_wrapper_vtable_no_preallocated);
+}
+
+static struct aws_s3_buffer_pool *s_rb_custom_pool_with_preallocated(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
+    (void)user_data;
+    return s_rb_wrapper_pool_new(allocator, config, &s_rb_wrapper_vtable_preallocated);
 }
 
 static int s_rb_expect_create_fails(
@@ -341,11 +419,12 @@ static int s_test_s3_recv_buffer_create_errors(struct aws_allocator *allocator, 
             .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT, .message = get, .recv_buffer = &empty_recv_buffer};
         ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, NULL, AWS_ERROR_SHORT_BUFFER));
     }
-    /* Custom buffer pool: it doesn't know about recv_buffer. */
+    /* A custom buffer pool without pre-allocated buffer support can't serve recv_buffer. */
     {
         struct aws_s3_meta_request_options o = {
             .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT, .message = get, .recv_buffer = &recv_buffer};
-        ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, s_rb_custom_pool_factory, AWS_ERROR_INVALID_ARGUMENT));
+        ASSERT_SUCCESS(s_rb_expect_create_fails(
+            allocator, &o, s_rb_custom_pool_without_preallocated, AWS_ERROR_UNSUPPORTED_OPERATION));
     }
 
     aws_http_message_release(get);
@@ -649,6 +728,19 @@ static int s_test_s3_recv_buffer_concurrent(struct aws_allocator *allocator, voi
     }
     aws_string_destroy(host_name);
     s_rb_env_clean_up(&env);
+    return 0;
+}
+
+/* A custom buffer pool that implements add/remove_preallocated_buffer can serve recv_buffer downloads. */
+AWS_TEST_CASE(test_s3_recv_buffer_custom_pool_with_preallocated, s_test_s3_recv_buffer_custom_pool_with_preallocated)
+static int s_test_s3_recv_buffer_custom_pool_with_preallocated(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_env_options opts = {
+        .part_size = MB_TO_BYTES(1),
+        .buffer_pool_factory_fn = s_rb_custom_pool_with_preallocated,
+    };
+    struct rb_get get = {.key = g_pre_existing_object_10MB};
+    ASSERT_SUCCESS(s_rb_expect(allocator, &opts, &get, MB_TO_BYTES(10), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(10)));
     return 0;
 }
 

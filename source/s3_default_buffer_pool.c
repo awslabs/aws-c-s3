@@ -6,10 +6,10 @@
 #include <aws/s3/private/s3_default_buffer_pool.h>
 
 #include <aws/common/array_list.h>
+#include <aws/common/hash_table.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/system_info.h>
 #include <aws/io/future.h>
-#include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/private/s3_util.h>
 
 #include <inttypes.h>
@@ -164,12 +164,22 @@ static uint64_t s_default_pool_derive_aligned_buffer_size(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     uint64_t size);
 
+static int s_default_pool_add_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer);
+static void s_default_pool_remove_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request);
+
 static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
     .reserve = s_default_pool_reserve,
     .trim = s_default_pool_trim,
     .add_special_size = s_default_pool_add_special_size,
     .release_special_size = s_default_pool_release_special_size,
     .derive_aligned_buffer_size = s_default_pool_derive_aligned_buffer_size,
+    .add_preallocated_buffer = s_default_pool_add_preallocated_buffer,
+    .remove_preallocated_buffer = s_default_pool_remove_preallocated_buffer,
 };
 
 static void s_destroy_special_block_list(void *val) {
@@ -313,6 +323,16 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         NULL,
         s_destroy_special_block_list);
 
+    /* Pre-allocated buffers: meta request pointer (a key only) -> caller-owned struct aws_byte_buf * */
+    aws_hash_table_init(
+        &buffer_pool->preallocated_buffers,
+        buffer_pool->base_allocator,
+        0, /* initial capacity */
+        aws_hash_ptr,
+        aws_ptr_eq,
+        NULL,
+        NULL);
+
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
     pool->vtable = &s_default_pool_vtable;
@@ -351,6 +371,7 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
 
     /* Clean up special blocks */
     aws_hash_table_clean_up(&buffer_pool->special_blocks);
+    aws_hash_table_clean_up(&buffer_pool->preallocated_buffers);
 
     aws_mutex_clean_up(&buffer_pool->mutex);
     struct aws_allocator *base = buffer_pool->base_allocator;
@@ -683,19 +704,20 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     return ticket;
 }
 
-/* ---- Zero-copy download destination (aws_s3_meta_request_options.recv_buffer) ----
- * When a meta request has a recv_buffer, its parts are not allocated from the pool. The ticket is
- * a view into the caller's buffer at the part's offset within the requested range. That memory is
- * the caller's, so it doesn't count against the pool's memory limit, and releasing the ticket only
- * frees the ticket's bookkeeping. */
-struct aws_s3_recv_buffer_ticket_impl {
+/* ---- Pre-allocated buffers (aws_s3_buffer_pool_add_preallocated_buffer) ----
+ * A meta request can register a caller-owned buffer (e.g. aws_s3_meta_request_options.recv_buffer).
+ * Its reservations then get a ticket that views that buffer at the requested offset instead of pool
+ * memory. That memory is the caller's, so it doesn't count against the pool's memory limit, and
+ * releasing the ticket only frees the ticket's bookkeeping. The meta request pointer is only used as a
+ * map key; the pool never looks inside it. */
+struct aws_s3_preallocated_ticket_impl {
     struct aws_allocator *allocator;
-    uint8_t *base; /* recv_buffer->buffer + (range_start - recv_buffer_base_offset) */
+    uint8_t *base; /* preallocated buffer + offset */
     size_t size;
 };
 
-static struct aws_byte_buf s_recv_buffer_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
-    struct aws_s3_recv_buffer_ticket_impl *impl = ticket->impl;
+static struct aws_byte_buf s_preallocated_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_preallocated_ticket_impl *impl = ticket->impl;
     struct aws_byte_buf buf;
     AWS_ZERO_STRUCT(buf);
     buf.buffer = impl->base;
@@ -704,57 +726,90 @@ static struct aws_byte_buf s_recv_buffer_ticket_claim(struct aws_s3_buffer_ticke
     return buf;
 }
 
-static void s_recv_buffer_ticket_destroy(void *data) {
+static void s_preallocated_ticket_destroy(void *data) {
     struct aws_s3_buffer_ticket *ticket = data;
-    struct aws_s3_recv_buffer_ticket_impl *impl = ticket->impl;
+    struct aws_s3_preallocated_ticket_impl *impl = ticket->impl;
     struct aws_allocator *allocator = impl->allocator;
     aws_mem_release(allocator, impl);
     aws_mem_release(allocator, ticket);
 }
 
-static struct aws_s3_buffer_ticket_vtable s_recv_buffer_ticket_vtable = {.claim = s_recv_buffer_ticket_claim};
+static struct aws_s3_buffer_ticket_vtable s_preallocated_ticket_vtable = {.claim = s_preallocated_ticket_claim};
 
-static struct aws_future_s3_buffer_ticket *s_reserve_from_recv_buffer(
+static struct aws_future_s3_buffer_ticket *s_reserve_from_preallocated_buffer(
     struct aws_allocator *allocator,
+    struct aws_byte_buf *buffer,
     struct aws_s3_buffer_pool_reserve_meta meta) {
 
-    struct aws_s3_meta_request *meta_request = meta.meta_request;
-    struct aws_byte_buf *recv_buffer = meta_request->recv_buffer;
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(allocator);
 
-    /* Place the part relative to the start of the requested range, and never past the end of the
-     * caller's buffer. Capacity is also checked at creation and against the discovered range. */
-    bool in_bounds = meta.range_start >= meta_request->recv_buffer_base_offset;
-    uint64_t offset = in_bounds ? meta.range_start - meta_request->recv_buffer_base_offset : 0;
-    in_bounds = in_bounds && offset + meta.size <= recv_buffer->capacity;
-
-    if (!in_bounds) {
+    /* Never hand out a view past the end of the caller's buffer. */
+    if (meta.offset > buffer->capacity || meta.size > buffer->capacity - meta.offset) {
         AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p recv_buffer out of bounds for part at object offset %" PRIu64 " (%zu bytes, base %" PRIu64
-            ", capacity %zu).",
-            (void *)meta_request,
-            meta.range_start,
+            AWS_LS_S3_CLIENT,
+            "id=%p Pre-allocated buffer can't hold a reservation of %zu bytes at offset %" PRIu64 " (capacity %zu).",
+            (void *)meta.meta_request,
             meta.size,
-            meta_request->recv_buffer_base_offset,
-            recv_buffer->capacity);
+            meta.offset,
+            buffer->capacity);
         aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_SHORT_BUFFER);
         return future;
     }
 
-    struct aws_s3_recv_buffer_ticket_impl *impl =
-        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_recv_buffer_ticket_impl));
+    struct aws_s3_preallocated_ticket_impl *impl =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_preallocated_ticket_impl));
     impl->allocator = allocator;
-    impl->base = recv_buffer->buffer + offset;
+    impl->base = buffer->buffer + meta.offset;
     impl->size = meta.size;
 
     struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_ticket));
     ticket->impl = impl;
-    ticket->vtable = &s_recv_buffer_ticket_vtable;
-    aws_ref_count_init(&ticket->ref_count, ticket, s_recv_buffer_ticket_destroy);
+    ticket->vtable = &s_preallocated_ticket_vtable;
+    aws_ref_count_init(&ticket->ref_count, ticket, s_preallocated_ticket_destroy);
 
     aws_future_s3_buffer_ticket_set_result_by_move(future, &ticket);
     return future;
+}
+
+static int s_default_pool_add_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer) {
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+    aws_mutex_lock(&buffer_pool->mutex);
+    int result = aws_hash_table_put(&buffer_pool->preallocated_buffers, meta_request, buffer, NULL);
+    aws_mutex_unlock(&buffer_pool->mutex);
+    return result;
+}
+
+static void s_default_pool_remove_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request) {
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+    aws_mutex_lock(&buffer_pool->mutex);
+    aws_hash_table_remove(&buffer_pool->preallocated_buffers, meta_request, NULL, NULL);
+    aws_mutex_unlock(&buffer_pool->mutex);
+}
+
+/* The pre-allocated buffer registered for `meta_request`, or NULL. */
+static struct aws_byte_buf *s_find_preallocated_buffer(
+    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_meta_request *meta_request) {
+
+    if (meta_request == NULL) {
+        return NULL;
+    }
+    struct aws_byte_buf *buffer = NULL;
+    aws_mutex_lock(&buffer_pool->mutex);
+    struct aws_hash_element *elem = NULL;
+    aws_hash_table_find(&buffer_pool->preallocated_buffers, meta_request, &elem);
+    if (elem != NULL) {
+        buffer = elem->value;
+    }
+    aws_mutex_unlock(&buffer_pool->mutex);
+    return buffer;
 }
 
 struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
@@ -766,9 +821,10 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
 
     AWS_FATAL_ASSERT(meta.size != 0);
 
-    /* Zero-copy download: the part goes straight into the caller's recv_buffer, not pool memory. */
-    if (meta.meta_request != NULL && meta.meta_request->recv_buffer != NULL) {
-        return s_reserve_from_recv_buffer(buffer_pool->base_allocator, meta);
+    /* A meta request with a pre-allocated buffer is served from it, not from pool memory. */
+    struct aws_byte_buf *preallocated = s_find_preallocated_buffer(buffer_pool, meta.meta_request);
+    if (preallocated != NULL) {
+        return s_reserve_from_preallocated_buffer(buffer_pool->base_allocator, preallocated, meta);
     }
 
     /* A reservation bigger than the pool's usable limit can never be satisfied: even releasing

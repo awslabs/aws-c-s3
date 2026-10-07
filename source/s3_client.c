@@ -625,7 +625,6 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->buffer_pool_factory_fn) {
         client->buffer_pool =
             client_config->buffer_pool_factory_fn(allocator, buffer_pool_config, client_config->buffer_pool_user_data);
-        client->uses_custom_buffer_pool = true;
     } else {
 
         client->buffer_pool = aws_s3_default_buffer_pool_new(allocator, buffer_pool_config);
@@ -2512,11 +2511,19 @@ void s_acquire_mem_and_prepare_request(
         struct aws_allocator *allocator = request->allocator;
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
+        /* Where this part goes within the requested range. A pool with a pre-allocated buffer for this
+         * meta request places it at this offset. A part before the range origin has no place in it, so
+         * pass an offset no buffer can hold, and the pool fails the reservation. */
+        uint64_t offset = 0;
+        if (aws_sub_u64_checked(request->part_range_start, meta_request->recv_object_range_origin, &offset)) {
+            offset = UINT64_MAX;
+        }
+
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
             .size = aws_min_size(request->buffer_size, request_size),
-            .range_start = request->part_range_start,
+            .offset = offset,
         };
 
         struct aws_s3_reserve_memory_payload *payload =

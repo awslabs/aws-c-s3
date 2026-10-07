@@ -119,10 +119,18 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
                 (void *)auto_ranged_get);
             goto on_error;
         }
-        /* recv_buffer[0] maps to the start of the requested range. For a suffix range
-         * (bytes=-N) the start isn't known yet; it's set once the HEAD discovers the object size. */
-        if (auto_ranged_get->base.recv_buffer != NULL && auto_ranged_get->initial_message_has_start_range) {
-            auto_ranged_get->base.recv_buffer_base_offset = auto_ranged_get->initial_range_start;
+    }
+
+    /* A recv_buffer part is placed when its buffer is reserved, before the first response resolves the
+     * object range, so set the origin now when it's already known: 0 without a Range header, or the
+     * Range start. A suffix range (bytes=-N) is resolved by the HEAD before any part is reserved. */
+    if (auto_ranged_get->base.recv_buffer != NULL) {
+        if (!auto_ranged_get->initial_message_has_range_header) {
+            auto_ranged_get->base.recv_object_range_origin = 0;
+            auto_ranged_get->base.recv_object_range_origin_resolved = true;
+        } else if (auto_ranged_get->initial_message_has_start_range) {
+            auto_ranged_get->base.recv_object_range_origin = auto_ranged_get->initial_range_start;
+            auto_ranged_get->base.recv_object_range_origin_resolved = true;
         }
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
@@ -1281,11 +1289,6 @@ update_synced_data:
              * range. Fail here, before further parts are dispatched, if it is too small. (The
              * first request already fits: it is sized down to the buffer's capacity when the buffer is
              * smaller than a part, and the default buffer pool bounds-checks every part as a backstop.) */
-            if (meta_request->recv_buffer != NULL && !auto_ranged_get->initial_message_has_start_range) {
-                /* Suffix range (bytes=-N): the range start is only known now, from the HEAD, and no
-                 * GET part has been dispatched yet, so parts created after this see the right base. */
-                meta_request->recv_buffer_base_offset = object_range_start;
-            }
             if (meta_request->recv_buffer != NULL && error_code == AWS_ERROR_SUCCESS && object_size != 0) {
                 uint64_t needed = object_range_end + 1 - object_range_start;
                 if (needed > meta_request->recv_buffer->capacity) {
@@ -1310,8 +1313,8 @@ update_synced_data:
             /* A part is delivered at its absolute position in the object, so the file sink needs the
              * range's origin to map the range's first byte to the file's base offset. Set before any
              * body is delivered, since the range is resolved from the first response's headers. */
-            meta_request->recv_file_object_range_origin_resolved = true;
-            meta_request->recv_file_object_range_origin = object_range_start;
+            meta_request->recv_object_range_origin_resolved = true;
+            meta_request->recv_object_range_origin = object_range_start;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so

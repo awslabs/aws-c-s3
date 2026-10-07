@@ -123,6 +123,10 @@ struct aws_s3_default_buffer_pool {
      * the pool will live with the client, and may result in all sorts of special lists to be around. */
     struct aws_hash_table special_blocks;
 
+    /* Pre-allocated buffers added with aws_s3_buffer_pool_add_preallocated_buffer: meta request pointer
+     * (used only as a key) -> caller-owned struct aws_byte_buf *. Guarded by mutex. */
+    struct aws_hash_table preallocated_buffers;
+
     /* TEST ONLY: to force the special blocks alive during trim. */
     bool force_keeping_special_blocks;
 };

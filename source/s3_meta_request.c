@@ -714,16 +714,6 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
         }
-        /* The default buffer pool places parts in recv_buffer. A custom pool doesn't know about it and
-         * would silently allocate its own memory instead, so reject the combination. */
-        if (client != NULL && client->uses_custom_buffer_pool) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_META_REQUEST,
-                "id=%p Cannot create meta request: recv_buffer is not supported with a custom buffer pool.",
-                (void *)meta_request);
-            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-            goto error;
-        }
         /* A buffer smaller than a part is fine: the first request is sized down to fit it. An empty
          * buffer can't hold even that first request. */
         if (options->recv_buffer->capacity == 0) {
@@ -735,6 +725,24 @@ int aws_s3_meta_request_init_base(
             goto error;
         }
         meta_request->recv_buffer = options->recv_buffer;
+
+        /* Parts are placed in recv_buffer by the client's buffer pool. A pool that doesn't support
+         * pre-allocated buffers can't serve this request. */
+        if (client == NULL) {
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        if (aws_s3_buffer_pool_add_preallocated_buffer(client->buffer_pool, meta_request, options->recv_buffer)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: the client's buffer pool doesn't support recv_buffer "
+                "(error %d: %s).",
+                (void *)meta_request,
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
+            goto error;
+        }
+        meta_request->recv_buffer_registered = true;
     }
 
     if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
@@ -1036,6 +1044,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
     if (meta_request->client != NULL) {
         if (meta_request->buffer_pool_optimized) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
+        }
+        if (meta_request->recv_buffer_registered) {
+            /* Every part is done with recv_buffer by now, and the pool must not keep a mapping for a
+             * meta request that is going away. */
+            aws_s3_buffer_pool_remove_preallocated_buffer(meta_request->client->buffer_pool, meta_request);
         }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         /* pending buffer acquisition will keep meta request alive from destroying.  */
@@ -2911,7 +2924,7 @@ static int s_s3_recv_file_offset(
      * for itself: 0 is what it holds before anything resolves it and also what a whole-object download
      * resolves it to. Mapping before then would place the body at its absolute position in the object
      * rather than at the base offset, with nothing about the outcome looking wrong. */
-    if (!meta_request->recv_file_object_range_origin_resolved) {
+    if (!meta_request->recv_object_range_origin_resolved) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Cannot place object range start %" PRIu64 " in the file before the object range is resolved.",
@@ -2924,14 +2937,14 @@ static int s_s3_recv_file_offset(
      * land somewhere far past the end of the file. The checked subtraction is the guard, so the check and
      * the value it protects cannot drift apart. */
     uint64_t offset_from_base = 0;
-    if (aws_sub_u64_checked(object_range_start, meta_request->recv_file_object_range_origin, &offset_from_base)) {
+    if (aws_sub_u64_checked(object_range_start, meta_request->recv_object_range_origin, &offset_from_base)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Object range start %" PRIu64 " precedes the range origin %" PRIu64 ", so it has no place in the "
             "file.",
             (void *)meta_request,
             object_range_start,
-            meta_request->recv_file_object_range_origin);
+            meta_request->recv_object_range_origin);
         /* Replaces the overflow error the checked subtraction raised: a range ahead of the origin is a state this
          * code should never reach, not an arithmetic accident. */
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
