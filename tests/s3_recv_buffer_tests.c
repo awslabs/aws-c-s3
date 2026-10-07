@@ -521,25 +521,17 @@ static int s_test_s3_recv_buffer_suffix_range_larger_than_object(struct aws_allo
     return 0;
 }
 
-/* Buffer smaller than a part, object fits, no size hint: the first request is sized down. */
+/* Buffer smaller than a part, object fits, but nothing says the download is small: the first
+ * request is a full part, which the buffer can't hold. */
 AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part, s_test_s3_recv_buffer_smaller_than_part)
 static int s_test_s3_recv_buffer_smaller_than_part(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct rb_get get = {.key = g_pre_existing_object_1MB};
-    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(1)));
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SHORT_BUFFER, 0, 0));
     return 0;
 }
 
-/* Same, with checksum validation on. */
-AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_checksum, s_test_s3_recv_buffer_smaller_than_part_checksum)
-static int s_test_s3_recv_buffer_smaller_than_part_checksum(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-    struct rb_get get = {.key = g_pre_existing_object_1MB, .validate_checksum = true};
-    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(1)));
-    return 0;
-}
-
-/* Same, with a size hint (which would normally pick the partNumber=1 path). */
+/* Same buffer, with a size hint: the first request is sized to the hint, so it fits. */
 AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_size_hint, s_test_s3_recv_buffer_smaller_than_part_size_hint)
 static int s_test_s3_recv_buffer_smaller_than_part_size_hint(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -549,13 +541,22 @@ static int s_test_s3_recv_buffer_smaller_than_part_size_hint(struct aws_allocato
     return 0;
 }
 
-/* Empty object, with a normal buffer and with a 1-byte buffer. */
+/* Same buffer, with a Range smaller than a part: the first request is sized to the range, so it fits. */
+AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_range, s_test_s3_recv_buffer_smaller_than_part_range)
+static int s_test_s3_recv_buffer_smaller_than_part_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_get get = {.key = g_pre_existing_object_10MB, .range = "bytes=1000-1048575"};
+    size_t len = 1048575 - 1000 + 1;
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, len, AWS_ERROR_SUCCESS, 1000, len));
+    return 0;
+}
+
+/* Empty object: success with len 0. */
 AWS_TEST_CASE(test_s3_recv_buffer_empty_object, s_test_s3_recv_buffer_empty_object)
 static int s_test_s3_recv_buffer_empty_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct rb_get get = {.key = g_pre_existing_empty_object};
-    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, 0));
-    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, 1, AWS_ERROR_SUCCESS, 0, 0));
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_1mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, 0));
     return 0;
 }
 
@@ -743,7 +744,7 @@ static int s_test_s3_recv_buffer_one_byte_short(struct aws_allocator *allocator,
     return 0;
 }
 
-/* Buffer smaller than a part, object much bigger: fails after the first (sized-down) request. */
+/* Buffer smaller than a part, object much bigger: fails on the first request. */
 AWS_TEST_CASE(test_s3_recv_buffer_small_buffer_big_object, s_test_s3_recv_buffer_small_buffer_big_object)
 static int s_test_s3_recv_buffer_small_buffer_big_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -924,7 +925,12 @@ static int s_test_s3_recv_buffer_pause_then_resume_with_range(struct aws_allocat
 
     /* --- Resume: ranged GET for the rest, into a view of the rest of the same array --- */
     char range[64];
-    snprintf(range, sizeof(range), "bytes=%" PRIu64 "-", range_start + done);
+    snprintf(
+        range,
+        sizeof(range),
+        "bytes=%" PRIu64 "-%" PRIu64,
+        range_start + done,
+        aws_s3_meta_request_resume_token_object_range_end(token));
     struct rb_get rest = {.key = g_pre_existing_object_10MB, .range = range};
     struct aws_byte_buf rest_view = aws_byte_buf_from_empty_array(b.mem + done, object_size - (size_t)done);
     struct rb_get_result result;

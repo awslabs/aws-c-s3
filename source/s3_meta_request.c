@@ -724,8 +724,7 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
         }
-        /* A buffer smaller than a part is fine: the first request is sized down to fit it. An empty
-         * buffer can't hold even that first request. */
+        /* An empty buffer can't hold even the first request. */
         if (options->recv_buffer->capacity == 0) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,

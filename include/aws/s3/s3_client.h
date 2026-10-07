@@ -1056,7 +1056,11 @@ struct aws_s3_meta_request_options {
      * - `len` must be 0 (reset it to reuse a buffer). Otherwise creation fails with
      *   AWS_ERROR_INVALID_ARGUMENT.
      * - The capacity must hold the whole requested range. Otherwise the meta request fails with
-     *   AWS_ERROR_SHORT_BUFFER once the object's size is known.
+     *   AWS_ERROR_SHORT_BUFFER.
+     * - The capacity must also hold the first request, which is one part (part_size). For a buffer
+     *   smaller than that, pass the download's size as object_size_hint or in a Range header, so the
+     *   first request is no bigger than the download. Otherwise the meta request fails with
+     *   AWS_ERROR_SHORT_BUFFER.
      * - The client's buffer pool must support pre-allocated buffers. The default pool does; a custom
      *   pool must implement add_preallocated_buffer. Otherwise creation fails with
      *   AWS_ERROR_UNSUPPORTED_OPERATION.
