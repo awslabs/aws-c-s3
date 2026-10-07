@@ -3040,12 +3040,23 @@ void aws_s3_client_notify_connection_finished(
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
-                (void *)client,
-                (void *)request,
-                (void *)meta_request);
+            if (client->retries_disabled) {
+                /* Expected when retries are disabled (max attempts = 1): the request was attempted
+                 * once with no retry token, so there is nothing to retry. Not an error. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Not scheduling retry of request %p for meta request %p: retries are disabled.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            }
 
             goto reset_connection;
         }
