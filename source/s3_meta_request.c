@@ -714,6 +714,16 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
         }
+        /* recv_buffer must start empty; reset len to reuse a buffer. */
+        if (options->recv_buffer->len != 0) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer must be empty (len is %zu).",
+                (void *)meta_request,
+                options->recv_buffer->len);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
         /* A buffer smaller than a part is fine: the first request is sized down to fit it. An empty
          * buffer can't hold even that first request. */
         if (options->recv_buffer->capacity == 0) {

@@ -413,6 +413,14 @@ static int s_test_s3_recv_buffer_create_errors(struct aws_allocator *allocator, 
             .recv_filepath = aws_byte_cursor_from_c_str("dummy_file")};
         ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, NULL, AWS_ERROR_INVALID_ARGUMENT));
     }
+    /* Not empty: len must be 0. */
+    {
+        struct aws_byte_buf used_recv_buffer = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+        used_recv_buffer.len = 1;
+        struct aws_s3_meta_request_options o = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT, .message = get, .recv_buffer = &used_recv_buffer};
+        ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, NULL, AWS_ERROR_INVALID_ARGUMENT));
+    }
     /* Zero capacity: can't hold even the first request. */
     {
         struct aws_s3_meta_request_options o = {
@@ -606,30 +614,7 @@ static int s_test_s3_recv_buffer_backpressure(struct aws_allocator *allocator, v
     return 0;
 }
 
-/* A buffer passed in with existing data: writing still starts at buffer[0], len ends as the download. */
-AWS_TEST_CASE(test_s3_recv_buffer_existing_len_ignored, s_test_s3_recv_buffer_existing_len_ignored)
-static int s_test_s3_recv_buffer_existing_len_ignored(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-    struct rb_env env;
-    ASSERT_SUCCESS(s_rb_env_init(allocator, &env, &s_rb_1mb_parts));
-    struct rb_buffer b;
-    s_rb_buffer_init(allocator, &b, MB_TO_BYTES(2));
-    b.buf.len = 12345;
-
-    struct rb_get get = {.key = g_pre_existing_object_1MB};
-    struct rb_get_result result;
-    ASSERT_SUCCESS(s_rb_download(allocator, &env, &get, &b.buf, &result));
-    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result.error_code);
-    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), b.buf.len);
-    ASSERT_SUCCESS(s_rb_check_pattern(b.mem, 0, MB_TO_BYTES(1)));
-    ASSERT_SUCCESS(s_rb_check_untouched(&b, MB_TO_BYTES(1)));
-
-    s_rb_buffer_clean_up(&b);
-    s_rb_env_clean_up(&env);
-    return 0;
-}
-
-/* The same buffer reused for two downloads in a row. */
+/* The same buffer reused for two downloads in a row, resetting len in between. */
 AWS_TEST_CASE(test_s3_recv_buffer_reuse, s_test_s3_recv_buffer_reuse)
 static int s_test_s3_recv_buffer_reuse(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -644,6 +629,7 @@ static int s_test_s3_recv_buffer_reuse(struct aws_allocator *allocator, void *ct
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result.error_code);
     ASSERT_UINT_EQUALS(MB_TO_BYTES(10), b.buf.len);
 
+    b.buf.len = 0;
     struct rb_get second = {.key = g_pre_existing_object_10MB, .range = "bytes=5000000-5999999"};
     ASSERT_SUCCESS(s_rb_download(allocator, &env, &second, &b.buf, &result));
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result.error_code);

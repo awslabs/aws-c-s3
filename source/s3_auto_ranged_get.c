@@ -1029,6 +1029,8 @@ static void s_s3_auto_ranged_get_request_finished(
     uint64_t object_range_start = 0ULL;
     uint64_t object_range_end = 0ULL;
     uint64_t object_size = 0ULL;
+    /* Length of the requested range: what the caller receives. 0 for an empty object. */
+    uint64_t object_range_length = 0ULL;
     uint64_t first_part_size = 0ULL;
 
     bool found_object_size = false;
@@ -1121,6 +1123,7 @@ static void s_s3_auto_ranged_get_request_finished(
          * into this function is being handled and does not indicate an overall failure.*/
         error_code = AWS_ERROR_SUCCESS;
         found_object_size = true;
+        object_range_length = object_size ? object_range_end - object_range_start + 1 : 0;
         uint32_t max_connections = aws_s3_client_get_max_active_connections(meta_request->client, meta_request);
 
         if (auto_ranged_get->force_dynamic_part_size ||
@@ -1256,9 +1259,8 @@ static void s_s3_auto_ranged_get_request_finished(
                 }
             }
 
-            uint64_t content_length = object_size ? object_range_end - object_range_start + 1 : 0;
             char content_length_buffer[64] = "";
-            snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, content_length);
+            snprintf(content_length_buffer, sizeof(content_length_buffer), "%" PRIu64, object_range_length);
             aws_http_headers_set(
                 request->send_data.response_headers,
                 g_content_length_header_name,
@@ -1289,19 +1291,18 @@ update_synced_data:
              * range. Fail here, before further parts are dispatched, if it is too small. (The
              * first request already fits: it is sized down to the buffer's capacity when the buffer is
              * smaller than a part, and the default buffer pool bounds-checks every part as a backstop.) */
-            if (meta_request->recv_buffer != NULL && error_code == AWS_ERROR_SUCCESS && object_size != 0) {
-                uint64_t needed = object_range_end + 1 - object_range_start;
-                if (needed > meta_request->recv_buffer->capacity) {
+            if (meta_request->recv_buffer != NULL && error_code == AWS_ERROR_SUCCESS) {
+                if (object_range_length > meta_request->recv_buffer->capacity) {
                     AWS_LOGF_ERROR(
                         AWS_LS_S3_META_REQUEST,
                         "id=%p recv_buffer too small for object: need %" PRIu64 " bytes, capacity %zu.",
                         (void *)meta_request,
-                        needed,
+                        object_range_length,
                         meta_request->recv_buffer->capacity);
                     error_code = AWS_ERROR_SHORT_BUFFER;
                 } else {
                     /* Reported to the caller as recv_buffer->len on success. */
-                    meta_request->recv_buffer_expected_len = needed;
+                    meta_request->recv_buffer_expected_len = object_range_length;
                 }
             }
             AWS_ASSERT(!auto_ranged_get->synced_data.object_range_known);
