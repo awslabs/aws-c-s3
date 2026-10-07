@@ -19,6 +19,7 @@
 #include <aws/common/clock.h>
 #include <aws/common/encoding.h>
 #include <aws/common/file.h>
+#include <aws/common/math.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
 #include <aws/io/async_stream.h>
@@ -178,6 +179,92 @@ static void s_validate_meta_request_checksum_on_finish(
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 }
 
+/* The caller can tell us the checksum of the data being downloaded instead of having the client learn it from the
+ * service. Seed the meta-request-level checksum with that value here, at creation, so that from this point on
+ * nothing downstream can tell a caller-supplied checksum from one a discovery response reported: the same running
+ * sum is fed over the same bytes and compared at finish by the same code.
+ *
+ * Supplying the value is by itself a request to validate, which internally is what validate_response_checksum
+ * means, so turn it on. */
+static int s_meta_request_init_expected_checksum(
+    struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_meta_request_options *options) {
+
+    if (options->checksum_config == NULL) {
+        return AWS_OP_SUCCESS;
+    }
+    struct aws_byte_cursor expected_checksum = options->checksum_config->expected_checksum;
+    enum aws_s3_checksum_algorithm algorithm = options->checksum_config->expected_checksum_algorithm;
+
+    if (expected_checksum.len == 0 && algorithm == AWS_SCA_NONE) {
+        return AWS_OP_SUCCESS;
+    }
+
+    if (expected_checksum.len == 0 || algorithm < AWS_SCA_INIT || algorithm > AWS_SCA_END) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum and expected_checksum_algorithm must both be set, "
+            "to a known algorithm.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* Only a download returns object data for the value to describe. A GetObject issued as a default meta request
+     * is one too: the client itself routes a GET carrying a partNumber down that path, and a caller can ask for a
+     * download it does not want split by naming the operation directly. Either way the whole response body is the
+     * bytes the value covers, arriving through the same delivery loop that feeds the running sum. */
+    bool downloads_object_data =
+        options->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
+        (options->type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
+         aws_byte_cursor_eq_c_str_ignore_case(
+             &options->operation_name, aws_s3_request_type_operation_name(AWS_S3_REQUEST_TYPE_GET_OBJECT)));
+    if (!downloads_object_data) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum is only supported for "
+            "AWS_S3_META_REQUEST_TYPE_GET_OBJECT, or AWS_S3_META_REQUEST_TYPE_DEFAULT with operation name "
+            "GetObject.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* The value covers the whole download, which is more than any one response the client receives, and
+     * AWS_SCVM_REQUEST_ONLY asks for nothing spanning more than one response to be validated. */
+    if (options->checksum_config->response_checksum_validation_mode == AWS_SCVM_REQUEST_ONLY) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum cannot be used with "
+            "response_checksum_validation_mode AWS_SCVM_REQUEST_ONLY.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* The value has to be one digest of this algorithm, base64-encoded. Among other things this rejects a
+     * composite checksum, whose trailing "-N" describes an object's parts rather than any span of bytes. */
+    size_t encoded_len = 0;
+    if (aws_base64_compute_encoded_len(aws_get_digest_size_from_checksum_algorithm(algorithm), &encoded_len) ||
+        expected_checksum.len != encoded_len) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Cannot create meta request; expected_checksum is not a base64-encoded checksum of the algorithm "
+            "it was given with.",
+            (void *)meta_request);
+        return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+    }
+
+    meta_request->meta_request_level_running_response_sum = aws_checksum_new(meta_request->allocator, algorithm);
+    if (meta_request->meta_request_level_running_response_sum == NULL) {
+        return AWS_OP_ERR;
+    }
+    if (aws_byte_buf_init_copy_from_cursor(
+            &meta_request->meta_request_level_response_header_checksum, meta_request->allocator, expected_checksum)) {
+        return AWS_OP_ERR;
+    }
+    meta_request->checksum_config.validate_response_checksum = true;
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Bring `recv_filepath` into existence per the requested recv_file_option, settle whether writes
  * can use O_DIRECT, and allocate the per-worker descriptor slots. No-op when the transfer has no
  * receive file.
@@ -203,6 +290,26 @@ static int s_s3_meta_request_init_recv_file(
     struct aws_s3_client *client = meta_request->client;
 
     meta_request->recv_filepath = aws_string_new_from_cursor(allocator, &options->recv_filepath);
+
+    /* Deleting on failure is only safe for a file whose previous content this transfer does not need to keep.
+     * WRITE_TO_POSITION always writes into an existing file, and CREATE_OR_APPEND does when the file is
+     * already there; deleting either would destroy bytes this transfer never wrote. Rejected before the file
+     * is touched. CREATE_OR_REPLACE is allowed: it truncates an existing file, so its old content is gone
+     * whether or not the file is deleted afterward. */
+    if (options->recv_file_delete_on_failure) {
+        bool writes_into_existing_file = options->recv_file_option == AWS_S3_RECV_FILE_WRITE_TO_POSITION ||
+                                         (options->recv_file_option == AWS_S3_RECV_FILE_CREATE_OR_APPEND &&
+                                          aws_path_exists(meta_request->recv_filepath));
+        if (writes_into_existing_file) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request; recv_file_delete_on_failure cannot be used when writing into an "
+                "existing file (AWS_S3_RECV_FILE_WRITE_TO_POSITION, or AWS_S3_RECV_FILE_CREATE_OR_APPEND with a file "
+                "that already exists).",
+                (void *)meta_request);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+    }
 
     /* "direct_io" is what we'll attempt; we may flip it off below if any precondition fails.
      * recv_file_direct_io_fallback_count tracks each fallback decision (init-time and write). */
@@ -299,16 +406,17 @@ static int s_s3_meta_request_init_recv_file(
     if (file_opened) {
         fclose(init_file);
         init_file = NULL;
+
+        /* Armed as soon as this meta request has opened -- and so possibly created or truncated -- the file, and
+         * before anything after the open can fail, so that failure is cleaned up too. Arming it before the open
+         * would let an init failure that never touched the file, such as CREATE_NEW finding one already there,
+         * delete a file this transfer does not own. */
+        meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
     }
 
     if (!file_opened || file_length_read_failed) {
         return AWS_OP_ERR;
     }
-
-    /* Armed only now that this meta request has opened -- and so possibly created or truncated --
-     * the file. Arming it earlier would let an init failure that never touched the file, such as
-     * CREATE_NEW finding one already there, delete a file this transfer does not own. */
-    meta_request->recv_file_delete_on_failure = options->recv_file_delete_on_failure;
 
     /* Additional init-time fallback checks for O_DIRECT */
     if (direct_io && !aws_file_direct_io_is_supported()) {
@@ -552,6 +660,10 @@ int aws_s3_meta_request_init_base(
         goto error;
     }
 
+    if (s_meta_request_init_expected_checksum(meta_request, options)) {
+        goto error;
+    }
+
     if (options->signing_config) {
         meta_request->cached_signing_config = aws_cached_signing_config_new(client, options->signing_config);
     }
@@ -620,7 +732,6 @@ int aws_s3_meta_request_init_base(
 
     meta_request->synced_data.next_streaming_part = 1;
 
-    meta_request->meta_request_level_running_response_sum = NULL;
     meta_request->user_data = options->user_data;
     meta_request->progress_callback = options->progress_callback;
     meta_request->telemetry_callback = options->telemetry_callback;
@@ -869,9 +980,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
      * none are outstanding by the time we get here. */
     s_s3_meta_request_close_write_fds(meta_request);
 
-    if (meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure) {
-        /* If the meta request succeeded, the file was already dealt with by the finish call. So it must
-         * be failing. */
+    /* Not finalized means the finish call never ran, so creation failed after the file was opened. */
+    if (meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure &&
+        !meta_request->recv_file_finalized) {
         aws_file_delete(meta_request->recv_filepath);
     }
     aws_string_destroy(meta_request->recv_filepath);
@@ -896,6 +1007,12 @@ static void s_s3_meta_request_destroy(void *user_data) {
     aws_mem_release(meta_request->allocator, meta_request->combine_slots);
     meta_request->combine_slots = NULL;
     meta_request->combine_slot_count = 0;
+
+    /* Normally the finish call tears the meta-request-level checksum down. A meta request that was seeded with a
+     * caller-supplied checksum and then failed mid-creation never gets that far, so clean up here too. */
+    aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
+    meta_request->meta_request_level_running_response_sum = NULL;
+    aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
 
     AWS_ASSERT(aws_array_list_length(&meta_request->synced_data.event_delivery_array) == 0);
     aws_array_list_clean_up(&meta_request->synced_data.event_delivery_array);
@@ -2759,8 +2876,10 @@ static int s_s3_recv_file_offset(
     }
 
     /* Ahead of the origin there is no file to map onto: the subtraction would wrap and the write would
-     * land somewhere far past the end of the file. */
-    if (object_range_start < meta_request->recv_file_object_range_origin) {
+     * land somewhere far past the end of the file. The checked subtraction is the guard, so the check and
+     * the value it protects cannot drift apart. */
+    uint64_t offset_from_base = 0;
+    if (aws_sub_u64_checked(object_range_start, meta_request->recv_file_object_range_origin, &offset_from_base)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Object range start %" PRIu64 " precedes the range origin %" PRIu64 ", so it has no place in the "
@@ -2768,11 +2887,24 @@ static int s_s3_recv_file_offset(
             (void *)meta_request,
             object_range_start,
             meta_request->recv_file_object_range_origin);
+        /* Replaces the overflow error the checked subtraction raised: a range ahead of the origin is a state this
+         * code should never reach, not an arithmetic accident. */
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
     }
 
-    *out_file_offset =
-        meta_request->recv_file_base_offset + (object_range_start - meta_request->recv_file_object_range_origin);
+    /* A large base offset, such as a WRITE_TO_POSITION recv_file_position, can wrap the sum around to a small
+     * offset, which would overwrite the start of the file without any error. */
+    if (aws_add_u64_checked(meta_request->recv_file_base_offset, offset_from_base, out_file_offset)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: File offset for object range start %" PRIu64 " overflows: base offset %" PRIu64 " plus %" PRIu64
+            " does not fit in 64 bits.",
+            (void *)meta_request,
+            object_range_start,
+            meta_request->recv_file_base_offset,
+            offset_from_base);
+        return AWS_OP_ERR;
+    }
     return AWS_OP_SUCCESS;
 }
 
@@ -3283,8 +3415,11 @@ static void s_s3_body_write_task(struct aws_task *task, void *arg, enum aws_task
         /* END CRITICAL SECTION */
     }
 
-    /* Releases the buffer ticket, which is what frees this part's pool memory. */
+    /* Order matters: the destroy below releases this task's meta request reference, which may be the last one and
+     * take the client's last reference with it, after which the client can be freed at any moment. So the client
+     * must be used before the destroy, never after. */
     aws_s3_client_schedule_process_work(client);
+    /* Releases the buffer ticket, which is what frees this part's pool memory. */
     s_s3_body_write_task_args_destroy(body_write);
 }
 
@@ -3785,6 +3920,10 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         if (delete_on_failure) {
             aws_file_delete(meta_request->recv_filepath);
         }
+
+        /* Set on failure too, not just success: the file is already deleted here, and by the time destroy runs
+         * the caller may have been told of the failure and put a new file at this path. */
+        meta_request->recv_file_finalized = true;
     }
 
     /* Fire pause/error resume-token callbacks before the general finish callback below,

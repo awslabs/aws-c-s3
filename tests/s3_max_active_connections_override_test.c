@@ -220,10 +220,18 @@ TEST_CASE(s3_max_active_connections_override_enforced) {
     struct aws_http_message *message = aws_s3_test_put_object_request_new(
         allocator, &host_cursor, test_object_path, g_test_body_content_type, input_stream, 0 /*flags*/);
 
+    /* Full-object checksum; the test stream cannot seek, so hash a second instance. */
+    struct aws_input_stream *checksum_stream = aws_s3_test_input_stream_new(allocator, object_size);
+    struct aws_s3_checksum_config checksum_config;
+    ASSERT_SUCCESS(aws_s3_tester_set_full_object_checksum(
+        allocator, message, checksum_stream, AWS_SCA_CRC64NVME, &checksum_config));
+    aws_input_stream_release(checksum_stream);
+
     struct aws_s3_meta_request_options options = {
         .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .message = message,
         .max_active_connections_override = 3,
+        .checksum_config = &checksum_config,
     };
 
     struct aws_s3_meta_request_test_results test_results;

@@ -44,6 +44,8 @@ enum AWS_S3_TESTER_SEND_META_REQUEST_FLAGS {
     AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5 = 0x00000040,
     AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5 = 0x00000080,
     AWS_S3_TESTER_SEND_META_REQUEST_SSE_C_AES256 = 0x00000100,
+    /* aws_s3_tester_send_get_object_meta_request checks the body against the tester pattern unless this is set. */
+    AWS_S3_TESTER_SEND_META_REQUEST_SKIP_PATTERN_VERIFY = 0x00000200,
 };
 
 enum aws_s3_tester_sse_type {
@@ -189,6 +191,13 @@ struct aws_s3_tester_meta_request_options {
     enum aws_s3_checksum_algorithm expected_validate_checksum_alg;
     bool disable_put_trailing_checksum;
     bool checksum_via_header;
+    /* Optional. The checksum of the data the GET is expected to return, base64-encoded, and its algorithm.
+     * Passed through to the meta request's checksum_config. */
+    struct aws_byte_cursor expected_checksum;
+    enum aws_s3_checksum_algorithm expected_checksum_algorithm;
+    /* Optional. Which checksums the download is validated against. Passed through to the meta request's
+     * checksum_config. */
+    enum aws_s3_checksum_validation_mode response_checksum_validation_mode;
 
     /* override client signing config */
     struct aws_signing_config_aws *signing_config;
@@ -227,6 +236,10 @@ struct aws_s3_tester_meta_request_options {
          * body callback stops asserting each range continues the last one, and instead assembles the
          * object into out_results->received_body_content by range_start. */
         bool allow_out_of_order_body;
+        /* A successful GET is checked against the tester pattern (see aws_s3_tester_pattern_crc64nvme) over the
+         * range S3 reports, independent of the client's checksum path. Set this when the object is not pattern
+         * content. Always skipped for the mock server. */
+        bool skip_pattern_verify;
     } get_options;
 
     /* Put Object Meta request specific options. */
@@ -244,8 +257,11 @@ struct aws_s3_tester_meta_request_options {
         bool eof_requires_extra_read;
         bool invalid_request;
         bool invalid_input_stream;
+        /* Add a Content-MD5 header: valid_md5 computes it over the body, invalid_md5 sends garbage. */
         bool valid_md5;
         bool invalid_md5;
+        /* Add the tester's canned x-amz-acl header. */
+        bool acl_public_read;
         struct aws_s3_meta_request_resume_token *resume_token;
         /* manually overwrite the content length for some invalid input stream */
         size_t content_length;
@@ -330,6 +346,11 @@ struct aws_s3_meta_request_test_results {
     /* True once a body arrived at an offset behind one already delivered. Without this a passing
      * out-of-order test could just as well have delivered everything in order. */
     bool body_arrived_out_of_order;
+
+    /* Whether the pattern check runs for this request; body_crc64nvme is the running CRC of in-order body
+     * callbacks (out-of-order delivery is checked from received_body_content instead). */
+    bool verify_body_against_pattern;
+    uint64_t body_crc64nvme;
 
     /* The range_start reported for the very first body chunk that arrived, and whether one arrived at
      * all. The documented contract on aws_s3_meta_request_receive_body_callback_fn is that this equals
@@ -542,14 +563,6 @@ int aws_s3_tester_send_get_object_meta_request(
     uint32_t flags,
     struct aws_s3_meta_request_test_results *out_results);
 
-/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
-int aws_s3_tester_send_put_object_meta_request(
-    struct aws_s3_tester *tester,
-    struct aws_s3_client *client,
-    uint32_t object_size_mb,
-    uint32_t flags,
-    struct aws_s3_meta_request_test_results *out_results);
-
 int aws_s3_tester_validate_get_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags);
@@ -578,11 +591,47 @@ struct aws_input_stream *aws_s3_test_input_stream_new_with_value_type(
     size_t length,
     enum aws_s3_test_stream_value stream_value);
 
-/* Add g_upload_folder to the file path to make sure we get all the non-pre-exist files in the same folder. */
+/* g_upload_folder + file_path. Every upload key goes through this or g_put_object_prefix, never a literal path. */
 int aws_s3_tester_upload_file_path_init(
     struct aws_allocator *allocator,
     struct aws_byte_buf *out_path_buffer,
     struct aws_byte_cursor file_path);
+
+/* Every object the tester uploads (aws_input_stream_tester, AWS_AUTOGEN_LOREM_IPSUM) and every pre-existing-*
+ * fixture (test_helper.py) is the same repeating text from offset 0, so the expected byte at any object offset is
+ * known without going through the client. Its period, 446 = 2 * 223, divides no power-of-two part size, so no two
+ * parts of an object are identical. */
+
+/* Append the `length` pattern bytes found at `object_offset`. */
+int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offset, size_t length);
+
+/* CRC64NVME of the pattern over [object_offset, object_offset + length), computed without materializing it. */
+uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length);
+
+/* For tests that drive their own GET: check the body-callback bytes against the pattern. Set
+ * results->verify_body_against_pattern before binding so the callback keeps the running CRC. Body callback only. */
+int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_results *results);
+
+/* Full-object checksums: computed over the source and sent in the x-amz-checksum-<algorithm> header, so S3 fails
+ * CompleteMultipartUpload if the assembled object differs. send_meta_request_with_options callers use
+ * put_options.full_object_checksum; the two helpers below are for hand-built PutObject messages. */
+
+/* Base64 checksum of the rest of `input_stream`. Consumes it without rewinding; if the stream cannot seek
+ * (aws_s3_test_input_stream), hash a second instance instead. */
+int aws_s3_tester_encoded_checksum_of_stream(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *input_stream,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *out_encoded_checksum);
+
+/* Set x-amz-checksum-<algorithm> on `message` from `source` (same content as the upload; consumed, not released)
+ * and fill `out_checksum_config` with the matching trailer config. */
+int aws_s3_tester_set_full_object_checksum(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    struct aws_input_stream *source,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_s3_checksum_config *out_checksum_config);
 
 /* Create a file on disk based on the input stream. Return the file path */
 struct aws_string *aws_s3_tester_create_file(
@@ -614,7 +663,10 @@ extern const struct aws_byte_cursor g_pre_existing_object_aes256_10MB;
 extern const struct aws_byte_cursor g_pre_existing_object_async_error_xml;
 extern const struct aws_byte_cursor g_pre_existing_empty_object;
 
-extern const struct aws_byte_cursor g_put_object_prefix;
+/* "/upload/<uuid>" and "/upload/<uuid>/put-object-test", populated on first use. Per process, so concurrent CI
+ * runs sharing the bucket never read each other's uploads. */
+extern struct aws_byte_cursor g_upload_folder;
+extern struct aws_byte_cursor g_put_object_prefix;
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 extern struct aws_byte_cursor g_test_bucket_name;

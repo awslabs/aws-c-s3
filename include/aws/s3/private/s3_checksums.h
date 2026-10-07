@@ -60,6 +60,7 @@ struct aws_s3_meta_request_checksum_config_storage {
     enum aws_s3_checksum_algorithm checksum_algorithm;
     struct aws_byte_buf unknown_checksum_algo; /* if checksum algo is unknown this will have checksum name */
     bool validate_response_checksum;
+    enum aws_s3_checksum_validation_mode response_checksum_validation_mode;
     struct {
         bool crc64nvme;
         bool crc32c;

@@ -327,27 +327,66 @@ static int s_validate_abort_multipart_upload_metrics(struct aws_s3_request_metri
     return AWS_OP_SUCCESS;
 }
 
-static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list, uint32_t expected_length) {
-    /* Check the size of the metrics should be the same as the number of requests, which should be create MPU, two
-     * upload parts and one complete MPU */
-    ASSERT_UINT_EQUALS(expected_length, aws_array_list_length(metrics_list));
-    struct aws_s3_request_metrics *metrics = NULL;
+/* Validate the metrics of a multipart upload that succeeded: one CreateMultipartUpload, `expected_num_parts`
+ * UploadParts and one CompleteMultipartUpload, each of which succeeded exactly once.
+ *
+ * Any request may also have failed attempts before its successful one -- e.g. a slow mock server under parallel test
+ * load can trip the connection throughput monitor and force a retry. Each attempt records its own metrics, so the list
+ * can be longer than the number of requests. A failed attempt is accepted only if a later attempt of the same request
+ * follows it, so a request that failed for good still fails the check. */
+static int s_validate_mpu_mock_server_metrics(struct aws_array_list *metrics_list, uint32_t expected_num_parts) {
+    size_t num_metrics = aws_array_list_length(metrics_list);
+    uint32_t num_create_succeeded = 0;
+    uint32_t num_parts_succeeded = 0;
+    uint32_t num_complete_succeeded = 0;
 
-    /* First metrics should be the CreateMPU */
-    aws_array_list_get_at(metrics_list, (void **)&metrics, 0);
-    ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
-
-    /* All of the middle should be Upload Parts*/
-    for (size_t i = 1; i < aws_array_list_length(metrics_list) - 1; i++) {
-        metrics = NULL;
+    for (size_t i = 0; i < num_metrics; i++) {
+        struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(metrics_list, (void **)&metrics, i);
-        ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true)); /* assuming all requests were success */
+
+        if (metrics->crt_info_metrics.error_code != AWS_ERROR_SUCCESS) {
+            /* A failed attempt must be followed by the next attempt of the same request. */
+            struct aws_s3_request_metrics *next_attempt = NULL;
+            for (size_t j = i + 1; j < num_metrics && next_attempt == NULL; j++) {
+                struct aws_s3_request_metrics *candidate = NULL;
+                aws_array_list_get_at(metrics_list, (void **)&candidate, j);
+                if (candidate->crt_info_metrics.request_ptr == metrics->crt_info_metrics.request_ptr) {
+                    next_attempt = candidate;
+                }
+            }
+            ASSERT_NOT_NULL(next_attempt);
+            ASSERT_UINT_EQUALS(
+                metrics->crt_info_metrics.retry_attempt + 1, next_attempt->crt_info_metrics.retry_attempt);
+            ASSERT_INT_EQUALS(
+                metrics->time_metrics.s3_request_first_attempt_start_timestamp_ns,
+                next_attempt->time_metrics.s3_request_first_attempt_start_timestamp_ns);
+            ASSERT_SUCCESS(s_validate_time_metrics(metrics, false /*is_last_attempt*/));
+            continue;
+        }
+
+        switch (metrics->req_resp_info_metrics.request_type) {
+            case AWS_S3_REQUEST_TYPE_CREATE_MULTIPART_UPLOAD:
+                ASSERT_SUCCESS(s_validate_create_multipart_upload_metrics(metrics));
+                ++num_create_succeeded;
+                break;
+            case AWS_S3_REQUEST_TYPE_UPLOAD_PART:
+                ASSERT_SUCCESS(s_validate_upload_part_metrics(metrics, true /*is_last_attempt*/));
+                ++num_parts_succeeded;
+                break;
+            case AWS_S3_REQUEST_TYPE_COMPLETE_MULTIPART_UPLOAD:
+                ASSERT_SUCCESS(s_validate_complete_multipart_upload_metrics(metrics));
+                /* CompleteMultipartUpload can only start once every part is done, so it is the last attempt. */
+                ASSERT_UINT_EQUALS(num_metrics - 1, i);
+                ++num_complete_succeeded;
+                break;
+            default:
+                ASSERT_TRUE(false, "unexpected request type %d", (int)metrics->req_resp_info_metrics.request_type);
+        }
     }
 
-    /* Last metrics should be CompleteMPU*/
-    metrics = NULL;
-    aws_array_list_get_at(metrics_list, (void **)&metrics, aws_array_list_length(metrics_list) - 1);
-    ASSERT_SUCCESS(s_validate_complete_multipart_upload_metrics(metrics));
+    ASSERT_UINT_EQUALS(1, num_create_succeeded);
+    ASSERT_UINT_EQUALS(expected_num_parts, num_parts_succeeded);
+    ASSERT_UINT_EQUALS(1, num_complete_succeeded);
 
     return AWS_OP_SUCCESS;
 }
@@ -469,8 +508,7 @@ TEST_CASE(multipart_upload_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(
-        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 2 /*expected_num_parts*/));
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -517,8 +555,7 @@ TEST_CASE(multipart_upload_meta_request_part_size_over_memory_limit_mock_server)
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(
-        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 2 /*expected_num_parts*/));
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -838,8 +875,7 @@ TEST_CASE(multipart_upload_unsigned_with_trailer_checksum_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
-    ASSERT_SUCCESS(
-        s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 4 /*1 create, 1 complete, 2 parts*/));
+    ASSERT_SUCCESS(s_validate_mpu_mock_server_metrics(&out_results.synced_data.metrics, 2 /*expected_num_parts*/));
 
     /**
      * Check the recorded headers.
@@ -1012,17 +1048,19 @@ TEST_CASE(request_metrics_http_manager_metrics_mock_server) {
     ASSERT_UINT_EQUALS(0, first_manager_metrics.available_concurrency);
     ASSERT_UINT_EQUALS(0, first_manager_metrics.pending_concurrency_acquires);
 
-    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: with only 1 connection allowed, each of these
-     * had to wait for the prior request's connection to be released back to the idle pool before it could
-     * proceed, so each should see that single connection sitting idle and available, not leased. */
+    /* UploadPart #1, UploadPart #2, CompleteMultipartUpload: by now the single allowed connection is open. The
+     * client frees the previous request's slot before returning its connection to the pool, so the next request
+     * can take its snapshot either before or after that release -- the connection may show as leased or idle. */
     for (size_t i = 1; i < num_requests; i++) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(&results.synced_data.metrics, &metrics, i);
 
         struct aws_http_manager_metrics manager_metrics;
         aws_s3_request_metrics_get_http_manager_metrics(metrics, &manager_metrics);
-        ASSERT_UINT_EQUALS(0, manager_metrics.leased_concurrency);
-        ASSERT_UINT_EQUALS(1, manager_metrics.available_concurrency);
+        /* Leased or idle, but never more than the 1 connection the client is limited to. */
+        ASSERT_UINT_EQUALS(1, manager_metrics.leased_concurrency + manager_metrics.available_concurrency);
+        /* Taken before this request's own acquire, so that acquire is never counted as pending. */
+        ASSERT_UINT_EQUALS(0, manager_metrics.pending_concurrency_acquires);
     }
 
     aws_s3_meta_request_test_results_clean_up(&results);
@@ -3324,6 +3362,343 @@ TEST_CASE(default_head_object_with_checksum_header_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* The caller can hand the client the checksum of the data a GET returns instead of having the client learn one from
+ * the service. Downloads below use /get_object_opaque_etag, a 256 KiB object of repeated 'a' whose responses carry
+ * no checksum header of any kind, so the caller's value is the only thing validation can run against. That path also
+ * has no HEAD response to serve, so a download that still tried to discover a checksum would fail outright. */
+static int s_test_get_object_expected_checksum(
+    struct aws_allocator *allocator,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_cursor expected_checksum,
+    const char *object_range,
+    uint64_t expected_body_size,
+    int expected_error_code) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        /* validate_get_response_checksum is deliberately left unset: supplying a checksum is by itself a request
+         * to validate against it. */
+        .expected_checksum = expected_checksum,
+        .expected_checksum_algorithm = algorithm,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag"),
+            },
+        .mock_server = true,
+        .validate_type = expected_error_code == AWS_ERROR_SUCCESS ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS
+                                                                  : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    if (object_range != NULL) {
+        get_options.get_options.object_range = aws_byte_cursor_from_c_str(object_range);
+    }
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(expected_error_code, out_results.finished_error_code);
+    /* Whether the value matched or not, the data was compared against it. */
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(algorithm, out_results.validation_algorithm);
+    /* A mismatch is only found once the last part has been checksummed, so every requested byte is delivered
+     * either way. */
+    ASSERT_UINT_EQUALS(expected_body_size, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* The whole object, in four parts. CRC32 combines, so the parts checksum themselves as they stream and the digests
+ * are folded into the value the caller gave. */
+TEST_CASE(get_object_expected_checksum_crc32_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_CRC32,
+        aws_byte_cursor_from_c_str("uo2NxA=="),
+        NULL /*object_range*/,
+        262144 /*expected_body_size*/,
+        AWS_ERROR_SUCCESS);
+}
+
+/* Same download with SHA256, which does not combine: the body is fed to a single running sum in object order as it
+ * is delivered. */
+TEST_CASE(get_object_expected_checksum_sha256_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_SHA256,
+        aws_byte_cursor_from_c_str("3T3eh2I9mms1TGjJQ9GJyJxjZS2UXnu98JhsrpGklSE="),
+        NULL /*object_range*/,
+        262144 /*expected_body_size*/,
+        AWS_ERROR_SUCCESS);
+}
+
+/* The value covers the requested bytes, not the object: here 128 KiB out of the middle of the object, which the
+ * service has no checksum of to report. */
+TEST_CASE(get_object_expected_checksum_range_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_CRC32,
+        aws_byte_cursor_from_c_str("ypdRMA=="),
+        "bytes=65536-196607" /*object_range*/,
+        131072 /*expected_body_size*/,
+        AWS_ERROR_SUCCESS);
+}
+
+/* The CRC32 of the first 64 KiB, offered as the checksum of all 256 KiB. */
+TEST_CASE(get_object_expected_checksum_mismatch_mock_server) {
+    (void)ctx;
+    return s_test_get_object_expected_checksum(
+        allocator,
+        AWS_SCA_CRC32,
+        aws_byte_cursor_from_c_str("wyCR/w=="),
+        NULL /*object_range*/,
+        262144 /*expected_body_size*/,
+        AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+}
+
+/* What the caller supplies is what the download is validated against, even where the service reports a checksum of
+ * its own. Every part response here carries the correct CRC32 of its own 64 KiB, so per-part validation passes, and
+ * the object's CRC32 is discoverable; the caller's value is wrong for the 256 KiB delivered, and that is what
+ * decides the outcome. */
+TEST_CASE(get_object_expected_checksum_takes_precedence_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .validate_get_response_checksum = true,
+        /* The CRC32 of 64 KiB of 'a', which is one part rather than the whole download. */
+        .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+        .expected_checksum_algorithm = AWS_SCA_CRC32,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_checksum_per_part_header"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* A download the caller asked not to be split is a default meta request, and the checksum it supplies covers the
+ * response body the single request returns. /get_object_default_no_checksum is a 64 KiB object of repeated 'a'
+ * answered whole, with no checksum header of any kind, so the caller's value is the only thing validation runs
+ * against. */
+static int s_test_default_get_expected_checksum(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor object_path,
+    struct aws_byte_cursor expected_checksum,
+    int expected_error_code) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+        .client = client,
+        .expected_checksum = expected_checksum,
+        .expected_checksum_algorithm = AWS_SCA_CRC32,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .default_type_options =
+            {
+                .mode = AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET,
+                .operation_name = aws_byte_cursor_from_c_str("GetObject"),
+            },
+        .mock_server = true,
+        .validate_type = expected_error_code == AWS_ERROR_SUCCESS ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS
+                                                                  : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(expected_error_code, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+    ASSERT_UINT_EQUALS(64 * 1024, out_results.received_body_size);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* The CRC32 of the 64 KiB the request returns. */
+TEST_CASE(default_get_expected_checksum_mock_server) {
+    (void)ctx;
+    return s_test_default_get_expected_checksum(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_default_no_checksum"),
+        aws_byte_cursor_from_c_str("wyCR/w=="),
+        AWS_ERROR_SUCCESS);
+}
+
+/* The CRC32 of 128 KiB of 'a', offered as the checksum of the 64 KiB that came back. */
+TEST_CASE(default_get_expected_checksum_mismatch_mock_server) {
+    (void)ctx;
+    return s_test_default_get_expected_checksum(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_default_no_checksum"),
+        aws_byte_cursor_from_c_str("ypdRMA=="),
+        AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+}
+
+/* The caller's value decides the outcome even where the response reports a checksum of its own:
+ * /get_object_checksum_mp_parts_count answers with the correct CRC32 of its 64 KiB, so the response is validated
+ * against its own header and passes, and against the caller's wrong value and does not. */
+TEST_CASE(default_get_expected_checksum_takes_precedence_mock_server) {
+    (void)ctx;
+    return s_test_default_get_expected_checksum(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_mp_parts_count"),
+        aws_byte_cursor_from_c_str("ypdRMA=="),
+        AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH);
+}
+
+/* response_checksum_validation_mode picks which checksums a download is checked against. The downloads below use the
+ * same objects as the tests above, so what changes with the mode is visible in the result: whether the whole download
+ * was validated against a single checksum on top of each part being validated against its own. */
+static int s_test_get_object_checksum_validation_mode(
+    struct aws_allocator *allocator,
+    struct aws_byte_cursor object_path,
+    enum aws_s3_checksum_validation_mode mode,
+    bool expected_did_validate) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .validate_get_response_checksum = true,
+        .response_checksum_validation_mode = mode,
+        .get_options =
+            {
+                .object_path = object_path,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
+    ASSERT_UINT_EQUALS(expected_did_validate, out_results.did_validate);
+    if (expected_did_validate) {
+        ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+    }
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Every part response of this object carries the CRC32 of its own body and nothing describes the whole object, so
+ * validating each response against its own checksum is all these headers can support, and it still reports the
+ * download as validated. */
+TEST_CASE(get_object_checksum_validation_request_only_mock_server) {
+    (void)ctx;
+    return s_test_get_object_checksum_validation_mode(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_per_part_header"),
+        AWS_SCVM_REQUEST_ONLY,
+        true /*expected_did_validate*/);
+}
+
+/* Here the object's CRC32 is only advertised on the HEAD response and the part responses carry no checksum of their
+ * own, so validation is only possible by combining the parts against the discovered value -- which spans more than
+ * one response. AWS_SCVM_REQUEST_ONLY neither makes that HEAD request nor uses its checksum, leaving nothing to
+ * validate: the same download that multipart_download_checksum_combine_mock_server reports as validated finishes
+ * unvalidated here. */
+TEST_CASE(get_object_checksum_validation_request_only_skips_whole_object_mock_server) {
+    (void)ctx;
+    return s_test_get_object_checksum_validation_mode(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_combine"),
+        AWS_SCVM_REQUEST_ONLY,
+        false /*expected_did_validate*/);
+}
+
+/* AWS_SCVM_FULL_OBJECT asks for the whole download to be validated, discovering the checksum since the caller
+ * supplied none: the same result the default mode gives. */
+TEST_CASE(get_object_checksum_validation_full_object_mock_server) {
+    (void)ctx;
+    return s_test_get_object_checksum_validation_mode(
+        allocator,
+        aws_byte_cursor_from_c_str("/get_object_checksum_combine"),
+        AWS_SCVM_FULL_OBJECT,
+        true /*expected_did_validate*/);
+}
+
 /* Test that the HTTP throughput monitoring's default settings can detect dead (or absurdly slow) connections.
  * We trigger this by having the mock server delay 60 seconds before sending the response. */
 TEST_CASE(get_object_throughput_failure_mock_server) {
@@ -4377,6 +4752,120 @@ TEST_CASE(get_error_token_delete_on_failure_mock_server) {
     ASSERT_NULL(test_data->resume_token);
 
     aws_mutex_clean_up(&test_data->mutex);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* A download that succeeds with recv_file_delete_on_failure set must keep its file. The finish call
+ * only deletes on failure, but meta request destroy deletes whenever the flag is still armed, so the
+ * flag has to be disarmed once the finish call has dealt with the file. The tester checks the file
+ * still exists after shutdown, which is after destroy. */
+TEST_CASE(get_delete_on_failure_keeps_file_on_success_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+                .recv_file_delete_on_failure = true,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Sends a GET that must fail during creation with `expected_error`, then resets the tester's finish and
+ * shutdown counts so the next request on the same tester is not held to them. */
+static int s_send_get_expecting_creation_error(
+    struct aws_s3_tester *tester,
+    struct aws_s3_tester_meta_request_options *get_options,
+    int expected_error) {
+
+    get_options->validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE;
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(tester, get_options, NULL));
+    ASSERT_INT_EQUALS(expected_error, aws_last_error());
+
+    aws_s3_tester_lock_synced_data(tester);
+    ASSERT_UINT_EQUALS(0, tester->synced_data.meta_request_shutdown_count);
+    ASSERT_UINT_EQUALS(0, tester->synced_data.meta_request_finish_count);
+    tester->synced_data.desired_meta_request_shutdown_count = 0;
+    tester->synced_data.desired_meta_request_finish_count = 0;
+    aws_s3_tester_unlock_synced_data(tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* recv_file_delete_on_failure is rejected at creation wherever a failure would delete content this transfer
+ * did not write: WRITE_TO_POSITION always, and CREATE_OR_APPEND onto an existing file. CREATE_OR_APPEND onto a
+ * missing file is still allowed, since the transfer creates it. */
+TEST_CASE(get_delete_on_failure_rejects_existing_file_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_parallel_write"),
+                .file_on_disk = true,
+                .recv_file_delete_on_failure = true,
+                .pre_exist_file_length = 10,
+            },
+        .mock_server = true,
+    };
+
+    get_options.get_options.recv_file_option = AWS_S3_RECV_FILE_WRITE_TO_POSITION;
+    ASSERT_SUCCESS(s_send_get_expecting_creation_error(&tester, &get_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    get_options.get_options.recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_APPEND;
+    ASSERT_SUCCESS(s_send_get_expecting_creation_error(&tester, &get_options, AWS_ERROR_INVALID_ARGUMENT));
+
+    /* No pre-existing file, so the tester only picks a path and the download creates it. */
+    get_options.get_options.pre_exist_file_length = 0;
+    get_options.validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS;
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);

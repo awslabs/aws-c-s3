@@ -99,6 +99,10 @@ static const uint32_t s_endpoints_cleanup_time_offset_in_s = 5;
 static const char *s_memory_limit_gib_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_GIB";
 static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 
+/* Eight threads is enough to saturate most disk setups. Mirroring the full event-loop count on a
+ * large host (e.g. 192 vCPUs) wastes threads and file descriptors without improving throughput. */
+static const uint16_t s_default_max_num_file_io_threads = 8;
+
 /* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
  * object order. Consulted below both the request and the client setting, so it changes the default rather
  * than overruling a caller. See `aws_s3_client.out_of_order_delivery_env`. */
@@ -107,6 +111,7 @@ static const char *s_ordered_delivery_env_var = "AWS_CRT_S3_ORDERED_DELIVERY";
 /* Set to anything non-empty and every download requests its parts in object order instead of spreading
  * them across far-apart regions of the object. See `aws_s3_client.force_sequential_requests`. */
 static const char *s_force_sequential_requests_env_var = "AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS";
+static const char *s_num_file_io_threads_env_var = "AWS_CRT_S3_NUM_FILE_IO_THREADS";
 
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
@@ -892,14 +897,48 @@ struct aws_s3_client *aws_s3_client_new(
         client->synced_data.body_streaming_elg_allocated = true;
     }
 
-    /* Set up file I/O ELG */
+    /* Set up file I/O ELG.
+     * Priority: config field (non-zero) > env var > default.
+     * 0 means "not set" at every level.
+     * Default is min(s_default_max_num_file_io_threads, bootstrap ELG loop count). */
     {
+        uint16_t num_event_loops =
+            (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
         uint16_t num_file_io_threads = client_config->num_file_io_threads;
 
+        /* Env var is consulted only when the config field was not explicitly set. */
         if (num_file_io_threads == 0) {
-            /* Default to one thread per bootstrap event loop, matching the body streaming ELG. */
-            num_file_io_threads =
-                (uint16_t)aws_event_loop_group_get_loop_count(client->client_bootstrap->event_loop_group);
+            struct aws_string *env_val = aws_get_env_nonempty(allocator, s_num_file_io_threads_env_var);
+            if (env_val != NULL) {
+                uint64_t parsed = 0;
+                if (!aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(env_val), &parsed) && parsed > 0 &&
+                    parsed <= UINT16_MAX) {
+                    num_file_io_threads = (uint16_t)parsed;
+                    AWS_LOGF_INFO(
+                        AWS_LS_S3_CLIENT,
+                        "id=%p %s=%u sets file I/O thread count.",
+                        (void *)client,
+                        s_num_file_io_threads_env_var,
+                        (unsigned)num_file_io_threads);
+                } else {
+                    AWS_LOGF_WARN(
+                        AWS_LS_S3_CLIENT,
+                        "Ignoring invalid %s value (must be 1..65535).",
+                        s_num_file_io_threads_env_var);
+                }
+                aws_string_destroy(env_val);
+            }
+        }
+
+        if (num_file_io_threads == 0) {
+            /* Default: min(s_default_max_num_file_io_threads, elg_count).
+             * See the constant definition for the rationale. */
+            num_file_io_threads = num_event_loops < s_default_max_num_file_io_threads
+                                      ? num_event_loops
+                                      : s_default_max_num_file_io_threads;
+            if (num_file_io_threads < 1) {
+                num_file_io_threads = 1;
+            }
         }
 
         struct aws_shutdown_callback_options file_io_elg_shutdown_options = {
@@ -910,9 +949,10 @@ struct aws_s3_client *aws_s3_client_new(
         client->file_io_elg =
             aws_event_loop_group_new_default(client->allocator, num_file_io_threads, &file_io_elg_shutdown_options);
 
-        if (!client->file_io_elg) {
-            goto on_error;
-        }
+        /* Not handled as an error: creating the body streaming ELG just succeeded, and this one is created the same
+         * way, so there is no failure left to expect. Handling it would need the error path to tear down a live
+         * ELG, which only finishes asynchronously through the client's shutdown callbacks. */
+        AWS_FATAL_ASSERT(client->file_io_elg != NULL);
         client->synced_data.file_io_elg_allocated = true;
 
         AWS_LOGF_DEBUG(
@@ -1042,6 +1082,9 @@ on_error:
 
     aws_array_list_clean_up(&client->network_interface_names);
     client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
+    /* Still NULL when the failure came before it was set; otherwise the body streaming ELG failed, the only failure
+     * point after it. */
+    aws_retry_strategy_release(client->retry_strategy);
 
     aws_mem_release(client->allocator, client);
     return NULL;

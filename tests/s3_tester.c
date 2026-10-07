@@ -11,6 +11,7 @@
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_util.h"
 #include <aws/auth/credentials.h>
+#include <aws/checksums/crc.h>
 #include <aws/common/encoding.h>
 #include <aws/common/environment.h>
 #include <aws/common/system_info.h>
@@ -49,7 +50,7 @@ const struct aws_byte_cursor g_s3_sse_c_key_header =
 const struct aws_byte_cursor g_s3_sse_c_key_md5_header =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-server-side-encryption-customer-key-md5");
 
-/* TODO populate these at the beginning of running tests with names that are unique to the test run. */
+/* Fixed names: shared read-only fixtures from tests/test_helper/test_helper.py, read by every branch and binding. */
 
 const struct aws_byte_cursor g_pre_existing_object_1MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-1MB");
 const struct aws_byte_cursor g_pre_existing_object_10MB = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-10MB");
@@ -61,8 +62,40 @@ const struct aws_byte_cursor g_pre_existing_empty_object = AWS_BYTE_CUR_INIT_FRO
 const struct aws_byte_cursor g_pre_existing_object_async_error_xml =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/pre-existing-async-error-xml");
 
-const struct aws_byte_cursor g_put_object_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload/put-object-test");
-const struct aws_byte_cursor g_upload_folder = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/upload");
+/* Uploads go under /upload/<uuid>/ so concurrent CI runs sharing the bucket never read each other's objects; still
+ * under upload/ for the bucket's 1-day expiry rule. Populated lazily: some tests build their object path before
+ * they have a tester. */
+static char s_upload_folder_storage[64] = "";
+static char s_put_object_prefix_storage[96] = "";
+struct aws_byte_cursor g_upload_folder = {0};
+struct aws_byte_cursor g_put_object_prefix = {0};
+
+static void s_ensure_upload_prefix(void) {
+    if (g_upload_folder.len != 0) {
+        return;
+    }
+
+    struct aws_uuid uuid;
+    AWS_FATAL_ASSERT(aws_uuid_init(&uuid) == AWS_OP_SUCCESS);
+    char uuid_str[AWS_UUID_STR_LEN] = "";
+    struct aws_byte_buf uuid_buf = aws_byte_buf_from_empty_array(uuid_str, sizeof(uuid_str));
+    AWS_FATAL_ASSERT(aws_uuid_to_str(&uuid, &uuid_buf) == AWS_OP_SUCCESS);
+
+    snprintf(
+        s_upload_folder_storage,
+        sizeof(s_upload_folder_storage),
+        "/upload/%.*s",
+        (int)uuid_buf.len,
+        (const char *)uuid_buf.buffer);
+    snprintf(
+        s_put_object_prefix_storage,
+        sizeof(s_put_object_prefix_storage),
+        "%s/put-object-test",
+        s_upload_folder_storage);
+
+    g_upload_folder = aws_byte_cursor_from_c_str(s_upload_folder_storage);
+    g_put_object_prefix = aws_byte_cursor_from_c_str(s_put_object_prefix_storage);
+}
 
 /* If `$CRT_S3_TEST_BUCKET_NAME` environment variable is set, use that; otherwise, use aws-c-s3-test-bucket */
 struct aws_byte_cursor g_test_bucket_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("aws-c-s3-test-bucket");
@@ -134,6 +167,11 @@ static int s_s3_test_meta_request_body_callback(
     ++meta_request_test_results->body_chunk_count;
     meta_request_test_results->received_body_size += body->len;
     aws_atomic_fetch_add(&meta_request_test_results->received_body_size_delta, body->len);
+    if (meta_request_test_results->verify_body_against_pattern) {
+        /* Bodies arrive one at a time on the delivery thread, so a running CRC is safe. */
+        meta_request_test_results->body_crc64nvme =
+            aws_checksums_crc64nvme_ex(body->ptr, body->len, meta_request_test_results->body_crc64nvme);
+    }
     AWS_LOGF_DEBUG(
         AWS_LS_S3_GENERAL,
         "Received range %" PRIu64 "-%" PRIu64 ". Expected range start: %" PRIu64,
@@ -484,6 +522,8 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
     }
 
     aws_s3_library_init(allocator);
+
+    s_ensure_upload_prefix();
 
     if (aws_mutex_init(&tester->synced_data.lock)) {
         return AWS_OP_ERR;
@@ -1582,6 +1622,72 @@ static int s_tester_check_client_thread_data(struct aws_s3_client *client) {
     return AWS_OP_SUCCESS;
 }
 
+/* Compare a GET's bytes with the pattern over the range S3 reported (Content-Range, else Content-Length), so
+ * nothing expected comes from the client under test. */
+static int s_verify_downloaded_bytes_against_pattern(
+    const struct aws_s3_tester_meta_request_options *options,
+    struct aws_s3_meta_request_test_results *results) {
+
+    ASSERT_NOT_NULL(results->response_headers);
+
+    uint64_t object_offset = 0;
+    uint64_t length = 0;
+    if (aws_http_headers_has(results->response_headers, aws_byte_cursor_from_c_str("Content-Range"))) {
+        uint64_t range_end = 0;
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_range_response_header(results->response_headers, &object_offset, &range_end, NULL));
+        length = range_end - object_offset + 1;
+    } else {
+        ASSERT_SUCCESS(
+            aws_s3_parse_content_length_response_header(results->allocator, results->response_headers, &length));
+    }
+
+    uint64_t actual_crc = 0;
+    if (options->get_options.file_on_disk) {
+        /* Bytes before the write offset were already in the file and are not ours to check. */
+        uint64_t file_offset = 0;
+        switch (options->get_options.recv_file_option) {
+            case AWS_S3_RECV_FILE_WRITE_TO_POSITION:
+                file_offset = options->get_options.recv_file_position;
+                break;
+            case AWS_S3_RECV_FILE_CREATE_OR_APPEND:
+                file_offset = options->get_options.pre_exist_file_length;
+                break;
+            default:
+                break;
+        }
+        ASSERT_TRUE(
+            file_offset + length <= results->received_file_content.len,
+            "downloaded file is shorter than the range S3 reported: have %zu bytes, need %" PRIu64,
+            results->received_file_content.len,
+            file_offset + length);
+        actual_crc =
+            aws_checksums_crc64nvme_ex(results->received_file_content.buffer + (size_t)file_offset, (size_t)length, 0);
+    } else if (results->allow_out_of_order_body) {
+        ASSERT_UINT_EQUALS(length, results->received_body_content.len);
+        actual_crc =
+            aws_checksums_crc64nvme_ex(results->received_body_content.buffer, results->received_body_content.len, 0);
+    } else {
+        ASSERT_UINT_EQUALS(length, results->received_body_size);
+        actual_crc = results->body_crc64nvme;
+    }
+
+    uint64_t expected_crc = aws_s3_tester_pattern_crc64nvme(object_offset, length);
+    ASSERT_TRUE(
+        expected_crc == actual_crc,
+        "downloaded bytes for object range [%" PRIu64 ", %" PRIu64 ") do not match the expected pattern",
+        object_offset,
+        object_offset + length);
+
+    return AWS_OP_SUCCESS;
+}
+
+int aws_s3_tester_verify_body_against_pattern(struct aws_s3_meta_request_test_results *results) {
+    struct aws_s3_tester_meta_request_options verify_options;
+    AWS_ZERO_STRUCT(verify_options);
+    return s_verify_downloaded_bytes_against_pattern(&verify_options, results);
+}
+
 int aws_s3_tester_send_meta_request_with_options(
     struct aws_s3_tester *tester,
     struct aws_s3_tester_meta_request_options *options,
@@ -1629,6 +1735,9 @@ int aws_s3_tester_send_meta_request_with_options(
         .checksum_algorithm = options->checksum_algorithm,
         .validate_response_checksum = options->validate_get_response_checksum,
         .validate_checksum_algorithms = options->validate_checksum_algorithms,
+        .expected_checksum = options->expected_checksum,
+        .expected_checksum_algorithm = options->expected_checksum_algorithm,
+        .response_checksum_validation_mode = options->response_checksum_validation_mode,
     };
     if (!disable_trailing_checksum) {
         checksum_config.location = options->checksum_via_header ? AWS_SCL_HEADER : AWS_SCL_TRAILER;
@@ -1827,19 +1936,11 @@ int aws_s3_tester_send_meta_request_with_options(
             struct aws_byte_buf *out_encoded_checksum = NULL;
             if (options->put_options.full_object_checksum != AWS_TEST_FOC_NONE) {
                 ASSERT_NOT_NULL(input_stream);
-                struct aws_byte_buf data;
-                int64_t out_length = 0;
-                aws_input_stream_get_length(input_stream, &out_length);
-                aws_byte_buf_init(&data, allocator, (size_t)out_length);
-                /* Read everything into the buf */
-                aws_input_stream_read(input_stream, &data);
-                /* Seek back to beginning for upload. */
-                aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN);
-                /* Get the checksum from the buf */
                 out_encoded_checksum = aws_mem_calloc(allocator, 1, sizeof(struct aws_byte_buf));
-                ASSERT_SUCCESS(s_calculate_in_memory_checksum_helper(
-                    allocator, aws_byte_cursor_from_buf(&data), options->checksum_algorithm, out_encoded_checksum));
-                aws_byte_buf_clean_up(&data);
+                ASSERT_SUCCESS(aws_s3_tester_encoded_checksum_of_stream(
+                    allocator, input_stream, options->checksum_algorithm, out_encoded_checksum));
+                /* That consumed the stream; put it back where the upload expects to find it. */
+                ASSERT_SUCCESS(aws_input_stream_seek(input_stream, 0, AWS_SSB_BEGIN));
             }
 
             /* if uploading via filepath, write input_stream out as tmp file on disk, and then upload that */
@@ -1850,19 +1951,34 @@ int aws_s3_tester_send_meta_request_with_options(
                 input_stream = aws_input_stream_release(input_stream);
             }
 
-            /* Put together a simple S3 Put Object request. */
+            /* Put together a simple S3 Put Object request. The message helper still takes legacy flag bits. */
+            uint32_t message_flags = (uint32_t)options->sse_type;
+            if (options->put_options.acl_public_read) {
+                message_flags |= AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL;
+            }
             struct aws_http_message *message;
             if (input_stream != NULL) {
                 message = aws_s3_test_put_object_request_new(
-                    allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, options->sse_type);
+                    allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, message_flags);
             } else {
                 message = aws_s3_test_put_object_request_new_without_body(
-                    allocator,
-                    &host_cur,
-                    g_test_body_content_type,
-                    test_object_path,
-                    upload_size_bytes,
-                    options->sse_type);
+                    allocator, &host_cur, g_test_body_content_type, test_object_path, upload_size_bytes, message_flags);
+            }
+
+            if (options->put_options.valid_md5) {
+                /* The body is the pattern from offset 0, so compute the MD5 over a regenerated copy. */
+                ASSERT_NOT_NULL(input_stream);
+                struct aws_byte_buf body_copy;
+                aws_byte_buf_init(&body_copy, allocator, upload_size_bytes);
+                ASSERT_SUCCESS(aws_s3_tester_pattern_append(&body_copy, 0, upload_size_bytes));
+                ASSERT_SUCCESS(aws_s3_message_util_add_content_md5_header(allocator, &body_copy, message));
+                aws_byte_buf_clean_up(&body_copy);
+            } else if (options->put_options.invalid_md5) {
+                struct aws_http_header content_md5_header = {
+                    .name = g_content_md5_header_name,
+                    .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5"),
+                };
+                ASSERT_SUCCESS(aws_http_message_add_header(message, content_md5_header));
             }
 
             if (options->put_options.full_object_checksum == AWS_TEST_FOC_HEADER) {
@@ -1921,6 +2037,22 @@ int aws_s3_tester_send_meta_request_with_options(
 
         ASSERT_TRUE(meta_request_options.message != NULL);
 
+        if (options->mock_server) {
+            /* Tag the request with an id unique to this meta request. The mock server is shared by every
+             * test running in parallel, so any state it keeps across HTTP requests (e.g. counting attempts
+             * so it can fail only the first) is keyed by this id rather than held globally. */
+            struct aws_uuid request_uuid;
+            ASSERT_SUCCESS(aws_uuid_init(&request_uuid));
+            char request_id_str[AWS_UUID_STR_LEN] = "";
+            struct aws_byte_buf request_id_buf = aws_byte_buf_from_empty_array(request_id_str, sizeof(request_id_str));
+            ASSERT_SUCCESS(aws_uuid_to_str(&request_uuid, &request_id_buf));
+            struct aws_http_header request_id_header = {
+                .name = aws_byte_cursor_from_c_str("x-mock-request-id"),
+                .value = aws_byte_cursor_from_buf(&request_id_buf),
+            };
+            ASSERT_SUCCESS(aws_http_message_add_header(meta_request_options.message, request_id_header));
+        }
+
         aws_string_destroy(host_name);
     } else {
         aws_http_message_acquire(meta_request_options.message);
@@ -1951,6 +2083,11 @@ int aws_s3_tester_send_meta_request_with_options(
 
     out_results->algorithm = options->expected_validate_checksum_alg;
     out_results->allow_out_of_order_body = options->get_options.allow_out_of_order_body;
+    bool is_get = meta_request_options.type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT ||
+                  (meta_request_options.type == AWS_S3_META_REQUEST_TYPE_DEFAULT &&
+                   options->default_type_options.mode == AWS_S3_TESTER_DEFAULT_TYPE_MODE_GET);
+    bool verify_pattern = is_get && !options->mock_server && !options->get_options.skip_pattern_verify;
+    out_results->verify_body_against_pattern = verify_pattern;
 
     ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(tester, &meta_request_options, out_results));
 
@@ -1976,7 +2113,7 @@ int aws_s3_tester_send_meta_request_with_options(
         FILE *file = aws_fopen(aws_string_c_str(filepath_str), "rb");
         ASSERT_NOT_NULL(file);
         ASSERT_SUCCESS(aws_file_get_length(file, &out_results->received_file_size));
-        if (options->get_options.capture_file_content && out_results->received_file_size > 0) {
+        if ((options->get_options.capture_file_content || verify_pattern) && out_results->received_file_size > 0) {
             /* Hand the bytes to the test before the file is deleted at the end, so a test can check
              * where each part landed and not just how many bytes arrived. */
             size_t to_read = (size_t)out_results->received_file_size;
@@ -2019,6 +2156,9 @@ int aws_s3_tester_send_meta_request_with_options(
                     ASSERT_UINT_EQUALS(out_results->progress.total_bytes_transferred, out_results->received_file_size);
                 }
             }
+            if (verify_pattern) {
+                ASSERT_SUCCESS(s_verify_downloaded_bytes_against_pattern(options, out_results));
+            }
             break;
         case AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE:
             ASSERT_FALSE(out_results->finished_error_code == AWS_ERROR_SUCCESS);
@@ -2044,6 +2184,12 @@ int aws_s3_tester_send_meta_request_with_options(
             } else {
                 ASSERT_TRUE(aws_path_exists(filepath_str));
             }
+        }
+        if (filepath_str && options->get_options.file_on_disk &&
+            out_results->finished_error_code == AWS_ERROR_SUCCESS) {
+            /* Checked after shutdown, not just at finish: the file must survive meta request destroy
+             * too, whatever recv_file_delete_on_failure was set to. */
+            ASSERT_TRUE(aws_path_exists(filepath_str));
         }
     }
 
@@ -2145,11 +2291,17 @@ int aws_s3_tester_send_get_object_meta_request(
     if (out_results == NULL) {
         out_results = &meta_request_test_results;
     }
+    /* Everything this path fetches is pattern content unless the caller says otherwise. */
+    bool verify_pattern = (flags & AWS_S3_TESTER_SEND_META_REQUEST_SKIP_PATTERN_VERIFY) == 0;
+    out_results->verify_body_against_pattern = verify_pattern;
 
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
 
     if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
         ASSERT_SUCCESS(aws_s3_tester_validate_get_object_results(out_results, flags));
+        if (verify_pattern) {
+            ASSERT_SUCCESS(aws_s3_tester_verify_body_against_pattern(out_results));
+        }
     }
 
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
@@ -2219,96 +2371,6 @@ int aws_s3_tester_validate_get_object_results(
     return AWS_OP_SUCCESS;
 }
 
-/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
-int aws_s3_tester_send_put_object_meta_request(
-    struct aws_s3_tester *tester,
-    struct aws_s3_client *client,
-    uint32_t file_size_mb,
-    uint32_t flags,
-    struct aws_s3_meta_request_test_results *out_results) {
-    ASSERT_TRUE(tester != NULL);
-    ASSERT_TRUE(client != NULL);
-
-    struct aws_allocator *allocator = tester->allocator;
-
-    struct aws_byte_buf test_buffer;
-    aws_s3_create_test_buffer(allocator, (size_t)file_size_mb * 1024ULL * 1024ULL, &test_buffer);
-
-    struct aws_byte_cursor test_body_cursor = aws_byte_cursor_from_buf(&test_buffer);
-    struct aws_input_stream *input_stream = aws_input_stream_new_from_cursor(allocator, &test_body_cursor);
-
-    struct aws_string *host_name =
-        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
-
-    char object_path_buffer[128] = "";
-
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_PUT_ACL) {
-        snprintf(
-            object_path_buffer,
-            sizeof(object_path_buffer),
-            "" PRInSTR "-acl-public-read-%uMB.txt",
-            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
-            file_size_mb);
-    } else {
-        snprintf(
-            object_path_buffer,
-            sizeof(object_path_buffer),
-            "" PRInSTR "-%uMB.txt",
-            AWS_BYTE_CURSOR_PRI(g_put_object_prefix),
-            file_size_mb);
-    }
-    struct aws_byte_cursor test_object_path = aws_byte_cursor_from_c_str(object_path_buffer);
-
-    struct aws_byte_cursor host_cur = aws_byte_cursor_from_string(host_name);
-    /* Put together a simple S3 Put Object request. */
-    struct aws_http_message *message = aws_s3_test_put_object_request_new(
-        allocator, &host_cur, test_object_path, g_test_body_content_type, input_stream, flags);
-
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_CORRECT_CONTENT_MD5) {
-        ASSERT_SUCCESS(aws_s3_message_util_add_content_md5_header(allocator, &test_buffer, message));
-    } else if (flags & AWS_S3_TESTER_SEND_META_REQUEST_WITH_INCORRECT_CONTENT_MD5) {
-        struct aws_http_header content_md5_header = {
-            .name = g_content_md5_header_name,
-            .value = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("dummy_content_md5"),
-        };
-        ASSERT_SUCCESS(aws_http_message_add_header(message, content_md5_header));
-    }
-
-    struct aws_s3_meta_request_options options;
-    AWS_ZERO_STRUCT(options);
-    options.type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT;
-    options.message = message;
-
-    struct aws_s3_meta_request_test_results meta_request_test_results;
-    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
-
-    if (out_results == NULL) {
-        out_results = &meta_request_test_results;
-    }
-
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(tester, client, &options, out_results, flags));
-
-    if (flags & AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS) {
-        ASSERT_SUCCESS(aws_s3_tester_validate_put_object_results(out_results, flags));
-    }
-
-    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
-
-    aws_http_message_release(message);
-    message = NULL;
-
-    aws_string_destroy(host_name);
-    host_name = NULL;
-
-    aws_input_stream_release(input_stream);
-    input_stream = NULL;
-
-    aws_byte_buf_clean_up(&test_buffer);
-
-    return AWS_OP_SUCCESS;
-}
-
-/* Avoid using this function as it will soon go away.  Use aws_s3_tester_send_meta_request_with_options instead.*/
 int aws_s3_tester_validate_put_object_results(
     struct aws_s3_meta_request_test_results *meta_request_test_results,
     uint32_t flags) {
@@ -2361,9 +2423,116 @@ int aws_s3_tester_upload_file_path_init(
     struct aws_byte_buf *out_path_buffer,
     struct aws_byte_cursor file_path) {
 
+    s_ensure_upload_prefix();
     ASSERT_SUCCESS(aws_byte_buf_init_copy_from_cursor(out_path_buffer, allocator, g_upload_folder));
     ASSERT_SUCCESS(aws_byte_buf_append_dynamic(out_path_buffer, &file_path));
 
+    return AWS_OP_SUCCESS;
+}
+
+/* One period of the pattern, measured from stream_tester.h output rather than hardcoded, so a change to the
+ * aws-c-io literal shows up as a different period instead of wrong bytes. */
+static uint8_t s_pattern_storage[4096];
+static struct aws_byte_cursor s_pattern_period = {0};
+
+static void s_ensure_pattern(void) {
+    if (s_pattern_period.len != 0) {
+        return;
+    }
+
+    struct aws_byte_buf sample;
+    s_byte_buf_init_autogenned(&sample, aws_default_allocator(), sizeof(s_pattern_storage), AWS_AUTOGEN_LOREM_IPSUM);
+
+    /* The period is the smallest shift at which the sample repeats. */
+    size_t half = sample.len / 2;
+    size_t period = 0;
+    for (size_t p = 1; p < half; ++p) {
+        if (memcmp(sample.buffer, sample.buffer + p, half) == 0) {
+            period = p;
+            break;
+        }
+    }
+    AWS_FATAL_ASSERT(period != 0 && "could not find the period of AWS_AUTOGEN_LOREM_IPSUM");
+
+    memcpy(s_pattern_storage, sample.buffer, period);
+    s_pattern_period = aws_byte_cursor_from_array(s_pattern_storage, period);
+    aws_byte_buf_clean_up(&sample);
+}
+
+int aws_s3_tester_pattern_append(struct aws_byte_buf *dest, uint64_t object_offset, size_t length) {
+    s_ensure_pattern();
+
+    size_t phase = (size_t)(object_offset % s_pattern_period.len);
+    while (length > 0) {
+        size_t n = aws_min_size(length, s_pattern_period.len - phase);
+        struct aws_byte_cursor piece = aws_byte_cursor_from_array(s_pattern_period.ptr + phase, n);
+        ASSERT_SUCCESS(aws_byte_buf_append_dynamic(dest, &piece));
+        length -= n;
+        phase = 0;
+    }
+    return AWS_OP_SUCCESS;
+}
+
+uint64_t aws_s3_tester_pattern_crc64nvme(uint64_t object_offset, uint64_t length) {
+    s_ensure_pattern();
+
+    /* One period at a time from the right phase; no allocation. */
+    uint64_t crc = 0;
+    size_t phase = (size_t)(object_offset % s_pattern_period.len);
+    while (length > 0) {
+        size_t n = (size_t)aws_min_u64(length, s_pattern_period.len - phase);
+        crc = aws_checksums_crc64nvme_ex(s_pattern_period.ptr + phase, n, crc);
+        length -= n;
+        phase = 0;
+    }
+    return crc;
+}
+
+int aws_s3_tester_encoded_checksum_of_stream(
+    struct aws_allocator *allocator,
+    struct aws_input_stream *input_stream,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_byte_buf *out_encoded_checksum) {
+
+    int64_t length = 0;
+    ASSERT_SUCCESS(aws_input_stream_get_length(input_stream, &length));
+
+    struct aws_byte_buf data;
+    aws_byte_buf_init(&data, allocator, (size_t)length);
+    /* A stream may return fewer bytes than asked for (small_reads), so read until EOF. */
+    struct aws_stream_status status = {.is_end_of_stream = false};
+    while (!status.is_end_of_stream && data.len < (size_t)length) {
+        ASSERT_SUCCESS(aws_input_stream_read(input_stream, &data));
+        ASSERT_SUCCESS(aws_input_stream_get_status(input_stream, &status));
+    }
+    ASSERT_UINT_EQUALS((size_t)length, data.len);
+
+    int result = s_calculate_in_memory_checksum_helper(
+        allocator, aws_byte_cursor_from_buf(&data), algorithm, out_encoded_checksum);
+    aws_byte_buf_clean_up(&data);
+    return result;
+}
+
+int aws_s3_tester_set_full_object_checksum(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    struct aws_input_stream *source,
+    enum aws_s3_checksum_algorithm algorithm,
+    struct aws_s3_checksum_config *out_checksum_config) {
+
+    struct aws_byte_buf encoded_checksum;
+    ASSERT_SUCCESS(aws_s3_tester_encoded_checksum_of_stream(allocator, source, algorithm, &encoded_checksum));
+    /* aws_http_headers copies the value, so the buffer can go once the header is set. */
+    int result = aws_http_headers_set(
+        aws_http_message_get_headers(message),
+        aws_get_http_header_name_from_checksum_algorithm(algorithm),
+        aws_byte_cursor_from_buf(&encoded_checksum));
+    aws_byte_buf_clean_up(&encoded_checksum);
+    ASSERT_SUCCESS(result);
+
+    AWS_ZERO_STRUCT(*out_checksum_config);
+    out_checksum_config->checksum_algorithm = algorithm;
+    out_checksum_config->location = AWS_SCL_TRAILER;
     return AWS_OP_SUCCESS;
 }
 
