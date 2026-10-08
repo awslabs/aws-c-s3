@@ -142,10 +142,9 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     }
     if (auto_ranged_get->base.recv_buffer != NULL &&
         auto_ranged_get->base.recv_buffer->capacity < auto_ranged_get->base.part_size) {
-        /* A recv_buffer smaller than a part can't hold a full-part first request. The download is at most the
-         * buffer's capacity, and asking for that much costs nothing (it's the caller's memory), so use it as the
-         * hint, even over the caller's: the first request then fits, and a hint that's too small can't make it
-         * fall back to a full part. */
+        /* The first request is normally one full part, which a recv_buffer smaller than a part can't hold.
+         * Set the hint to the buffer's capacity (replacing the caller's hint) so the first request asks for
+         * at most that much. A bigger object wouldn't fit anyway. Hints are only used without a Range header. */
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = auto_ranged_get->base.recv_buffer->capacity;
     }
