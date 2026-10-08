@@ -824,7 +824,12 @@ struct aws_s3_client_config {
      * Raising it past the point where the disk saturates buys nothing and costs threads. Lowering
      * it below the disk's concurrency leaves throughput on the table.
      *
-     * Defaults to the number of event loops in the client bootstrap's event loop group.
+     * Can also be set via the AWS_CRT_S3_NUM_FILE_IO_THREADS environment variable.
+     * This config field takes priority over the env var; the env var is only consulted
+     * when this field is 0 (default).
+     *
+     * Defaults to min(s_default_max_num_file_io_threads, number of event loops in the client
+     * bootstrap's event loop group).
      */
     uint16_t num_file_io_threads;
 };

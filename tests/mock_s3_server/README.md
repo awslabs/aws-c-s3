@@ -44,6 +44,8 @@ Where you can define the expected response status, header and response body. If 
 The server validates that all specified headers in the "request_headers" field are present in the incoming request. If any required header is missing, the request will fail. These headers will not be part of the Response headers.
 If the "delay" field is present, the response will be delayed by X seconds.
 
+The server is shared by all tests, which may run in parallel (`ctest -j`), so it must not keep state that is global across requests. When a route needs state that outlives one HTTP request (for example, failing only the first attempt so the retry succeeds), key that state by the `x-mock-request-id` header. The tester adds it, with a UUID unique per meta request, to every message it builds for the mock server.
+
 ### GetObject Response
 
 By default, the GetObject response will read from ./{OperationName}/{Key}.json for the status and headers. But the body will be generated to match the range in the request.

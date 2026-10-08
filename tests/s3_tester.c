@@ -2037,6 +2037,22 @@ int aws_s3_tester_send_meta_request_with_options(
 
         ASSERT_TRUE(meta_request_options.message != NULL);
 
+        if (options->mock_server) {
+            /* Tag the request with an id unique to this meta request. The mock server is shared by every
+             * test running in parallel, so any state it keeps across HTTP requests (e.g. counting attempts
+             * so it can fail only the first) is keyed by this id rather than held globally. */
+            struct aws_uuid request_uuid;
+            ASSERT_SUCCESS(aws_uuid_init(&request_uuid));
+            char request_id_str[AWS_UUID_STR_LEN] = "";
+            struct aws_byte_buf request_id_buf = aws_byte_buf_from_empty_array(request_id_str, sizeof(request_id_str));
+            ASSERT_SUCCESS(aws_uuid_to_str(&request_uuid, &request_id_buf));
+            struct aws_http_header request_id_header = {
+                .name = aws_byte_cursor_from_c_str("x-mock-request-id"),
+                .value = aws_byte_cursor_from_buf(&request_id_buf),
+            };
+            ASSERT_SUCCESS(aws_http_message_add_header(meta_request_options.message, request_id_header));
+        }
+
         aws_string_destroy(host_name);
     } else {
         aws_http_message_acquire(meta_request_options.message);

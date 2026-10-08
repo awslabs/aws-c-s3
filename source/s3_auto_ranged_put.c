@@ -1171,7 +1171,11 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
     part_prep->allocator = allocator;
     part_prep->request = request;
     part_prep->on_complete = aws_future_http_message_acquire(message_future);
-    if (s_compute_request_body_size(meta_request, request)) {
+    /* Only on the first prepare. With no Content-Length, reading the body can shrink content_length and
+     * part_range_end to what was actually read, and a retry skips that read and reuses the same body buffer.
+     * Recomputing here would reset them to the full part size, so progress and metrics would report bytes
+     * that were never sent. */
+    if (request->num_times_prepared == 0 && s_compute_request_body_size(meta_request, request)) {
         s_s3_prepare_upload_part_finish(part_prep, aws_last_error_or_unknown());
         return message_future;
     }

@@ -14,6 +14,7 @@
     ],
     "downstream": [
     ],
+    "test_parallel": true,
     "test_steps": [
         "test"
     ],
