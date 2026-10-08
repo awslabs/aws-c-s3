@@ -65,10 +65,10 @@ struct aws_s3_buffer_pool_reserve_meta {
      * resolved. */
     bool can_block;
 
-    /* Offset in the meta request's pre-allocated buffer (see aws_s3_buffer_pool_add_preallocated_buffer)
-     * where this reservation's data goes: a position in the caller's buffer, not an S3 object range.
-     * Only meaningful if a pre-allocated buffer was added for meta_request. */
-    uint64_t offset;
+    /* Where this reservation's data goes in the meta request's local destination: 0 is the first byte of
+     * the requested range, not of the S3 object. A pool that manages where data goes can use it, e.g. to
+     * place it in a pre-allocated buffer (see aws_s3_buffer_pool_add_preallocated_buffer). */
+    uint64_t local_offset;
 };
 
 struct aws_s3_buffer_ticket;
@@ -139,8 +139,8 @@ struct aws_s3_buffer_pool_vtable {
 
     /**
      * Optional. Serve reservations for `meta_request` from caller-owned memory instead of pool memory:
-     * a reservation of `size` at `offset` (see aws_s3_buffer_pool_reserve_meta) gets a ticket whose
-     * buffer is `buffer->buffer + offset`. The pool doesn't own the memory and must not free it.
+     * a reservation of `size` at `local_offset` (see aws_s3_buffer_pool_reserve_meta) gets a ticket whose
+     * buffer is `buffer->buffer + local_offset`. The pool doesn't own the memory and must not free it.
      * `meta_request` is only a key; the pool doesn't need to look inside it.
      * A pool that doesn't implement this can't be used with aws_s3_meta_request_options.recv_buffer.
      */

@@ -706,13 +706,13 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
 
 /* ---- Pre-allocated buffers (aws_s3_buffer_pool_add_preallocated_buffer) ----
  * A meta request can register a caller-owned buffer (e.g. aws_s3_meta_request_options.recv_buffer).
- * Its reservations then get a ticket that views that buffer at the requested offset instead of pool
+ * Its reservations then get a ticket that views that buffer at the reservation's local_offset instead of pool
  * memory. That memory is the caller's, so it doesn't count against the pool's memory limit, and
  * releasing the ticket only frees the ticket's bookkeeping. The meta request pointer is only used as a
  * map key; the pool never looks inside it. */
 struct aws_s3_preallocated_ticket_impl {
     struct aws_allocator *allocator;
-    uint8_t *base; /* preallocated buffer + offset */
+    uint8_t *base; /* preallocated buffer + local_offset */
     size_t size;
 };
 
@@ -744,13 +744,13 @@ static struct aws_future_s3_buffer_ticket *s_reserve_from_preallocated_buffer(
     struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(allocator);
 
     /* Never hand out a view past the end of the caller's buffer. */
-    if (meta.offset > buffer->capacity || meta.size > buffer->capacity - meta.offset) {
+    if (meta.local_offset > buffer->capacity || meta.size > buffer->capacity - meta.local_offset) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_CLIENT,
             "id=%p Pre-allocated buffer can't hold a reservation of %zu bytes at offset %" PRIu64 " (capacity %zu).",
             (void *)meta.meta_request,
             meta.size,
-            meta.offset,
+            meta.local_offset,
             buffer->capacity);
         aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_SHORT_BUFFER);
         return future;
@@ -759,7 +759,7 @@ static struct aws_future_s3_buffer_ticket *s_reserve_from_preallocated_buffer(
     struct aws_s3_preallocated_ticket_impl *impl =
         aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_preallocated_ticket_impl));
     impl->allocator = allocator;
-    impl->base = buffer->buffer + meta.offset;
+    impl->base = buffer->buffer + meta.local_offset;
     impl->size = meta.size;
 
     struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_ticket));

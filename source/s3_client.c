@@ -2519,12 +2519,12 @@ void s_acquire_mem_and_prepare_request(
         payload->callback = callback;
         payload->user_data = user_data;
 
-        /* Where this part goes within the requested range. A pool with a pre-allocated buffer for this
-         * meta request places it at this offset. Every part lies inside the requested range, so a part
+        /* Where this part goes within the requested range (its local_offset), for a pool that places data
+         * itself, e.g. in a pre-allocated buffer. Every part lies inside the requested range, so a part
          * starting before it is a bug: fail the request here, through the same path as a failed
          * reservation, rather than hand the pool an offset it can't use. */
-        uint64_t offset = 0;
-        if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &offset)) {
+        uint64_t local_offset = 0;
+        if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset)) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p: Part starts at %" PRIu64 ", before the requested range start %" PRIu64 ".",
@@ -2538,7 +2538,7 @@ void s_acquire_mem_and_prepare_request(
                 .client = client,
                 .meta_request = meta_request,
                 .size = aws_min_size(request->buffer_size, request_size),
-                .offset = offset,
+                .local_offset = local_offset,
             };
             payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
         }

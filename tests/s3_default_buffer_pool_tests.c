@@ -828,7 +828,7 @@ static struct aws_future_s3_buffer_ticket *s_reserve_at(
         (struct aws_s3_buffer_pool_reserve_meta){
             .meta_request = meta_request,
             .size = size,
-            .offset = offset,
+            .local_offset = offset,
         });
 }
 

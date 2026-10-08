@@ -121,17 +121,16 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         }
     }
 
-    /* A recv_buffer part is placed when its buffer is reserved, before the first response resolves the
-     * object range, so set requested_range_start now when it's already known: 0 without a Range header, or the
-     * Range start. A suffix range (bytes=-N) is resolved by the HEAD before any part is reserved. */
-    if (auto_ranged_get->base.recv_buffer != NULL) {
-        if (!auto_ranged_get->initial_message_has_range_header) {
-            auto_ranged_get->base.requested_range_start = 0;
-            auto_ranged_get->base.requested_range_start_resolved = true;
-        } else if (auto_ranged_get->initial_message_has_start_range) {
-            auto_ranged_get->base.requested_range_start = auto_ranged_get->initial_range_start;
-            auto_ranged_get->base.requested_range_start_resolved = true;
-        }
+    /* Each part's buffer is reserved with its local_offset (part start - requested_range_start) before the
+     * first response resolves the object range, so set requested_range_start now when it's already known:
+     * 0 without a Range header, or the Range start. A suffix range (bytes=-N) is resolved by the HEAD before
+     * any part is reserved. */
+    if (!auto_ranged_get->initial_message_has_range_header) {
+        auto_ranged_get->base.requested_range_start = 0;
+        auto_ranged_get->base.requested_range_start_resolved = true;
+    } else if (auto_ranged_get->initial_message_has_start_range) {
+        auto_ranged_get->base.requested_range_start = auto_ranged_get->initial_range_start;
+        auto_ranged_get->base.requested_range_start_resolved = true;
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
 

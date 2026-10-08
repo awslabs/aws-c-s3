@@ -7,7 +7,9 @@
 
 #include "s3_tester.h"
 
+#include <aws/s3/private/s3_client_impl.h>
 #include <aws/s3/private/s3_default_buffer_pool.h>
+#include <aws/s3/private/s3_meta_request_impl.h>
 #include <aws/s3/private/s3_util.h>
 #include <aws/s3/s3_client.h>
 
@@ -315,6 +317,41 @@ static struct aws_s3_buffer_pool *s_rb_custom_pool_with_preallocated(
     void *user_data) {
     (void)user_data;
     return s_rb_wrapper_pool_new(allocator, config, &s_rb_wrapper_vtable_preallocated);
+}
+
+/* A custom pool that records the local_offset of every reservation it's asked for, then passes it on to the
+ * default pool. Lets a test check what a pool managing its own memory would be told. */
+static struct {
+    struct aws_mutex mutex;
+    size_t num_reservations;
+    uint64_t min_local_offset;
+    uint64_t max_local_offset_end; /* local_offset + size */
+} s_rb_recorded;
+
+static struct aws_future_s3_buffer_ticket *s_rb_recording_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+    aws_mutex_lock(&s_rb_recorded.mutex);
+    if (s_rb_recorded.num_reservations == 0 || meta.local_offset < s_rb_recorded.min_local_offset) {
+        s_rb_recorded.min_local_offset = meta.local_offset;
+    }
+    s_rb_recorded.max_local_offset_end = aws_max_u64(s_rb_recorded.max_local_offset_end, meta.local_offset + meta.size);
+    ++s_rb_recorded.num_reservations;
+    aws_mutex_unlock(&s_rb_recorded.mutex);
+    return s_rb_wrapper_reserve(pool, meta);
+}
+
+static struct aws_s3_buffer_pool_vtable s_rb_wrapper_vtable_recording = {
+    .reserve = s_rb_recording_reserve,
+    .trim = s_rb_wrapper_trim,
+};
+
+static struct aws_s3_buffer_pool *s_rb_recording_pool(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
+    (void)user_data;
+    return s_rb_wrapper_pool_new(allocator, config, &s_rb_wrapper_vtable_recording);
 }
 
 static int s_rb_expect_create_fails(
@@ -761,6 +798,172 @@ static int s_test_s3_recv_buffer_custom_pool_with_preallocated(struct aws_alloca
     };
     struct rb_get get = {.key = g_pre_existing_object_10MB};
     ASSERT_SUCCESS(s_rb_expect(allocator, &opts, &get, MB_TO_BYTES(10), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(10)));
+    return 0;
+}
+
+/* A ranged GET without recv_buffer through a custom pool: every reservation's local_offset is relative to the
+ * start of the requested range (starting at 0, ending within the range), including the first part's, which
+ * is reserved before any response. */
+AWS_TEST_CASE(
+    test_s3_recv_buffer_local_offset_without_recv_buffer,
+    s_test_s3_recv_buffer_local_offset_without_recv_buffer)
+static int s_test_s3_recv_buffer_local_offset_without_recv_buffer(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    AWS_ZERO_STRUCT(s_rb_recorded);
+    ASSERT_SUCCESS(aws_mutex_init(&s_rb_recorded.mutex));
+
+    struct rb_env_options opts = {.part_size = MB_TO_BYTES(1), .buffer_pool_factory_fn = s_rb_recording_pool};
+    struct rb_env env;
+    ASSERT_SUCCESS(s_rb_env_init(allocator, &env, &opts));
+    struct aws_string *host_name =
+        aws_s3_tester_build_endpoint_string(allocator, &g_test_bucket_name, &g_test_s3_region);
+
+    const uint64_t range_start = 3000000;
+    const uint64_t range_length = MB_TO_BYTES(10) - range_start;
+    struct rb_get get = {.key = g_pre_existing_object_10MB, .range = "bytes=3000000-"};
+    struct aws_http_message *message = s_rb_get_message(allocator, host_name, &get);
+    ASSERT_NOT_NULL(message);
+    struct aws_s3_meta_request_options options = {
+        .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .message = message,
+    };
+    struct aws_s3_meta_request_test_results results;
+    aws_s3_meta_request_test_results_init(&results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_bind_meta_request(&env.tester, &options, &results));
+
+    struct aws_s3_meta_request *meta_request = aws_s3_client_make_meta_request(env.client, &options);
+    ASSERT_NOT_NULL(meta_request);
+    aws_s3_tester_wait_for_meta_request_finish(&env.tester);
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, results.finished_error_code);
+    ASSERT_UINT_EQUALS(range_length, results.received_body_size);
+
+    aws_mutex_lock(&s_rb_recorded.mutex);
+    ASSERT_TRUE(s_rb_recorded.num_reservations > 1);
+    ASSERT_UINT_EQUALS(0, s_rb_recorded.min_local_offset);
+    ASSERT_TRUE(s_rb_recorded.max_local_offset_end <= range_length);
+    aws_mutex_unlock(&s_rb_recorded.mutex);
+
+    aws_s3_meta_request_release(meta_request);
+    aws_s3_tester_wait_for_meta_request_shutdown(&env.tester);
+    aws_s3_meta_request_test_results_clean_up(&results);
+    aws_http_message_release(message);
+    aws_string_destroy(host_name);
+    s_rb_env_clean_up(&env);
+    aws_mutex_clean_up(&s_rb_recorded.mutex);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------------------------------
+ * Retries
+ * ------------------------------------------------------------------------------------------------ */
+
+/* Fails part 2 after its body has already landed in the caller's recv_buffer: overwrites that slot with
+ * garbage and turns the response into a 500, which the client retries. With `fail_every_attempt`, every
+ * attempt fails, so retries run out. */
+static struct {
+    bool fail_every_attempt;
+    int num_injected;
+    size_t num_bytes_scribbled;
+} s_rb_retry;
+
+static void s_rb_send_request_finish_fail_part_2(
+    struct aws_s3_connection *connection,
+    struct aws_http_stream *stream,
+    int error_code) {
+
+    struct aws_s3_request *request = connection->request;
+    struct aws_s3_tester *tester = request->meta_request->client->shutdown_callback_user_data;
+
+    if (request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT && request->part_number == 2 &&
+        request->send_data.response_status == AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT &&
+        (s_rb_retry.fail_every_attempt || s_rb_retry.num_injected == 0)) {
+        /* The body was written straight into the caller's buffer. Scribble over it, so the test can tell the
+         * retry rewrote this slot rather than leaving the first attempt's bytes in place. */
+        struct aws_byte_buf *body = &request->send_data.response_body;
+        if (body->buffer != NULL) {
+            memset(body->buffer, 0xAB, body->len);
+            s_rb_retry.num_bytes_scribbled += body->len;
+        }
+        request->send_data.response_status = AWS_HTTP_STATUS_CODE_500_INTERNAL_SERVER_ERROR;
+        ++s_rb_retry.num_injected;
+    }
+
+    aws_s3_tester_get_meta_request_vtable_patch(tester, 0)->original_vtable->send_request_finish(
+        connection, stream, error_code);
+}
+
+static struct aws_s3_meta_request *s_rb_meta_request_factory_fail_part_2(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    struct aws_s3_meta_request *meta_request =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable->meta_request_factory(client, options);
+    if (meta_request != NULL) {
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL)->send_request_finish =
+            s_rb_send_request_finish_fail_part_2;
+    }
+    return meta_request;
+}
+
+static int s_rb_download_failing_part_2(
+    struct aws_allocator *allocator,
+    bool fail_every_attempt,
+    struct rb_buffer *b,
+    struct rb_get_result *result) {
+
+    AWS_ZERO_STRUCT(s_rb_retry);
+    s_rb_retry.fail_every_attempt = fail_every_attempt;
+
+    struct rb_env env;
+    ASSERT_SUCCESS(s_rb_env_init(allocator, &env, &s_rb_1mb_parts));
+    aws_s3_tester_patch_client_vtable(&env.tester, env.client, NULL)->meta_request_factory =
+        s_rb_meta_request_factory_fail_part_2;
+
+    struct rb_get get = {.key = g_pre_existing_object_10MB};
+    ASSERT_SUCCESS(s_rb_download(allocator, &env, &get, &b->buf, result));
+    s_rb_env_clean_up(&env);
+    return AWS_OP_SUCCESS;
+}
+
+/* A part fails after its body is already in the buffer, then succeeds on retry: the retry rewrites the same
+ * slot, so the whole object comes out right. */
+AWS_TEST_CASE(test_s3_recv_buffer_retry_part, s_test_s3_recv_buffer_retry_part)
+static int s_test_s3_recv_buffer_retry_part(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_buffer b;
+    s_rb_buffer_init(allocator, &b, MB_TO_BYTES(10));
+
+    struct rb_get_result result;
+    ASSERT_SUCCESS(s_rb_download_failing_part_2(allocator, false /*fail_every_attempt*/, &b, &result));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, result.error_code);
+    ASSERT_INT_EQUALS(1, s_rb_retry.num_injected);
+    /* The whole part had landed in the buffer and was scribbled over before the retry. */
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(1), s_rb_retry.num_bytes_scribbled);
+    ASSERT_UINT_EQUALS(MB_TO_BYTES(10), b.buf.len);
+    ASSERT_SUCCESS(s_rb_check_pattern(b.mem, 0, MB_TO_BYTES(10)));
+    ASSERT_SUCCESS(s_rb_check_untouched(&b, MB_TO_BYTES(10)));
+
+    s_rb_buffer_clean_up(&b);
+    return 0;
+}
+
+/* A part fails on every attempt: retries run out, the download fails, and len stays 0. */
+AWS_TEST_CASE(test_s3_recv_buffer_retry_exhausted, s_test_s3_recv_buffer_retry_exhausted)
+static int s_test_s3_recv_buffer_retry_exhausted(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_buffer b;
+    s_rb_buffer_init(allocator, &b, MB_TO_BYTES(10));
+
+    struct rb_get_result result;
+    ASSERT_SUCCESS(s_rb_download_failing_part_2(allocator, true /*fail_every_attempt*/, &b, &result));
+    ASSERT_TRUE(result.error_code != AWS_ERROR_SUCCESS);
+    ASSERT_TRUE(s_rb_retry.num_injected > 1);
+    ASSERT_UINT_EQUALS(0, b.buf.len);
+    /* Nothing is written past the buffer, even across failed attempts. */
+    ASSERT_SUCCESS(s_rb_check_untouched(&b, b.capacity));
+
+    s_rb_buffer_clean_up(&b);
     return 0;
 }
 
