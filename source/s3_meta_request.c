@@ -692,6 +692,10 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
+    /* Not known yet: the derived meta request sets it once it knows where the requested range starts. */
+    meta_request->requested_range_start = 0;
+    meta_request->requested_range_start_resolved = false;
+
     /* Optional in-memory download destination (zero-copy). Mutually exclusive with recv_filepath
      * and body callbacks: parts are written directly into the caller's buffer instead of being
      * delivered/copied. */
@@ -2933,7 +2937,7 @@ static int s_s3_recv_file_offset(
      * for itself: 0 is what it holds before anything resolves it and also what a whole-object download
      * resolves it to. Mapping before then would place the body at its absolute position in the object
      * rather than at the base offset, with nothing about the outcome looking wrong. */
-    if (!meta_request->recv_object_range_origin_resolved) {
+    if (!meta_request->requested_range_start_resolved) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Cannot place object range start %" PRIu64 " in the file before the object range is resolved.",
@@ -2946,14 +2950,14 @@ static int s_s3_recv_file_offset(
      * land somewhere far past the end of the file. The checked subtraction is the guard, so the check and
      * the value it protects cannot drift apart. */
     uint64_t offset_from_base = 0;
-    if (aws_sub_u64_checked(object_range_start, meta_request->recv_object_range_origin, &offset_from_base)) {
+    if (aws_sub_u64_checked(object_range_start, meta_request->requested_range_start, &offset_from_base)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Object range start %" PRIu64 " precedes the range origin %" PRIu64 ", so it has no place in the "
             "file.",
             (void *)meta_request,
             object_range_start,
-            meta_request->recv_object_range_origin);
+            meta_request->requested_range_start);
         /* Replaces the overflow error the checked subtraction raised: a range ahead of the origin is a state this
          * code should never reach, not an arithmetic accident. */
         return aws_raise_error(AWS_ERROR_INVALID_STATE);

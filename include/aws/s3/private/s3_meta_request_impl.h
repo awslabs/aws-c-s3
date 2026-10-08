@@ -469,7 +469,7 @@ struct aws_s3_meta_request {
 
     /* Optional caller-provided in-memory download destination (zero-copy).
      * Non-NULL means each part is written directly into this buffer at
-     * (part range start - recv_object_range_origin); the client neither allocates nor frees it.
+     * (part range start - requested_range_start); the client neither allocates nor frees it.
      * Set only once it has been added to the client's buffer pool, so destroy removes it then.
      * See aws_s3_meta_request_options.recv_buffer. */
     struct aws_byte_buf *recv_buffer;
@@ -541,10 +541,10 @@ struct aws_s3_meta_request {
      * derived meta request when it resolves the object range, before any body is delivered; for
      * recv_buffer it is set at creation when already known, since a part is placed when its buffer is
      * reserved, before the first response. */
-    uint64_t recv_object_range_origin;
+    uint64_t requested_range_start;
 
-    /* Whether the origin above has been resolved. */
-    bool recv_object_range_origin_resolved;
+    /* Whether requested_range_start has been resolved. */
+    bool requested_range_start_resolved;
 
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
      * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)

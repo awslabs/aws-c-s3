@@ -521,13 +521,45 @@ static int s_test_s3_recv_buffer_suffix_range_larger_than_object(struct aws_allo
     return 0;
 }
 
-/* Buffer smaller than a part, object fits, but nothing says the download is small: the first
- * request is a full part, which the buffer can't hold. */
+/* Buffer smaller than a part, object fits, no size hint: the buffer's capacity is used as the hint,
+ * so the first request fits. */
 AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part, s_test_s3_recv_buffer_smaller_than_part)
 static int s_test_s3_recv_buffer_smaller_than_part(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct rb_get get = {.key = g_pre_existing_object_1MB};
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(1)));
+    return 0;
+}
+
+/* Same, with checksum validation on. */
+AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_checksum, s_test_s3_recv_buffer_smaller_than_part_checksum)
+static int s_test_s3_recv_buffer_smaller_than_part_checksum(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_get get = {.key = g_pre_existing_object_1MB, .validate_checksum = true};
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(1)));
+    return 0;
+}
+
+/* Same buffer, with a Range that has no end (bytes=A-): hints don't apply to ranged GETs, so the first
+ * request is a full part, which the buffer can't hold. */
+AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_open_range, s_test_s3_recv_buffer_smaller_than_part_open_range)
+static int s_test_s3_recv_buffer_smaller_than_part_open_range(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_get get = {.key = g_pre_existing_object_10MB, .range = "bytes=10000000-"};
     ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SHORT_BUFFER, 0, 0));
+    return 0;
+}
+
+/* Buffer smaller than a part, with a caller hint bigger than the buffer (4 MiB hint, 2 MiB buffer, 1 MiB
+ * object): the buffer's capacity replaces the hint, so the first request fits in the buffer. */
+AWS_TEST_CASE(
+    test_s3_recv_buffer_smaller_than_part_hint_larger_than_buffer,
+    s_test_s3_recv_buffer_smaller_than_part_hint_larger_than_buffer)
+static int s_test_s3_recv_buffer_smaller_than_part_hint_larger_than_buffer(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    uint64_t hint = MB_TO_BYTES(4);
+    struct rb_get get = {.key = g_pre_existing_object_1MB, .object_size_hint = &hint};
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(2), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(1)));
     return 0;
 }
 
@@ -551,12 +583,13 @@ static int s_test_s3_recv_buffer_smaller_than_part_range(struct aws_allocator *a
     return 0;
 }
 
-/* Empty object: success with len 0. */
+/* Empty object, with a normal buffer and with a 1-byte buffer. */
 AWS_TEST_CASE(test_s3_recv_buffer_empty_object, s_test_s3_recv_buffer_empty_object)
 static int s_test_s3_recv_buffer_empty_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct rb_get get = {.key = g_pre_existing_empty_object};
-    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_1mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 0, 0));
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(8), AWS_ERROR_SUCCESS, 0, 0));
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, 1, AWS_ERROR_SUCCESS, 0, 0));
     return 0;
 }
 
@@ -744,7 +777,8 @@ static int s_test_s3_recv_buffer_one_byte_short(struct aws_allocator *allocator,
     return 0;
 }
 
-/* Buffer smaller than a part, object much bigger: fails on the first request. */
+/* Buffer smaller than a part, object much bigger: the first request (sized to the buffer) can't hold
+ * the object, and the request fails. */
 AWS_TEST_CASE(test_s3_recv_buffer_small_buffer_big_object, s_test_s3_recv_buffer_small_buffer_big_object)
 static int s_test_s3_recv_buffer_small_buffer_big_object(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

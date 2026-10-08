@@ -2511,21 +2511,6 @@ void s_acquire_mem_and_prepare_request(
         struct aws_allocator *allocator = request->allocator;
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
-        /* Where this part goes within the requested range. A pool with a pre-allocated buffer for this
-         * meta request places it at this offset. A part before the range origin has no place in it, so
-         * pass an offset no buffer can hold, and the pool fails the reservation. */
-        uint64_t offset = 0;
-        if (aws_sub_u64_checked(request->part_range_start, meta_request->recv_object_range_origin, &offset)) {
-            offset = UINT64_MAX;
-        }
-
-        struct aws_s3_buffer_pool_reserve_meta meta = {
-            .client = client,
-            .meta_request = meta_request,
-            .size = aws_min_size(request->buffer_size, request_size),
-            .offset = offset,
-        };
-
         struct aws_s3_reserve_memory_payload *payload =
             aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
 
@@ -2533,7 +2518,30 @@ void s_acquire_mem_and_prepare_request(
         payload->request = request;
         payload->callback = callback;
         payload->user_data = user_data;
-        payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+
+        /* Where this part goes within the requested range. A pool with a pre-allocated buffer for this
+         * meta request places it at this offset. Every part lies inside the requested range, so a part
+         * starting before it is a bug: fail the request here, through the same path as a failed
+         * reservation, rather than hand the pool an offset it can't use. */
+        uint64_t offset = 0;
+        if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &offset)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Part starts at %" PRIu64 ", before the requested range start %" PRIu64 ".",
+                (void *)meta_request,
+                request->part_range_start,
+                meta_request->requested_range_start);
+            payload->buffer_future = aws_future_s3_buffer_ticket_new(allocator);
+            aws_future_s3_buffer_ticket_set_error(payload->buffer_future, AWS_ERROR_INVALID_STATE);
+        } else {
+            struct aws_s3_buffer_pool_reserve_meta meta = {
+                .client = client,
+                .meta_request = meta_request,
+                .size = aws_min_size(request->buffer_size, request_size),
+                .offset = offset,
+            };
+            payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+        }
 
         /* BEGIN CRITICAL SECTION */
         {

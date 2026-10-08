@@ -122,15 +122,15 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     }
 
     /* A recv_buffer part is placed when its buffer is reserved, before the first response resolves the
-     * object range, so set the origin now when it's already known: 0 without a Range header, or the
+     * object range, so set requested_range_start now when it's already known: 0 without a Range header, or the
      * Range start. A suffix range (bytes=-N) is resolved by the HEAD before any part is reserved. */
     if (auto_ranged_get->base.recv_buffer != NULL) {
         if (!auto_ranged_get->initial_message_has_range_header) {
-            auto_ranged_get->base.recv_object_range_origin = 0;
-            auto_ranged_get->base.recv_object_range_origin_resolved = true;
+            auto_ranged_get->base.requested_range_start = 0;
+            auto_ranged_get->base.requested_range_start_resolved = true;
         } else if (auto_ranged_get->initial_message_has_start_range) {
-            auto_ranged_get->base.recv_object_range_origin = auto_ranged_get->initial_range_start;
-            auto_ranged_get->base.recv_object_range_origin_resolved = true;
+            auto_ranged_get->base.requested_range_start = auto_ranged_get->initial_range_start;
+            auto_ranged_get->base.requested_range_start_resolved = true;
         }
     }
     auto_ranged_get->initial_message_has_if_match_header = aws_http_headers_has(headers, g_if_match_header_name);
@@ -139,6 +139,15 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
     if (options->object_size_hint != NULL) {
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = *options->object_size_hint;
+    }
+    if (auto_ranged_get->base.recv_buffer != NULL &&
+        auto_ranged_get->base.recv_buffer->capacity < auto_ranged_get->base.part_size) {
+        /* A recv_buffer smaller than a part can't hold a full-part first request. The download is at most the
+         * buffer's capacity, and asking for that much costs nothing (it's the caller's memory), so use it as the
+         * hint, even over the caller's: the first request then fits, and a hint that's too small can't make it
+         * fall back to a full part. */
+        auto_ranged_get->object_size_hint_available = true;
+        auto_ranged_get->object_size_hint = auto_ranged_get->base.recv_buffer->capacity;
     }
 
     AWS_LOGF_DEBUG(
@@ -1290,8 +1299,8 @@ update_synced_data:
             /* A part is delivered at its absolute position in the object, so the file sink needs the
              * range's origin to map the range's first byte to the file's base offset. Set before any
              * body is delivered, since the range is resolved from the first response's headers. */
-            meta_request->recv_object_range_origin_resolved = true;
-            meta_request->recv_object_range_origin = object_range_start;
+            meta_request->requested_range_start_resolved = true;
+            meta_request->requested_range_start = object_range_start;
             if (!first_part_buffer_size_mismatch && first_part_size) {
                 /* Only record the discovered first-part size on a successful partNumber request.
                  * On a buffer-size mismatch the request was cancelled before the body arrived, so
