@@ -808,3 +808,150 @@ static int s_test_s3_buffer_pool_trim_reserved_but_unallocated(struct aws_alloca
     return 0;
 }
 AWS_TEST_CASE(test_s3_buffer_pool_trim_reserved_but_unallocated, s_test_s3_buffer_pool_trim_reserved_but_unallocated)
+
+/* ---- Pre-allocated buffers: the pool hands out views into caller-owned memory ---- */
+
+/* The pool only uses the meta request pointer as a key, so any address works: no meta request
+ * internals are needed to drive it. */
+static int s_dummy_meta_request_key_1;
+static int s_dummy_meta_request_key_2;
+#define KEY_1 ((struct aws_s3_meta_request *)&s_dummy_meta_request_key_1)
+#define KEY_2 ((struct aws_s3_meta_request *)&s_dummy_meta_request_key_2)
+
+static struct aws_future_s3_buffer_ticket *s_reserve_at(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_meta_request *meta_request,
+    uint64_t offset,
+    size_t size) {
+    return aws_s3_default_buffer_pool_reserve(
+        pool,
+        (struct aws_s3_buffer_pool_reserve_meta){
+            .meta_request = meta_request,
+            .size = size,
+            .local_offset = offset,
+        });
+}
+
+static int s_check_usage_is_zero(struct aws_s3_buffer_pool *pool) {
+    struct aws_s3_default_buffer_pool_usage_stats usage = aws_s3_default_buffer_pool_get_usage(pool);
+    ASSERT_UINT_EQUALS(0, usage.primary_used);
+    ASSERT_UINT_EQUALS(0, usage.primary_reserved);
+    ASSERT_UINT_EQUALS(0, usage.secondary_used);
+    ASSERT_UINT_EQUALS(0, usage.secondary_reserved);
+    return AWS_OP_SUCCESS;
+}
+
+/* A reservation for a meta request with a pre-allocated buffer gets a view at buffer + offset, ready
+ * immediately, and the caller's memory never counts against the pool. */
+AWS_TEST_CASE(test_s3_buffer_pool_preallocated_view, s_test_s3_buffer_pool_preallocated_view)
+static int s_test_s3_buffer_pool_preallocated_view(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    uint8_t mem[1024];
+    struct aws_byte_buf buffer = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+    ASSERT_SUCCESS(aws_s3_buffer_pool_add_preallocated_buffer(pool, KEY_1, &buffer));
+
+    struct {
+        uint64_t offset;
+        size_t size;
+    } cases[] = {
+        {0, 256},   /* start of the buffer */
+        {512, 256}, /* middle */
+        {768, 256}, /* ends exactly at capacity */
+        {0, 1024},  /* the whole buffer */
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(cases); ++i) {
+        struct aws_future_s3_buffer_ticket *future = s_reserve_at(pool, KEY_1, cases[i].offset, cases[i].size);
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+        ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, aws_future_s3_buffer_ticket_get_error(future));
+        struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+        struct aws_byte_buf view = aws_s3_buffer_ticket_claim(ticket);
+        ASSERT_PTR_EQUALS(mem + cases[i].offset, view.buffer);
+        ASSERT_UINT_EQUALS(cases[i].size, view.capacity);
+        ASSERT_UINT_EQUALS(0, view.len);
+        ASSERT_NULL(view.allocator); /* not owned: the client never frees it */
+        ASSERT_SUCCESS(s_check_usage_is_zero(pool));
+        aws_s3_buffer_ticket_release(ticket);
+        aws_future_s3_buffer_ticket_release(future);
+        ASSERT_SUCCESS(s_check_usage_is_zero(pool));
+    }
+
+    aws_s3_buffer_pool_remove_preallocated_buffer(pool, KEY_1);
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}
+
+/* A reservation that doesn't fit fails with AWS_ERROR_SHORT_BUFFER instead of handing out a view past
+ * the end of the buffer. */
+AWS_TEST_CASE(test_s3_buffer_pool_preallocated_out_of_bounds, s_test_s3_buffer_pool_preallocated_out_of_bounds)
+static int s_test_s3_buffer_pool_preallocated_out_of_bounds(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    uint8_t mem[1024];
+    struct aws_byte_buf buffer = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+    ASSERT_SUCCESS(aws_s3_buffer_pool_add_preallocated_buffer(pool, KEY_1, &buffer));
+
+    struct {
+        uint64_t offset;
+        size_t size;
+    } cases[] = {
+        {900, 256},          /* runs past the end */
+        {1024, 1},           /* starts at the end */
+        {0, 1025},           /* bigger than the whole buffer */
+        {UINT64_MAX, 1},     /* the client's "has no place in the buffer" marker */
+        {UINT64_MAX - 1, 8}, /* would wrap around if added naively */
+    };
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(cases); ++i) {
+        struct aws_future_s3_buffer_ticket *future = s_reserve_at(pool, KEY_1, cases[i].offset, cases[i].size);
+        ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+        ASSERT_INT_EQUALS(AWS_ERROR_SHORT_BUFFER, aws_future_s3_buffer_ticket_get_error(future));
+        aws_future_s3_buffer_ticket_release(future);
+        ASSERT_SUCCESS(s_check_usage_is_zero(pool));
+    }
+
+    aws_s3_buffer_pool_remove_preallocated_buffer(pool, KEY_1);
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}
+
+/* A reservation for `key` gets pool memory, not a view of `not_mem`. */
+static int s_expect_pool_memory(struct aws_s3_buffer_pool *pool, struct aws_s3_meta_request *key, uint8_t *not_mem) {
+    struct aws_future_s3_buffer_ticket *future = s_reserve_at(pool, key, 0, MB_TO_BYTES(8));
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, aws_future_s3_buffer_ticket_get_error(future));
+    struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+    struct aws_byte_buf buf = aws_s3_buffer_ticket_claim(ticket);
+    ASSERT_NOT_NULL(buf.buffer);
+    ASSERT_FALSE(buf.buffer == not_mem);
+    struct aws_s3_default_buffer_pool_usage_stats usage = aws_s3_default_buffer_pool_get_usage(pool);
+    ASSERT_TRUE(usage.primary_used + usage.secondary_used >= MB_TO_BYTES(8));
+    aws_s3_buffer_ticket_release(ticket);
+    aws_future_s3_buffer_ticket_release(future);
+    return AWS_OP_SUCCESS;
+}
+
+/* Only the registered meta request is served from its buffer: another meta request, no meta request,
+ * and the same meta request after removal all get pool memory as before. */
+AWS_TEST_CASE(test_s3_buffer_pool_preallocated_per_meta_request, s_test_s3_buffer_pool_preallocated_per_meta_request)
+static int s_test_s3_buffer_pool_preallocated_per_meta_request(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    uint8_t mem[1024];
+    struct aws_byte_buf buffer = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+    ASSERT_SUCCESS(aws_s3_buffer_pool_add_preallocated_buffer(pool, KEY_1, &buffer));
+
+    ASSERT_SUCCESS(s_expect_pool_memory(pool, KEY_2, mem)); /* a different meta request */
+    ASSERT_SUCCESS(s_expect_pool_memory(pool, NULL, mem));  /* no meta request */
+
+    aws_s3_buffer_pool_remove_preallocated_buffer(pool, KEY_1);
+    ASSERT_SUCCESS(s_expect_pool_memory(pool, KEY_1, mem)); /* removed */
+
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}

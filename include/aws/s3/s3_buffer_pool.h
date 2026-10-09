@@ -64,6 +64,11 @@ struct aws_s3_buffer_pool_reserve_meta {
      * once it completes. A pool that defers must guarantee every deferred reservation is eventually
      * resolved. */
     bool can_block;
+
+    /* Where this reservation's data goes in the meta request's local destination: 0 is the first byte of
+     * the requested range, not of the S3 object. A pool that manages where data goes can use it, e.g. to
+     * place it in a pre-allocated buffer (see aws_s3_buffer_pool_add_preallocated_buffer). */
+    uint64_t local_offset;
 };
 
 struct aws_s3_buffer_ticket;
@@ -131,6 +136,24 @@ struct aws_s3_buffer_pool_vtable {
     /* Implement below for custom ref count behavior. Alternatively set those to null and init the ref count. */
     struct aws_s3_buffer_pool *(*acquire)(struct aws_s3_buffer_pool *pool);
     struct aws_s3_buffer_pool *(*release)(struct aws_s3_buffer_pool *pool);
+
+    /**
+     * Optional. Serve reservations for `meta_request` from caller-owned memory instead of pool memory:
+     * a reservation of `size` at `local_offset` (see aws_s3_buffer_pool_reserve_meta) gets a ticket whose
+     * buffer is `buffer->buffer + local_offset`. The pool doesn't own the memory and must not free it.
+     * `meta_request` is only a key; the pool doesn't need to look inside it.
+     * A pool that doesn't implement this can't be used with aws_s3_meta_request_options.recv_buffer.
+     */
+    int (*add_preallocated_buffer)(
+        struct aws_s3_buffer_pool *pool,
+        struct aws_s3_meta_request *meta_request,
+        struct aws_byte_buf *buffer);
+
+    /**
+     * Required if add_preallocated_buffer is implemented. Stop serving `meta_request` from its
+     * pre-allocated buffer. Called once the meta request is done with it.
+     */
+    void (*remove_preallocated_buffer)(struct aws_s3_buffer_pool *pool, struct aws_s3_meta_request *meta_request);
 };
 
 /**
@@ -146,6 +169,22 @@ AWS_S3_API struct aws_future_s3_buffer_ticket *aws_s3_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_buffer_pool_reserve_meta meta);
 AWS_S3_API void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool);
+
+/**
+ * Serve reservations for `meta_request` from the caller-owned `buffer` (see the vtable entry).
+ * Raises AWS_ERROR_UNSUPPORTED_OPERATION if the pool doesn't implement it.
+ */
+AWS_S3_API int aws_s3_buffer_pool_add_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer);
+
+/**
+ * Stop serving `meta_request` from its pre-allocated buffer. No-op if the pool doesn't implement it.
+ */
+AWS_S3_API void aws_s3_buffer_pool_remove_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool,
+    struct aws_s3_meta_request *meta_request);
 
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_acquire(struct aws_s3_buffer_pool *buffer_pool);
 AWS_S3_API struct aws_s3_buffer_pool *aws_s3_buffer_pool_release(struct aws_s3_buffer_pool *buffer_pool);

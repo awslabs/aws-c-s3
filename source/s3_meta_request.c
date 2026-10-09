@@ -692,6 +692,85 @@ int aws_s3_meta_request_init_base(
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
 
+    /* Not known yet: the derived meta request sets it once it knows where the requested range starts. */
+    meta_request->requested_range_start = 0;
+    meta_request->requested_range_start_resolved = false;
+
+    /* Optional in-memory download destination (zero-copy). Mutually exclusive with recv_filepath
+     * and body callbacks: parts are written directly into the caller's buffer instead of being
+     * delivered/copied. */
+    if (options->recv_buffer != NULL) {
+        if (options->recv_filepath.len > 0 || options->body_callback != NULL || options->body_callback_ex != NULL) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is mutually exclusive with recv_filepath and "
+                "body_callback(_ex).",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* recv_buffer is a download destination only. */
+        if (options->type != AWS_S3_META_REQUEST_TYPE_GET_OBJECT) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer is only supported for GET_OBJECT.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* recv_buffer must start empty; reset len to reuse a buffer. */
+        if (options->recv_buffer->len != 0) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer must be empty (len is %zu).",
+                (void *)meta_request,
+                options->recv_buffer->len);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* recv_buffer already bounds the download, so a size hint isn't needed with it. One that doesn't match
+         * the buffer contradicts it, so reject it. */
+        if (options->object_size_hint != NULL && *options->object_size_hint != options->recv_buffer->capacity) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: object_size_hint (%" PRIu64
+                ") must match recv_buffer's capacity (%zu) when recv_buffer is set.",
+                (void *)meta_request,
+                *options->object_size_hint,
+                options->recv_buffer->capacity);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        /* An empty buffer can't hold even the first request. */
+        if (options->recv_buffer->capacity == 0) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: recv_buffer has no capacity.",
+                (void *)meta_request);
+            aws_raise_error(AWS_ERROR_SHORT_BUFFER);
+            goto error;
+        }
+
+        /* Parts are placed in recv_buffer by the client's buffer pool. A pool that doesn't support
+         * pre-allocated buffers can't serve this request. recv_buffer is set only once the pool has
+         * it, so destroy removes it from the pool exactly when it was added. */
+        if (client == NULL) {
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
+        if (aws_s3_buffer_pool_add_preallocated_buffer(client->buffer_pool, meta_request, options->recv_buffer)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: the client's buffer pool doesn't support recv_buffer "
+                "(error %d: %s).",
+                (void *)meta_request,
+                aws_last_error_or_unknown(),
+                aws_error_str(aws_last_error_or_unknown()));
+            goto error;
+        }
+        meta_request->recv_buffer = options->recv_buffer;
+    }
+
     if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
         goto error;
     }
@@ -991,6 +1070,11 @@ static void s_s3_meta_request_destroy(void *user_data) {
     if (meta_request->client != NULL) {
         if (meta_request->buffer_pool_optimized) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
+        }
+        if (meta_request->recv_buffer != NULL) {
+            /* Every part is done with recv_buffer by now, and the pool must not keep a mapping for a
+             * meta request that is going away. */
+            aws_s3_buffer_pool_remove_preallocated_buffer(meta_request->client->buffer_pool, meta_request);
         }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
         /* pending buffer acquisition will keep meta request alive from destroying.  */
@@ -2866,7 +2950,7 @@ static int s_s3_recv_file_offset(
      * for itself: 0 is what it holds before anything resolves it and also what a whole-object download
      * resolves it to. Mapping before then would place the body at its absolute position in the object
      * rather than at the base offset, with nothing about the outcome looking wrong. */
-    if (!meta_request->recv_file_object_range_origin_resolved) {
+    if (!meta_request->requested_range_start_resolved) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Cannot place object range start %" PRIu64 " in the file before the object range is resolved.",
@@ -2879,14 +2963,14 @@ static int s_s3_recv_file_offset(
      * land somewhere far past the end of the file. The checked subtraction is the guard, so the check and
      * the value it protects cannot drift apart. */
     uint64_t offset_from_base = 0;
-    if (aws_sub_u64_checked(object_range_start, meta_request->recv_file_object_range_origin, &offset_from_base)) {
+    if (aws_sub_u64_checked(object_range_start, meta_request->requested_range_start, &offset_from_base)) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p: Object range start %" PRIu64 " precedes the range origin %" PRIu64 ", so it has no place in the "
             "file.",
             (void *)meta_request,
             object_range_start,
-            meta_request->recv_file_object_range_origin);
+            meta_request->requested_range_start);
         /* Replaces the overflow error the checked subtraction raised: a range ahead of the origin is a state this
          * code should never reach, not an arithmetic accident. */
         return aws_raise_error(AWS_ERROR_INVALID_STATE);
@@ -3011,6 +3095,16 @@ static int s_deliver_body_to_sink(
     const struct aws_byte_cursor *body,
     uint64_t delivery_range_start,
     struct aws_s3_request *request) {
+
+    if (meta_request->recv_buffer != NULL) {
+        /* The body was received straight into the caller's recv_buffer, so there is nothing to deliver.
+         * The caller gets no body callbacks to open the read window from, so open it here, as the file
+         * path does; otherwise a client with read backpressure would stop requesting parts. */
+        if (meta_request->client->enable_read_backpressure) {
+            aws_s3_meta_request_increment_read_window(meta_request, body->len);
+        }
+        return AWS_OP_SUCCESS;
+    }
 
     if (meta_request->recv_filepath != NULL) {
         uint64_t file_offset = 0;
@@ -3988,6 +4082,12 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
     if (meta_request->checksum_config.validate_response_checksum) {
         /* validate checksum finish */
         s_validate_meta_request_checksum_on_finish(meta_request, &finish_result);
+    }
+
+    /* Zero-copy download: report how many bytes were written into the caller's buffer. Done after
+     * checksum validation, which can still fail the request. On failure, len is left untouched. */
+    if (meta_request->recv_buffer != NULL && finish_result.error_code == AWS_ERROR_SUCCESS) {
+        meta_request->recv_buffer->len = (size_t)meta_request->recv_buffer_expected_len;
     }
 
     if (meta_request->finish_callback != NULL) {

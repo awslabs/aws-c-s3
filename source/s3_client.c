@@ -2550,12 +2550,6 @@ void s_acquire_mem_and_prepare_request(
         struct aws_allocator *allocator = request->allocator;
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
-        struct aws_s3_buffer_pool_reserve_meta meta = {
-            .client = client,
-            .meta_request = meta_request,
-            .size = aws_min_size(request->buffer_size, request_size),
-        };
-
         struct aws_s3_reserve_memory_payload *payload =
             aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
 
@@ -2563,7 +2557,30 @@ void s_acquire_mem_and_prepare_request(
         payload->request = request;
         payload->callback = callback;
         payload->user_data = user_data;
-        payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+
+        /* Where this part goes within the requested range (its local_offset), for a pool that places data
+         * itself, e.g. in a pre-allocated buffer. Every part lies inside the requested range, so a part
+         * starting before it is a bug: fail the request here, through the same path as a failed
+         * reservation, rather than hand the pool an offset it can't use. */
+        uint64_t local_offset = 0;
+        if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Part starts at %" PRIu64 ", before the requested range start %" PRIu64 ".",
+                (void *)meta_request,
+                request->part_range_start,
+                meta_request->requested_range_start);
+            payload->buffer_future = aws_future_s3_buffer_ticket_new(allocator);
+            aws_future_s3_buffer_ticket_set_error(payload->buffer_future, AWS_ERROR_INVALID_STATE);
+        } else {
+            struct aws_s3_buffer_pool_reserve_meta meta = {
+                .client = client,
+                .meta_request = meta_request,
+                .size = aws_min_size(request->buffer_size, request_size),
+                .local_offset = local_offset,
+            };
+            payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+        }
 
         /* BEGIN CRITICAL SECTION */
         {
