@@ -128,7 +128,7 @@ static void s_s3_request_type_info_init(struct aws_allocator *allocator) {
         allocator,
         AWS_ARRAY_SIZE(s_s3_request_type_info_array) /*initial_size*/,
         aws_hash_byte_cursor_ptr_ignore_case,
-        (aws_hash_callback_eq_fn *)aws_byte_cursor_eq_ignore_case,
+        aws_byte_cursor_eq_ignore_case_cb,
         NULL /*destroy_key*/,
         NULL /*destroy_value*/);
     AWS_FATAL_ASSERT(!err);
