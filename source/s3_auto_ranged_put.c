@@ -444,13 +444,50 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_release(allocator, auto_ranged_put);
         return NULL;
     }
+    /* request_body: send each part straight from the caller's memory if the buffer pool accepts it as a
+     * pre-allocated buffer (no copy, no pool memory). A pool that doesn't support that still works: each
+     * part is then copied from the caller's memory into a pool buffer. */
+    bool request_body_zero_copy = false;
+    if (options->request_body.ptr != NULL) {
+        auto_ranged_put->base.request_body = options->request_body;
+        /* The pool keeps a pointer to this view, so it lives on the meta request. It's a writable aws_byte_buf
+         * because that's what the pool API takes, but parts are only ever read from it, never written. */
+        auto_ranged_put->base.request_body_preallocated =
+            aws_byte_buf_from_array(options->request_body.ptr, options->request_body.len);
+        if (aws_s3_buffer_pool_add_preallocated_buffer(
+                client->buffer_pool, &auto_ranged_put->base, &auto_ranged_put->base.request_body_preallocated)) {
+            int error_code = aws_last_error_or_unknown();
+            AWS_ZERO_STRUCT(auto_ranged_put->base.request_body_preallocated);
+            if (error_code != AWS_ERROR_UNSUPPORTED_OPERATION) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_META_REQUEST,
+                    "id=%p Could not create auto-ranged-put meta request; adding request_body to the buffer pool "
+                    "failed with error %d (%s).",
+                    (void *)&auto_ranged_put->base,
+                    error_code,
+                    aws_error_str(error_code));
+                aws_s3_meta_request_release(&auto_ranged_put->base);
+                aws_raise_error(error_code);
+                return NULL;
+            }
+            AWS_LOGF_INFO(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p The buffer pool doesn't support pre-allocated buffers, so request_body parts are copied "
+                "into pool buffers.",
+                (void *)&auto_ranged_put->base);
+        } else {
+            request_body_zero_copy = true;
+        }
+    }
+
     /* The buffer reserved for each request is meta_request->part_size, EXCEPT when the body
      * streams from a file: aws_s3_request_new then sizes it at 2 * g_streaming_buffer_size
-     * regardless of part size, so a part larger than max_part_size costs nothing extra. */
+     * regardless of part size, so a part larger than max_part_size costs nothing extra. Parts sent
+     * straight from request_body don't use pool memory at all. */
     bool file_streaming =
         auto_ranged_put->base.fio_opts.should_stream && auto_ranged_put->base.request_body_parallel_stream != NULL;
 
-    if (!file_streaming && part_size > client->max_part_size) {
+    if (!file_streaming && !request_body_zero_copy && part_size > client->max_part_size) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not create auto-ranged-put meta request; part size of %" PRIu64
@@ -940,11 +977,14 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
 
-    /* When the body stream supports reading in parallel, and it's upload parts, do parallel preparation to speed up
-     * reading. */
+    /* When the body supports reading in parallel (a parallel stream, or request_body, which is read at any
+     * offset), and it's upload parts, do parallel preparation to speed up reading. */
     bool parallel_prepare =
-        (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-    if (parallel_prepare && meta_request->fio_opts.should_stream) {
+        (meta_request->request_body_parallel_stream != NULL || meta_request->request_body.ptr != NULL) &&
+        request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART;
+    /* Streaming straight from the file only applies to a parallel stream, not to request_body. */
+    if (parallel_prepare && meta_request->request_body_parallel_stream != NULL &&
+        meta_request->fio_opts.should_stream) {
         request->fio_streaming = true;
     }
 

@@ -1686,11 +1686,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return NULL;
     }
     if (options->request_body.ptr != NULL) {
-        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "Could not create meta request."
-                " request_body is only supported for DEFAULT meta requests.");
+                " request_body is only supported for DEFAULT and PUT_OBJECT meta requests.");
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
         }
@@ -1767,7 +1767,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "Could not create auto-ranged-put meta request."
-                    " Body must be set via filepath, async stream, or body stream.");
+                    " Body must be set via filepath, async stream, body stream, or request_body.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
@@ -2503,9 +2503,10 @@ static void s_on_pool_buffer_reserved(void *user_data) {
      * We can revisit whether it makes sense for get and add it later.
      */
 
+    /* request_body is read at any offset, like a parallel stream, so its parts don't need ordering. */
     bool needs_ordered_prepare = request->part_number > 0 &&
                                  meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-                                 !meta_request->request_body_parallel_stream;
+                                 !meta_request->request_body_parallel_stream && meta_request->request_body.ptr == NULL;
 
     if (needs_ordered_prepare) {
         /* Insert into priority queue and drain in order to ensure sequential

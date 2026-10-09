@@ -8000,8 +8000,9 @@ static int s_test_s3_request_body_fail_non_default_type(struct aws_allocator *al
         allocator, &host_name, g_test_body_content_type, object_key, body.len, 0 /*flags*/);
     ASSERT_NOT_NULL(message);
 
+    /* request_body is supported for DEFAULT and PUT_OBJECT only. */
     struct aws_s3_meta_request_options meta_request_options = {
-        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .type = AWS_S3_META_REQUEST_TYPE_COPY_OBJECT,
         .message = message,
         .request_body = body,
     };
@@ -8083,7 +8084,7 @@ static int s_test_s3_request_body_zero_length_fail_non_default_type(struct aws_a
     struct aws_byte_cursor object_key = aws_byte_cursor_from_c_str("dummy_key");
 
     /* Use a GET meta request: it needs no body source, so the only thing that can reject this is the
-     * request_body DEFAULT-only validation. */
+     * request_body type validation (DEFAULT and PUT_OBJECT only). */
     struct aws_http_message *message = aws_s3_test_get_object_request_new(allocator, host_name, object_key);
     ASSERT_NOT_NULL(message);
 

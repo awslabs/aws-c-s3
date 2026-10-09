@@ -1071,9 +1071,9 @@ static void s_s3_meta_request_destroy(void *user_data) {
         if (meta_request->buffer_pool_optimized) {
             aws_s3_buffer_pool_release_special_size(meta_request->client->buffer_pool, meta_request->part_size);
         }
-        if (meta_request->recv_buffer != NULL) {
-            /* Every part is done with recv_buffer by now, and the pool must not keep a mapping for a
-             * meta request that is going away. */
+        if (meta_request->recv_buffer != NULL || meta_request->request_body_preallocated.buffer != NULL) {
+            /* Every part is done with the pre-allocated buffer (recv_buffer or request_body) by now, and the
+             * pool must not keep a mapping for a meta request that is going away. */
             aws_s3_buffer_pool_remove_preallocated_buffer(meta_request->client->buffer_pool, meta_request);
         }
         aws_s3_buffer_ticket_release(meta_request->synced_data.async_write.buffered_data_ticket);
@@ -4109,6 +4109,28 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
 
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(buffer);
+
+    /* If request_body, the whole body is already in memory: fill the buffer from it at this offset. When the
+     * buffer pool accepted request_body as a pre-allocated buffer, `buffer` is already a view of request_body
+     * at this offset, so the bytes are in place and nothing is copied. */
+    if (meta_request->request_body.ptr != NULL) {
+        struct aws_future_bool *future = aws_future_bool_new(meta_request->allocator);
+        uint64_t read_offset = 0;
+        if (aws_add_u64_checked(offset, buffer->len, &read_offset) || read_offset > meta_request->request_body.len) {
+            aws_future_bool_set_error(future, AWS_ERROR_INVALID_STATE);
+            return future;
+        }
+        size_t to_read =
+            (size_t)aws_min_u64(buffer->capacity - buffer->len, meta_request->request_body.len - read_offset);
+        const uint8_t *src = meta_request->request_body.ptr + read_offset;
+        uint8_t *dest = buffer->buffer + buffer->len;
+        if (dest != src) {
+            memcpy(dest, src, to_read);
+        }
+        buffer->len += to_read;
+        aws_future_bool_set_result(future, read_offset + to_read >= meta_request->request_body.len);
+        return future;
+    }
 
     /* If async-stream, simply call read_to_fill() */
     if (meta_request->request_body_async_stream != NULL) {
