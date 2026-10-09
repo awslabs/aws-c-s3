@@ -657,6 +657,11 @@ struct aws_s3_client_config {
 
         /** Token bucket capacity per host partition (circuit breaker). 0 = default (500). */
         size_t initial_bucket_capacity;
+
+        /** If true, retries are disabled entirely: each request is attempted exactly
+         *  once (max attempts = 1). Takes precedence over every other retry_config field.
+         *  Ignored if an explicit retry_strategy is supplied (that strategy wins). */
+        bool disable_retries;
     } retry_config;
 
     /**

@@ -842,6 +842,21 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->retry_strategy != NULL) {
         aws_retry_strategy_acquire(client_config->retry_strategy);
         client->retry_strategy = client_config->retry_strategy;
+    } else if (client_config->retry_config.disable_retries) {
+        /* Retries disabled: use the no-retry strategy. Record the mode on the
+         * client so the request path makes a single token-less
+         * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
+        client->retries_disabled = true;
+
+        struct aws_no_retry_options no_retry_options;
+        AWS_ZERO_STRUCT(no_retry_options);
+        client->retry_strategy = aws_retry_strategy_new_no_retry(allocator, &no_retry_options);
+
+        if (client->retry_strategy == NULL) {
+            /* if something failed in creation of retry_strategy, we should error instead of having a null
+             * retry_strategy attached to the client */
+            goto on_error;
+        }
     } else {
         /* max_retries requires explicit S3 default because passing 0 to aws-c-io's
          * standard retry strategy would use its own default of 3, not the S3 default of 5.
@@ -2833,6 +2848,15 @@ static void s_s3_client_create_connection_for_request_default(
     AWS_ASSERT(result == AWS_OP_SUCCESS);
     (void)result;
 
+    if (client->retries_disabled) {
+        /* Retries disabled (max attempts = 1): skip retry-token acquisition. The no-retry strategy
+         * would deny it (AWS_IO_RETRY_PERMISSION_DENIED) and fail the request before it is ever sent.
+         * Send directly through the acquired-token callback with a NULL token (same pattern
+         * the retry path uses). The connection-finish path will not schedule a retry for a NULL token. */
+        s_s3_client_acquired_retry_token(client->retry_strategy, AWS_ERROR_SUCCESS, NULL /*token*/, connection);
+        return;
+    }
+
     if (aws_retry_strategy_acquire_retry_token(
             client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, connection, 0)) {
 
@@ -2892,7 +2916,10 @@ static void s_s3_client_acquired_retry_token(
         goto error_clean_up;
     }
 
-    AWS_ASSERT(token);
+    /* token is NULL when retries are disabled (max attempts = 1): the request is attempted exactly
+     * once and the connection-finish path will not schedule a retry (see its NULL retry_token guard
+     * in aws_s3_client_notify_connection_finished). Otherwise a successful acquire always has a token. */
+    AWS_ASSERT(token != NULL || client->retries_disabled);
 
     connection->retry_token = token;
 
@@ -3013,12 +3040,23 @@ void aws_s3_client_notify_connection_finished(
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
-                (void *)client,
-                (void *)request,
-                (void *)meta_request);
+            if (client->retries_disabled) {
+                /* Expected when retries are disabled (max attempts = 1): the request was attempted
+                 * once with no retry token, so there is nothing to retry. Not an error. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Not scheduling retry of request %p for meta request %p: retries are disabled.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            }
 
             goto reset_connection;
         }
