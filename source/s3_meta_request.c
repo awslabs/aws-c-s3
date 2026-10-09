@@ -728,6 +728,19 @@ int aws_s3_meta_request_init_base(
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             goto error;
         }
+        /* recv_buffer already bounds the download, so a size hint isn't needed with it. One that doesn't match
+         * the buffer contradicts it, so reject it. */
+        if (options->object_size_hint != NULL && *options->object_size_hint != options->recv_buffer->capacity) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Cannot create meta request: object_size_hint (%" PRIu64
+                ") must match recv_buffer's capacity (%zu) when recv_buffer is set.",
+                (void *)meta_request,
+                *options->object_size_hint,
+                options->recv_buffer->capacity);
+            aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            goto error;
+        }
         /* An empty buffer can't hold even the first request. */
         if (options->recv_buffer->capacity == 0) {
             AWS_LOGF_ERROR(

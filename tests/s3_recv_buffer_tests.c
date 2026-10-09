@@ -458,6 +458,19 @@ static int s_test_s3_recv_buffer_create_errors(struct aws_allocator *allocator, 
             .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT, .message = get, .recv_buffer = &used_recv_buffer};
         ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, NULL, AWS_ERROR_INVALID_ARGUMENT));
     }
+    /* object_size_hint that doesn't match the buffer's capacity, smaller or larger. */
+    {
+        uint64_t hints[] = {sizeof(mem) - 1, sizeof(mem) + 1};
+        for (size_t i = 0; i < AWS_ARRAY_SIZE(hints); ++i) {
+            struct aws_s3_meta_request_options o = {
+                .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+                .message = get,
+                .recv_buffer = &recv_buffer,
+                .object_size_hint = &hints[i],
+            };
+            ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, NULL, AWS_ERROR_INVALID_ARGUMENT));
+        }
+    }
     /* Zero capacity: can't hold even the first request. */
     {
         struct aws_s3_meta_request_options o = {
@@ -587,20 +600,7 @@ static int s_test_s3_recv_buffer_smaller_than_part_open_range(struct aws_allocat
     return 0;
 }
 
-/* Buffer smaller than a part, with a caller hint bigger than the buffer (4 MiB hint, 2 MiB buffer, 1 MiB
- * object): the buffer's capacity replaces the hint, so the first request fits in the buffer. */
-AWS_TEST_CASE(
-    test_s3_recv_buffer_smaller_than_part_hint_larger_than_buffer,
-    s_test_s3_recv_buffer_smaller_than_part_hint_larger_than_buffer)
-static int s_test_s3_recv_buffer_smaller_than_part_hint_larger_than_buffer(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-    uint64_t hint = MB_TO_BYTES(4);
-    struct rb_get get = {.key = g_pre_existing_object_1MB, .object_size_hint = &hint};
-    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(2), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(1)));
-    return 0;
-}
-
-/* Same buffer, with a size hint: the first request is sized to the hint, so it fits. */
+/* Same buffer, with a size hint equal to its capacity (the only hint allowed with recv_buffer). */
 AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_size_hint, s_test_s3_recv_buffer_smaller_than_part_size_hint)
 static int s_test_s3_recv_buffer_smaller_than_part_size_hint(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -639,18 +639,6 @@ static int s_test_s3_recv_buffer_part_size_boundaries(struct aws_allocator *allo
     ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_1mb_parts, &get, part - 1, AWS_ERROR_SHORT_BUFFER, 0, 0));
     ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_1mb_parts, &get, part, AWS_ERROR_SUCCESS, 0, part));
     ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_1mb_parts, &get, part + 1, AWS_ERROR_SUCCESS, 0, part));
-    return 0;
-}
-
-/* Wrong size hint (says 1 MiB, object is 10 MiB) with a big buffer: the partNumber=1 request is too
- * small, gets cancelled, and the client falls back to ranged gets. */
-AWS_TEST_CASE(test_s3_recv_buffer_wrong_size_hint, s_test_s3_recv_buffer_wrong_size_hint)
-static int s_test_s3_recv_buffer_wrong_size_hint(struct aws_allocator *allocator, void *ctx) {
-    (void)ctx;
-    uint64_t hint = MB_TO_BYTES(1);
-    struct rb_get get = {.key = g_pre_existing_object_10MB, .object_size_hint = &hint};
-    ASSERT_SUCCESS(
-        s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(10), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(10)));
     return 0;
 }
 

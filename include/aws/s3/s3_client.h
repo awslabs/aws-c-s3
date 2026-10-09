@@ -1060,6 +1060,9 @@ struct aws_s3_meta_request_options {
      *   Otherwise creation fails with AWS_ERROR_INVALID_ARGUMENT.
      * - `len` must be 0 (reset it to reuse a buffer). Otherwise creation fails with
      *   AWS_ERROR_INVALID_ARGUMENT.
+     * - Don't set object_size_hint: the client already uses the buffer's capacity as the hint when the
+     *   buffer is smaller than a part. If set, it must equal the capacity. Otherwise creation fails with
+     *   AWS_ERROR_INVALID_ARGUMENT.
      * - The capacity must hold the whole requested range. Otherwise the meta request fails with
      *   AWS_ERROR_SHORT_BUFFER.
      * - With a Range header that has no end (bytes=A-), the capacity must also hold one part
@@ -1289,6 +1292,8 @@ struct aws_s3_meta_request_options {
      * The optimal strategy for downloading a file depends on its size.
      * Set this hint to help the S3 client choose the best strategy for this particular file.
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
+     * Don't set it with recv_buffer: the client uses the buffer's capacity as the hint when needed, and a hint that
+     * doesn't equal the capacity fails creation with AWS_ERROR_INVALID_ARGUMENT.
      */
     const uint64_t *object_size_hint;
 
