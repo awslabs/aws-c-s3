@@ -4759,6 +4759,73 @@ TEST_CASE(get_error_token_delete_on_failure_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* A whole-object checksum mismatch is only found once every part has arrived, after each part already passed
+ * on its own. The finish call must still treat it as the failure it is: delete the file if asked to, and fire
+ * on_error_resume_token. The token is NULL even when the file is kept, because every byte was received; a resume
+ * would have nothing left to download and would report the corrupt file as complete. The tester checks the file
+ * is gone, or still there, after shutdown. */
+static int s_test_get_expected_checksum_mismatch_to_file(struct aws_allocator *allocator, bool delete_on_failure) {
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    AWS_ZERO_STRUCT(s_get_error_token_test_data);
+    struct get_error_token_mock_test_data *test_data = &s_get_error_token_test_data;
+    aws_mutex_init(&test_data->mutex);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .on_error_resume_token = s_get_error_token_mock_on_error,
+        .client = client,
+        /* The CRC32 of the first 64 KiB, offered as the checksum of all 256 KiB. */
+        .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+        .expected_checksum_algorithm = AWS_SCA_CRC32,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag"),
+                .file_on_disk = true,
+                .recv_file_delete_on_failure = delete_on_failure,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+
+    ASSERT_TRUE(test_data->error_callback_invoked);
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, test_data->error_code);
+    ASSERT_NULL(test_data->resume_token);
+
+    aws_mutex_clean_up(&test_data->mutex);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(get_expected_checksum_mismatch_delete_on_failure_mock_server) {
+    (void)ctx;
+    return s_test_get_expected_checksum_mismatch_to_file(allocator, true /*delete_on_failure*/);
+}
+
+TEST_CASE(get_expected_checksum_mismatch_keeps_file_mock_server) {
+    (void)ctx;
+    return s_test_get_expected_checksum_mismatch_to_file(allocator, false /*delete_on_failure*/);
+}
+
 /* A download that succeeds with recv_file_delete_on_failure set must keep its file. The finish call
  * only deletes on failure, but meta request destroy deletes whenever the flag is still armed, so the
  * flag has to be disarmed once the finish call has dealt with the file. The tester checks the file

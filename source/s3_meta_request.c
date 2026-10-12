@@ -3830,6 +3830,18 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
 
+        /* Validate the whole-object checksum before anything below reads the outcome. A mismatch is only found
+         * here, after every part already passed on its own, and it must count as the failure it is: for the
+         * error and resume-token decisions just below, and for recv_file_delete_on_failure after the lock is
+         * released. */
+        bool whole_object_mismatch = false;
+        if (meta_request->checksum_config.validate_response_checksum &&
+            meta_request->synced_data.finish_result.error_code == AWS_ERROR_SUCCESS) {
+            s_validate_meta_request_checksum_on_finish(meta_request, &meta_request->synced_data.finish_result);
+            whole_object_mismatch =
+                meta_request->synced_data.finish_result.error_code == AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+        }
+
         /* Read pause state and build a resume token while still holding the lock. */
         if (meta_request->synced_data.async_pause_requested) {
             is_async_paused = true;
@@ -3841,13 +3853,16 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             is_error = true;
         }
 
-        /* No error token when recv_file_delete_on_failure will discard the partial file on error —
-         * the token would describe deleted state. The on_error_resume_token callback still fires
-         * with a NULL token below. Async pause is unaffected as pause is not treated as an error.
+        /* No error token when recv_file_delete_on_failure will discard the partial file on error,
+         * since the token would describe deleted state. Nor after a whole-object checksum mismatch, with or
+         * without a file: every byte was received, so a resume would have nothing left to download and would
+         * report the bad data as complete. The on_error_resume_token callback still fires with a NULL token
+         * below. Async pause is unaffected as pause is not treated as an error.
          **/
-        bool error_state_discarded = meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure;
+        bool skip_error_token =
+            (meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure) || whole_object_mismatch;
 
-        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !error_state_discarded)) &&
+        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !skip_error_token)) &&
             meta_request->vtable->build_resume_token_synced != NULL) {
             token = meta_request->vtable->build_resume_token_synced(meta_request);
         }
@@ -3985,10 +4000,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         aws_future_void_release(shutdown_future);
     }
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
-    if (meta_request->checksum_config.validate_response_checksum) {
-        /* validate checksum finish */
-        s_validate_meta_request_checksum_on_finish(meta_request, &finish_result);
-    }
 
     if (meta_request->finish_callback != NULL) {
         meta_request->finish_callback(meta_request, &finish_result, meta_request->user_data);
