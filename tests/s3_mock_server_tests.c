@@ -1338,7 +1338,8 @@ TEST_CASE(multipart_upload_streaming_odd_last_part_mock_server) {
 
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
-    ASSERT_SUCCESS(aws_s3_tester_send_meta_request(&tester, client, &meta_request_options, &out_results, 0 /*flags*/));
+    int send_result = aws_s3_tester_send_meta_request(
+        &tester, client, &meta_request_options, &out_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS);
 
     ASSERT_FALSE(
         length_tester.saw_mismatch,
@@ -1346,7 +1347,7 @@ TEST_CASE(multipart_upload_streaming_odd_last_part_mock_server) {
         length_tester.part_number,
         length_tester.sent_length,
         length_tester.expected_length);
-    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_SUCCESS(send_result);
 
     aws_http_message_release(message);
     aws_uri_clean_up(&mock_server);
