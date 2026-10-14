@@ -1194,7 +1194,10 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             (size_t)request->content_length,
             meta_request->fio_opts.direct_io);
 
-        if (request->num_times_prepared == 0) {
+        /* if request body stream creation errored, we should catch it  */
+        if (request->request_body_stream == NULL) {
+            error_code = aws_last_error_or_unknown();
+        } else if (request->num_times_prepared == 0) {
             if (s_s3_new_upload_part_info_after_body(request, meta_request, false)) {
                 error_code = aws_last_error_or_unknown();
             }
