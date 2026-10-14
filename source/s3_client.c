@@ -2550,10 +2550,17 @@ void s_acquire_mem_and_prepare_request(
         struct aws_allocator *allocator = request->allocator;
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
+        size_t reserve_size = aws_min_size(request->buffer_size, request_size);
+        if (meta_request->fio_opts.should_stream && meta_request->request_body_parallel_stream != NULL) {
+            /* The part streaming input stream splits the buffer into two halves, page aligned for direct IO. */
+            size_t alignment = 2 * (meta_request->fio_opts.direct_io ? aws_system_info_page_size() : 1);
+            reserve_size = (reserve_size + alignment - 1) / alignment * alignment;
+        }
+
         struct aws_s3_buffer_pool_reserve_meta meta = {
             .client = client,
             .meta_request = meta_request,
-            .size = aws_min_size(request->buffer_size, request_size),
+            .size = reserve_size,
         };
 
         struct aws_s3_reserve_memory_payload *payload =
