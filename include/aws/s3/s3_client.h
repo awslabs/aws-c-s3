@@ -1145,7 +1145,7 @@ struct aws_s3_meta_request_options {
      * own memory pool) and want to avoid the client allocating a new buffer and copying into it.
      *
      * Memory ownership / lifetime:
-     * - The client BORROWS this memory; it never frees or modifies it.
+     * - The client BORROWS this memory; it never copies, frees, or modifies it.
      * - The memory MUST stay valid and unmodified until the meta request completes. The client
      *   re-reads it on every send attempt, so it must outlive all retries. To learn when it is safe
      *   to free or reuse the memory, use the meta request's shutdown callback (the `aws_s3_meta_request_shutdown_fn`
@@ -1155,10 +1155,10 @@ struct aws_s3_meta_request_options {
      * Supported for:
      * - AWS_S3_META_REQUEST_TYPE_DEFAULT: sent as a single request.
      * - AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: sent as a single PutObject at or below the multipart upload
-     *   threshold. Above it, sent as a multipart upload with parts sent in parallel, each from its slice of this
-     *   memory. If the client's buffer pool supports pre-allocated buffers (the default pool does), parts are sent
-     *   straight from this memory with no copy; otherwise each part is copied into a pool buffer first. A paused
-     *   upload can be resumed with its resume token and the same memory.
+     *   threshold. Above it, sent as a multipart upload with parts sent in parallel, each straight from its slice
+     *   of this memory. That requires the client's buffer pool to support pre-allocated buffers (the default
+     *   pool does); otherwise creation fails with AWS_ERROR_UNSUPPORTED_OPERATION. A paused upload can be resumed
+     *   with its resume token and the same memory.
      *
      * Do not set if the body is being passed by other means (i.e. the message body-stream,
      * send_filepath, send_async_stream, or send_using_async_writes).

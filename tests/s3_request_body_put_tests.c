@@ -56,7 +56,7 @@ static void s_rbp_wrapper_trim(struct aws_s3_buffer_pool *pool) {
 static int s_rbp_wrapper_add_preallocated(
     struct aws_s3_buffer_pool *pool,
     struct aws_s3_meta_request *meta_request,
-    struct aws_byte_buf *buffer) {
+    const struct aws_byte_buf *buffer) {
     struct rbp_wrapper_pool *impl = pool->impl;
     ++s_rbp_pool_stats.num_adds;
     return aws_s3_buffer_pool_add_preallocated_buffer(impl->inner, meta_request, buffer);
@@ -344,39 +344,57 @@ static int s_test_s3_request_body_put_single_part(struct aws_allocator *allocato
     return 0;
 }
 
-/* A custom pool without pre-allocated buffer support: the multipart upload still works, by copying each part
- * from request_body into a pool buffer. The check downloads with a client on the default pool, since
- * recv_buffer needs pre-allocated buffer support. */
-AWS_TEST_CASE(test_s3_request_body_put_multipart_pool_fallback, s_test_s3_request_body_put_multipart_pool_fallback)
-static int s_test_s3_request_body_put_multipart_pool_fallback(struct aws_allocator *allocator, void *ctx) {
+/* A custom pool without pre-allocated buffer support: a multipart request_body upload is rejected at creation with
+ * AWS_ERROR_UNSUPPORTED_OPERATION, as recv_buffer is. A small one (single PUT) still works, since it never uses
+ * the pool. */
+AWS_TEST_CASE(
+    test_s3_request_body_put_multipart_pool_unsupported,
+    s_test_s3_request_body_put_multipart_pool_unsupported)
+static int s_test_s3_request_body_put_multipart_pool_unsupported(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
-    struct rbp_env upload_env;
-    ASSERT_SUCCESS(s_rbp_env_init(allocator, &upload_env, s_rbp_pool_without_preallocated));
+    struct rbp_env env;
+    ASSERT_SUCCESS(s_rbp_env_init(allocator, &env, s_rbp_pool_without_preallocated));
 
     struct aws_byte_buf key;
     ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
-        allocator, &key, aws_byte_cursor_from_c_str("/request-body-put-multipart-pool-fallback.bin")));
+        allocator, &key, aws_byte_cursor_from_c_str("/request-body-put-pool-unsupported.bin")));
     uint8_t *data = aws_mem_acquire(allocator, RBP_MULTIPART_SIZE);
     s_rbp_fill(data, RBP_MULTIPART_SIZE);
-    struct aws_byte_cursor body = aws_byte_cursor_from_array(data, RBP_MULTIPART_SIZE);
 
+    /* Multipart: rejected at creation. */
+    struct aws_byte_cursor host = aws_byte_cursor_from_string(env.host_name);
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host, g_test_body_content_type, aws_byte_cursor_from_buf(&key), RBP_MULTIPART_SIZE, 0);
+    ASSERT_NOT_NULL(message);
+    struct aws_s3_meta_request_options options = {
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .message = message,
+        .request_body = aws_byte_cursor_from_array(data, RBP_MULTIPART_SIZE),
+    };
+    ASSERT_NULL(aws_s3_client_make_meta_request(env.client, &options));
+    ASSERT_INT_EQUALS(AWS_ERROR_UNSUPPORTED_OPERATION, aws_last_error());
+    ASSERT_INT_EQUALS(0, s_rbp_pool_stats.num_adds);
+    aws_http_message_release(message);
+
+    /* Single PUT (at or below the multipart threshold): works without the pool. */
+    struct aws_byte_cursor small = aws_byte_cursor_from_array(data, MB_TO_BYTES(1));
     int error_code = AWS_ERROR_UNKNOWN;
     ASSERT_SUCCESS(s_rbp_put(
         allocator,
-        &upload_env,
+        &env,
         aws_byte_cursor_from_buf(&key),
-        body,
+        small,
         AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         AWS_SCA_NONE,
         NULL /*resume_token*/,
         &error_code));
     ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, error_code);
-    s_rbp_env_clean_up(&upload_env);
+    s_rbp_env_clean_up(&env);
 
     /* Verify with a client on the default pool. */
     struct rbp_env download_env;
     ASSERT_SUCCESS(s_rbp_env_init(allocator, &download_env, NULL));
-    ASSERT_SUCCESS(s_rbp_expect_object(allocator, &download_env, aws_byte_cursor_from_buf(&key), body));
+    ASSERT_SUCCESS(s_rbp_expect_object(allocator, &download_env, aws_byte_cursor_from_buf(&key), small));
     s_rbp_env_clean_up(&download_env);
 
     aws_mem_release(allocator, data);

@@ -50,7 +50,7 @@ void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
 int aws_s3_buffer_pool_add_preallocated_buffer(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_meta_request *meta_request,
-    struct aws_byte_buf *buffer) {
+    const struct aws_byte_buf *buffer) {
     AWS_ERROR_PRECONDITION(buffer_pool);
     AWS_ERROR_PRECONDITION(meta_request);
     AWS_ERROR_PRECONDITION(buffer);
