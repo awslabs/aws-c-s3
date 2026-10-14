@@ -161,8 +161,8 @@ static bool s_validate_meta_request_checksum_on_finish(
      * connection thread that creates it at discovery, then either the delivery loop (byte-wise) or this
      * function (folding recorded part digests), never both. Each handoff sits behind a lock that the path
      * already takes, so nothing here races. See the combine_slots declaration for the ordering argument. */
-    if (meta_request->checksum_config.validate_response_checksum &&
-        meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+    if (meta_request->checksum_config.validate_response_checksum && meta_request_result->error_code == AWS_OP_SUCCESS &&
+        meta_request->meta_request_level_running_response_sum) {
         /* A part that never completed leaves the whole-object sum covering only a subset of the object, so
          * validating it would be meaningless. Report it as unvalidated rather than as a failure: the caller
          * asked for the object, and every part that arrived was still checked against whatever checksum it
