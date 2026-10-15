@@ -2001,6 +2001,50 @@ TEST_CASE(get_object_mismatch_checksum_responses_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+/* A hint no larger than the part size sends discovery down the partNumber=1 GET, whose checksum mismatch must still
+ * fail the meta request. */
+TEST_CASE(get_object_size_hint_checksum_mismatch_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    uint64_t object_size_hint = 64 * 1024;
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .object_size_hint = &object_size_hint,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_unmatch_checksum_crc32"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 /* Downloads a 256 KiB object in four 64 KiB parts, where the whole-object CRC32 is only advertised on
  * the HEAD response. Each part's CRC is computed on its own connection and the four are combined, so a
  * correct result proves the combined checksum equals the checksum of the concatenated object.
