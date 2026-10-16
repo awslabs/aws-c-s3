@@ -949,7 +949,8 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
      * reading. */
     bool parallel_prepare =
         (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-    if (parallel_prepare && meta_request->fio_opts.should_stream) {
+    /* A part that fits in its buffer is read in full instead of streamed through it. */
+    if (parallel_prepare && meta_request->fio_opts.should_stream && request->content_length > request->buffer_size) {
         request->fio_streaming = true;
     }
 
@@ -1199,7 +1200,10 @@ struct aws_future_http_message *s_s3_prepare_upload_part(struct aws_s3_request *
             (size_t)request->content_length,
             meta_request->fio_opts.direct_io);
 
-        if (request->num_times_prepared == 0) {
+        /* if request body stream creation errored, we should catch it  */
+        if (request->request_body_stream == NULL) {
+            error_code = aws_last_error_or_unknown();
+        } else if (request->num_times_prepared == 0) {
             if (s_s3_new_upload_part_info_after_body(request, meta_request, false)) {
                 error_code = aws_last_error_or_unknown();
             }

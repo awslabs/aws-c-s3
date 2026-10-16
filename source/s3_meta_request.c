@@ -144,16 +144,25 @@ done:
     return validated;
 }
 
-/* Prepare the finish request when we validate the checksum */
-static void s_validate_meta_request_checksum_on_finish(
+/* Validates the whole-object checksum at finish, setting AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH on the
+ * result if it doesn't match, and releases the running sum either way.
+ *
+ * Returns whether this call found a mismatch. The caller needs that answer and cannot get it by reading
+ * the result's error code, which only tells it the request failed, not that this check is what failed it.
+ * A false return covers both "matched" and "nothing was validated" (validation off, no running sum, the
+ * request already failed, or parts missing), which is what every caller wants to treat alike. */
+static bool s_validate_meta_request_checksum_on_finish(
     struct aws_s3_meta_request *meta_request,
     struct aws_s3_meta_request_result *meta_request_result) {
+
+    bool mismatch = false;
 
     /* No lock. meta_request_level_running_response_sum has a single owner at any point in its life: the
      * connection thread that creates it at discovery, then either the delivery loop (byte-wise) or this
      * function (folding recorded part digests), never both. Each handoff sits behind a lock that the path
      * already takes, so nothing here races. See the combine_slots declaration for the ordering argument. */
-    if (meta_request_result->error_code == AWS_OP_SUCCESS && meta_request->meta_request_level_running_response_sum) {
+    if (meta_request->checksum_config.validate_response_checksum && meta_request_result->error_code == AWS_OP_SUCCESS &&
+        meta_request->meta_request_level_running_response_sum) {
         /* A part that never completed leaves the whole-object sum covering only a subset of the object, so
          * validating it would be meaningless. Report it as unvalidated rather than as a failure: the caller
          * asked for the object, and every part that arrived was still checked against whatever checksum it
@@ -170,6 +179,7 @@ static void s_validate_meta_request_checksum_on_finish(
                     meta_request->meta_request_level_running_response_sum,
                     &meta_request->meta_request_level_response_header_checksum)) {
                 meta_request_result->error_code = AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH;
+                mismatch = true;
                 AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p Checksum mismatch!", (void *)meta_request);
             }
         }
@@ -177,6 +187,7 @@ static void s_validate_meta_request_checksum_on_finish(
     aws_checksum_destroy(meta_request->meta_request_level_running_response_sum);
     meta_request->meta_request_level_running_response_sum = NULL;
     aws_byte_buf_clean_up(&meta_request->meta_request_level_response_header_checksum);
+    return mismatch;
 }
 
 /* The caller can tell us the checksum of the data being downloaded instead of having the client learn it from the
@@ -3924,6 +3935,13 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
 
         meta_request->synced_data.state = AWS_S3_META_REQUEST_STATE_FINISHED;
 
+        /* Validate the whole-object checksum before anything below reads the outcome. A mismatch is only found
+         * here, after every part already passed on its own, and it must count as the failure it is: for the
+         * error and resume-token decisions just below, and for recv_file_delete_on_failure after the lock is
+         * released. */
+        bool whole_object_mismatch =
+            s_validate_meta_request_checksum_on_finish(meta_request, &meta_request->synced_data.finish_result);
+
         /* Read pause state and build a resume token while still holding the lock. */
         if (meta_request->synced_data.async_pause_requested) {
             is_async_paused = true;
@@ -3935,13 +3953,16 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
             is_error = true;
         }
 
-        /* No error token when recv_file_delete_on_failure will discard the partial file on error —
-         * the token would describe deleted state. The on_error_resume_token callback still fires
-         * with a NULL token below. Async pause is unaffected as pause is not treated as an error.
+        /* No error token when recv_file_delete_on_failure will discard the partial file on error,
+         * since the token would describe deleted state. Nor after a whole-object checksum mismatch, with or
+         * without a file: every byte was received, so a resume would have nothing left to download and would
+         * report the bad data as complete. The on_error_resume_token callback still fires with a NULL token
+         * below. Async pause is unaffected as pause is not treated as an error.
          **/
-        bool error_state_discarded = meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure;
+        bool skip_error_token =
+            (meta_request->recv_filepath != NULL && meta_request->recv_file_delete_on_failure) || whole_object_mismatch;
 
-        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !error_state_discarded)) &&
+        if ((is_async_paused || (is_error && meta_request->on_error_resume_token && !skip_error_token)) &&
             meta_request->vtable->build_resume_token_synced != NULL) {
             token = meta_request->vtable->build_resume_token_synced(meta_request);
         }
@@ -4079,10 +4100,6 @@ void aws_s3_meta_request_finish_default(struct aws_s3_meta_request *meta_request
         aws_future_void_release(shutdown_future);
     }
     meta_request->initial_request_message = aws_http_message_release(meta_request->initial_request_message);
-    if (meta_request->checksum_config.validate_response_checksum) {
-        /* validate checksum finish */
-        s_validate_meta_request_checksum_on_finish(meta_request, &finish_result);
-    }
 
     /* Zero-copy download: report how many bytes were written into the caller's buffer. Done after
      * checksum validation, which can still fail the request. On failure, len is left untouched. */
