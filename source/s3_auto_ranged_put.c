@@ -444,6 +444,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_release(allocator, auto_ranged_put);
         return NULL;
     }
+    /* An upload's parts are positioned from the start of its body, so that start is known now. Parts reserve
+     * pool buffers, and a reservation needs it resolved. */
+    auto_ranged_put->base.requested_range_start = 0;
+    auto_ranged_put->base.requested_range_start_resolved = true;
+
     /* request_body: each part is sent straight from the caller's memory, so the client's buffer pool must
      * serve it as a pre-allocated buffer. A pool that can't is rejected (AWS_ERROR_UNSUPPORTED_OPERATION), as
      * for recv_buffer. The pool keeps its own copy of the view, which is only ever read, never written. */

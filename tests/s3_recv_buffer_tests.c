@@ -484,6 +484,16 @@ static int s_test_s3_recv_buffer_create_errors(struct aws_allocator *allocator, 
         ASSERT_SUCCESS(s_rb_expect_create_fails(
             allocator, &o, s_rb_custom_pool_without_preallocated, AWS_ERROR_UNSUPPORTED_OPERATION));
     }
+    /* A GET with partNumber goes to the default meta request, which never writes into recv_buffer. */
+    {
+        struct aws_byte_cursor part_key = aws_byte_cursor_from_c_str("/dummy_key?partNumber=1");
+        struct aws_http_message *part_get = aws_s3_test_get_object_request_new(allocator, host_name, part_key);
+        ASSERT_NOT_NULL(part_get);
+        struct aws_s3_meta_request_options o = {
+            .type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT, .message = part_get, .recv_buffer = &recv_buffer};
+        ASSERT_SUCCESS(s_rb_expect_create_fails(allocator, &o, NULL, AWS_ERROR_UNSUPPORTED_OPERATION));
+        aws_http_message_release(part_get);
+    }
 
     aws_http_message_release(get);
     aws_http_message_release(put);
