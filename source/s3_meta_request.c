@@ -838,9 +838,12 @@ int aws_s3_meta_request_init_base(
     meta_request->vtable = vtable;
 
     return AWS_OP_SUCCESS;
-error:
+error: {
+    /* Destroying can overwrite the thread-local error, and the caller reads aws_last_error(). */
+    int error_code = aws_last_error_or_unknown();
     s_s3_meta_request_destroy((void *)meta_request);
-    return AWS_OP_ERR;
+    return aws_raise_error(error_code);
+}
 }
 
 void aws_s3_meta_request_increment_read_window(struct aws_s3_meta_request *meta_request, uint64_t bytes) {
