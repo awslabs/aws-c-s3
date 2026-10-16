@@ -10,6 +10,7 @@
 #include "aws/s3/private/s3_util.h"
 #include "aws/s3/s3_client.h"
 #include "s3_tester.h"
+#include <aws/common/clock.h>
 #include <aws/common/environment.h>
 #include <aws/io/stream.h>
 #include <aws/io/uri.h>
@@ -2882,6 +2883,114 @@ TEST_CASE(parallel_write_empty_part_mock_server) {
      * Left unrecorded, part 2 would hold the prefix at 64 KiB while the total reached 192 KiB. */
     ASSERT_UINT_EQUALS(expected_bytes, out_results.num_bytes_delivered);
     ASSERT_UINT_EQUALS(expected_bytes, out_results.num_bytes_delivered_total);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test that a zero-byte object's body write finishes before the meta request does.
+ *
+ * The ranged GET for an empty object is refused with InvalidRange, so the partNumber=1 retry is what
+ * succeeds, with an empty body that is still handed to a write worker. The write is held back for up to
+ * a second by `recv_file_write_stub`, standing in for a busy worker; a meta request that finished
+ * meanwhile has already released `recv_file_write_fd_slots`, which the real write indexes. */
+struct empty_object_write_test_data {
+    struct aws_atomic_var writes_attempted;
+    struct aws_atomic_var write_after_finish;
+};
+static struct empty_object_write_test_data s_empty_object_write_test_data;
+
+static int s_recv_file_write_after_finish_stub(
+    struct aws_s3_meta_request *meta_request,
+    uint64_t file_offset,
+    const struct aws_byte_cursor *body) {
+
+    (void)file_offset;
+    (void)body;
+    bool finished = false;
+    for (int i = 0; i < 100 && !finished; ++i) {
+        aws_s3_meta_request_lock_synced_data(meta_request);
+        finished = meta_request->synced_data.state == AWS_S3_META_REQUEST_STATE_FINISHED;
+        aws_s3_meta_request_unlock_synced_data(meta_request);
+        if (!finished) {
+            aws_thread_current_sleep(aws_timestamp_convert(10, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+        }
+    }
+    aws_atomic_store_int(&s_empty_object_write_test_data.write_after_finish, finished ? 1 : 0);
+    aws_atomic_fetch_add(&s_empty_object_write_test_data.writes_attempted, 1);
+    return AWS_OP_SUCCESS;
+}
+
+static struct aws_s3_meta_request *s_empty_object_write_meta_request_factory(
+    struct aws_s3_client *client,
+    const struct aws_s3_meta_request_options *options) {
+
+    struct aws_s3_tester *tester = client->shutdown_callback_user_data;
+    struct aws_s3_client_vtable *original_client_vtable =
+        aws_s3_tester_get_client_vtable_patch(tester, 0)->original_vtable;
+    struct aws_s3_meta_request *meta_request = original_client_vtable->meta_request_factory(client, options);
+
+    struct aws_s3_meta_request_vtable *patched_meta_request_vtable =
+        aws_s3_tester_patch_meta_request_vtable(tester, meta_request, NULL);
+    patched_meta_request_vtable->recv_file_write_stub = s_recv_file_write_after_finish_stub;
+
+    return meta_request;
+}
+
+TEST_CASE(parallel_write_empty_object_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    AWS_ZERO_STRUCT(s_empty_object_write_test_data);
+    aws_atomic_init_int(&s_empty_object_write_test_data.writes_attempted, 0);
+    aws_atomic_init_int(&s_empty_object_write_test_data.write_after_finish, 0);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = S_PART_SIZE,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_empty_object_write_meta_request_factory;
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_empty_object"),
+                .file_on_disk = true,
+                .recv_file_option = AWS_S3_RECV_FILE_CREATE_OR_REPLACE,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_NO_VALIDATE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.out_of_order_delivery);
+
+    /* The finish callback may beat the held-back write; wait for it rather than miss it. */
+    for (int i = 0; i < 500 && aws_atomic_load_int(&s_empty_object_write_test_data.writes_attempted) == 0; ++i) {
+        aws_thread_current_sleep(aws_timestamp_convert(10, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL));
+    }
+    ASSERT_UINT_EQUALS(1, aws_atomic_load_int(&s_empty_object_write_test_data.writes_attempted));
+    ASSERT_UINT_EQUALS(
+        0,
+        aws_atomic_load_int(&s_empty_object_write_test_data.write_after_finish),
+        "Empty object's part 1 write ran after the meta request reached FINISHED, which released "
+        "recv_file_write_fd_slots: the auto-ranged GET finished with num_parts_delivery_completed < "
+        "num_parts_delivery_sent because total_num_parts is 0.");
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
