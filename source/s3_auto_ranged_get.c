@@ -685,6 +685,15 @@ static int s_discover_object_range_and_size(
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
             AWS_ASSERT(request->part_number == 1);
+
+            /* A first part too large for the hint-sized buffer is the only failure whose headers still describe the
+             * object, so resurface any other error code. */
+            if (error_code != AWS_ERROR_SUCCESS &&
+                error_code != AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
+                aws_raise_error(error_code);
+                break;
+            }
+
             AWS_ASSERT(request->send_data.response_headers != NULL);
             /* There should be a Content-Length header that indicates the size of first part. */
             if (aws_s3_parse_content_length_response_header(

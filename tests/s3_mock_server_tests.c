@@ -1232,6 +1232,137 @@ TEST_CASE(request_body_empty_mock_server) {
         allocator, empty_body, 0 /*throttle_until_attempt*/, false /*omit_content_length*/);
 }
 
+struct upload_part_length_tester {
+    uint64_t object_size;
+    uint64_t part_size;
+    /* Set by the first UploadPart whose body length is not its part's size; that part is never sent. */
+    bool saw_mismatch;
+    uint32_t part_number;
+    uint64_t expected_length;
+    uint64_t sent_length;
+};
+
+/* Patched http_connection_make_request that refuses to send an UploadPart whose body length is not its part's size. */
+static struct aws_http_stream *s_upload_part_length_make_request(
+    struct aws_http_connection *client_connection,
+    const struct aws_http_make_request_options *options) {
+
+    struct aws_s3_connection *connection = options->user_data;
+    struct aws_s3_request *request = connection->request;
+    struct aws_s3_tester *tester = request->meta_request->client->shutdown_callback_user_data;
+    struct upload_part_length_tester *length_tester = tester->user_data;
+
+    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART) {
+        uint64_t part_start = (uint64_t)(request->part_number - 1) * length_tester->part_size;
+        uint64_t expected_length = aws_min_u64(length_tester->part_size, length_tester->object_size - part_start);
+
+        /* With a trailing checksum, Content-Length covers the encoding; the decoded header carries the body length. */
+        struct aws_http_headers *headers = aws_http_message_get_headers(options->request);
+        struct aws_byte_cursor length_value;
+        AWS_ZERO_STRUCT(length_value);
+        if (aws_http_headers_get(headers, g_decoded_content_length_header_name, &length_value) != AWS_OP_SUCCESS) {
+            aws_http_headers_get(headers, g_content_length_header_name, &length_value);
+        }
+        uint64_t sent_length = 0;
+        aws_byte_cursor_utf8_parse_u64(length_value, &sent_length);
+
+        if (sent_length != expected_length) {
+            aws_s3_tester_lock_synced_data(tester);
+            if (!length_tester->saw_mismatch) {
+                length_tester->saw_mismatch = true;
+                length_tester->part_number = request->part_number;
+                length_tester->expected_length = expected_length;
+                length_tester->sent_length = sent_length;
+            }
+            aws_s3_tester_unlock_synced_data(tester);
+            aws_raise_error(AWS_ERROR_S3_NON_RECOVERABLE_ASYNC_ERROR);
+            return NULL;
+        }
+    }
+
+    return aws_http_connection_make_request(client_connection, options);
+}
+
+/* A streamed upload whose last part is odd-sized and under the streaming buffer cap must send that part in full. */
+TEST_CASE(multipart_upload_streaming_odd_last_part_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_tester_client_options client_options = {
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->http_connection_make_request = s_upload_part_length_make_request;
+
+    /* 17 MiB + 3 bytes in 8 MiB parts: the last part is 1 MiB + 3 bytes. */
+    struct upload_part_length_tester length_tester = {
+        .object_size = MB_TO_BYTES(17) + 3,
+        .part_size = MB_TO_BYTES(8),
+    };
+    tester.user_data = &length_tester;
+
+    struct aws_byte_buf file_contents;
+    ASSERT_SUCCESS(aws_byte_buf_init(&file_contents, allocator, (size_t)length_tester.object_size));
+    ASSERT_TRUE(aws_byte_buf_write_u8_n(&file_contents, 'a', (size_t)length_tester.object_size));
+    struct aws_byte_cursor file_cursor = aws_byte_cursor_from_buf(&file_contents);
+    struct aws_input_stream *file_stream = aws_input_stream_new_from_cursor(allocator, &file_cursor);
+    ASSERT_NOT_NULL(file_stream);
+    struct aws_string *filepath_str = aws_s3_tester_create_file(
+        allocator, aws_byte_cursor_from_c_str("multipart_upload_streaming_odd_last_part"), file_stream);
+    ASSERT_NOT_NULL(filepath_str);
+
+    struct aws_uri mock_server;
+    ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+    struct aws_byte_cursor host_cursor = *aws_uri_authority(&mock_server);
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str("/default");
+
+    struct aws_http_message *message = aws_s3_test_put_object_request_new_without_body(
+        allocator, &host_cursor, g_test_body_content_type, object_path, length_tester.object_size, 0 /*flags*/);
+    ASSERT_NOT_NULL(message);
+
+    struct aws_s3_file_io_options fio_opts = {
+        .should_stream = true,
+    };
+    struct aws_s3_meta_request_options meta_request_options = {
+        .type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .message = message,
+        .endpoint = &mock_server,
+        .send_filepath = aws_byte_cursor_from_string(filepath_str),
+        .fio_opts = &fio_opts,
+        .part_size = length_tester.part_size,
+    };
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    int send_result = aws_s3_tester_send_meta_request(
+        &tester, client, &meta_request_options, &out_results, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS);
+
+    ASSERT_FALSE(
+        length_tester.saw_mismatch,
+        "UploadPart %" PRIu32 " would send %" PRIu64 " bytes, but the part is %" PRIu64 " bytes",
+        length_tester.part_number,
+        length_tester.sent_length,
+        length_tester.expected_length);
+    ASSERT_SUCCESS(send_result);
+
+    aws_http_message_release(message);
+    aws_uri_clean_up(&mock_server);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_input_stream_release(file_stream);
+    aws_file_delete(filepath_str);
+    aws_string_destroy(filepath_str);
+    aws_byte_buf_clean_up(&file_contents);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(multipart_upload_with_network_interface_names_mock_server) {
     (void)ctx;
 #if defined(AWS_OS_WINDOWS)
@@ -1863,6 +1994,50 @@ TEST_CASE(get_object_mismatch_checksum_responses_mock_server) {
 
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
     ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.algorithm);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* A hint no larger than the part size sends discovery down the partNumber=1 GET, whose checksum mismatch must still
+ * fail the meta request. */
+TEST_CASE(get_object_size_hint_checksum_mismatch_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    uint64_t object_size_hint = 64 * 1024;
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .client = client,
+        .expected_validate_checksum_alg = AWS_SCA_CRC32,
+        .validate_get_response_checksum = true,
+        .object_size_hint = &object_size_hint,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_unmatch_checksum_crc32"),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -4866,6 +5041,73 @@ TEST_CASE(get_error_token_delete_on_failure_mock_server) {
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
+}
+
+/* A whole-object checksum mismatch is only found once every part has arrived, after each part already passed
+ * on its own. The finish call must still treat it as the failure it is: delete the file if asked to, and fire
+ * on_error_resume_token. The token is NULL even when the file is kept, because every byte was received; a resume
+ * would have nothing left to download and would report the corrupt file as complete. The tester checks the file
+ * is gone, or still there, after shutdown. */
+static int s_test_get_expected_checksum_mismatch_to_file(struct aws_allocator *allocator, bool delete_on_failure) {
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    AWS_ZERO_STRUCT(s_get_error_token_test_data);
+    struct get_error_token_mock_test_data *test_data = &s_get_error_token_test_data;
+    aws_mutex_init(&test_data->mutex);
+
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = 64 * 1024,
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_tester_meta_request_options get_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_GET_OBJECT,
+        .on_error_resume_token = s_get_error_token_mock_on_error,
+        .client = client,
+        /* The CRC32 of the first 64 KiB, offered as the checksum of all 256 KiB. */
+        .expected_checksum = aws_byte_cursor_from_c_str("wyCR/w=="),
+        .expected_checksum_algorithm = AWS_SCA_CRC32,
+        .get_options =
+            {
+                .object_path = aws_byte_cursor_from_c_str("/get_object_opaque_etag"),
+                .file_on_disk = true,
+                .recv_file_delete_on_failure = delete_on_failure,
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, out_results.finished_error_code);
+    ASSERT_TRUE(out_results.did_validate);
+    ASSERT_UINT_EQUALS(AWS_SCA_CRC32, out_results.validation_algorithm);
+
+    ASSERT_TRUE(test_data->error_callback_invoked);
+    ASSERT_INT_EQUALS(AWS_ERROR_S3_RESPONSE_CHECKSUM_MISMATCH, test_data->error_code);
+    ASSERT_NULL(test_data->resume_token);
+
+    aws_mutex_clean_up(&test_data->mutex);
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(get_expected_checksum_mismatch_delete_on_failure_mock_server) {
+    (void)ctx;
+    return s_test_get_expected_checksum_mismatch_to_file(allocator, true /*delete_on_failure*/);
+}
+
+TEST_CASE(get_expected_checksum_mismatch_keeps_file_mock_server) {
+    (void)ctx;
+    return s_test_get_expected_checksum_mismatch_to_file(allocator, false /*delete_on_failure*/);
 }
 
 /* A download that succeeds with recv_file_delete_on_failure set must keep its file. The finish call
