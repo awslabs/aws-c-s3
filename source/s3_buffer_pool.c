@@ -47,6 +47,30 @@ void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool) {
     buffer_pool->vtable->trim(buffer_pool);
 }
 
+int aws_s3_buffer_pool_add_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer) {
+    AWS_ERROR_PRECONDITION(buffer_pool);
+    AWS_ERROR_PRECONDITION(meta_request);
+    AWS_ERROR_PRECONDITION(buffer);
+
+    if (buffer_pool->vtable->add_preallocated_buffer == NULL) {
+        return aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+    }
+    return buffer_pool->vtable->add_preallocated_buffer(buffer_pool, meta_request, buffer);
+}
+
+void aws_s3_buffer_pool_remove_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool,
+    struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(buffer_pool);
+
+    if (buffer_pool->vtable->remove_preallocated_buffer != NULL) {
+        buffer_pool->vtable->remove_preallocated_buffer(buffer_pool, meta_request);
+    }
+}
+
 struct aws_s3_buffer_ticket *aws_s3_buffer_ticket_acquire(struct aws_s3_buffer_ticket *ticket) {
     if (ticket != NULL) {
         if (ticket->vtable->acquire) {

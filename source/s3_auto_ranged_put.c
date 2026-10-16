@@ -444,6 +444,11 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
         aws_mem_release(allocator, auto_ranged_put);
         return NULL;
     }
+    /* An upload's parts are positioned from the start of its body, so that start is known now. Parts reserve
+     * pool buffers, and a reservation needs it resolved. */
+    auto_ranged_put->base.requested_range_start = 0;
+    auto_ranged_put->base.requested_range_start_resolved = true;
+
     /* The buffer reserved for each request is meta_request->part_size, EXCEPT when the body
      * streams from a file: aws_s3_request_new then sizes it at 2 * g_streaming_buffer_size
      * regardless of part size, so a part larger than max_part_size costs nothing extra. */
