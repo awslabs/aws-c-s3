@@ -1748,6 +1748,16 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     struct aws_byte_cursor part_number_query_str = aws_byte_cursor_from_c_str("partNumber");
                     while (aws_query_string_next_param(sub_string, &param)) {
                         if (aws_byte_cursor_eq(&param.key, &part_number_query_str)) {
+                            /* A default meta request never reserves from the pool, so recv_buffer would
+                             * never be written and the body would be discarded. */
+                            if (options->recv_buffer != NULL) {
+                                AWS_LOGF_ERROR(
+                                    AWS_LS_S3_META_REQUEST,
+                                    "Could not create meta request: recv_buffer is not supported for a GET with "
+                                    "partNumber.");
+                                aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+                                return NULL;
+                            }
                             return aws_s3_meta_request_default_new(
                                 client->allocator,
                                 client,
@@ -2561,9 +2571,19 @@ void s_acquire_mem_and_prepare_request(
         /* Where this part goes within the requested range (its local_offset), for a pool that places data
          * itself, e.g. in a pre-allocated buffer. Every part lies inside the requested range, so a part
          * starting before it is a bug: fail the request here, through the same path as a failed
-         * reservation, rather than hand the pool an offset it can't use. */
+         * reservation, rather than hand the pool an offset it can't use. Likewise if the range start isn't
+         * resolved yet: its placeholder 0 would make local_offset the part's absolute object offset. */
         uint64_t local_offset = 0;
-        if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset)) {
+        if (!meta_request->requested_range_start_resolved) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Cannot reserve a buffer for the part at %" PRIu64
+                " before the requested range start is resolved.",
+                (void *)meta_request,
+                request->part_range_start);
+            payload->buffer_future = aws_future_s3_buffer_ticket_new(allocator);
+            aws_future_s3_buffer_ticket_set_error(payload->buffer_future, AWS_ERROR_INVALID_STATE);
+        } else if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset)) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "id=%p: Part starts at %" PRIu64 ", before the requested range start %" PRIu64 ".",

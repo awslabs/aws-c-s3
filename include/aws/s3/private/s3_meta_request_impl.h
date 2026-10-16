@@ -540,7 +540,8 @@ struct aws_s3_meta_request {
      * the object and the caller expects the range's first byte at the destination's start. Set by the
      * derived meta request when it resolves the object range, before any body is delivered; for
      * recv_buffer it is set at creation when already known, since a part is placed when its buffer is
-     * reserved, before the first response. */
+     * reserved, before the first response. Zero for an upload, set at creation. Must be resolved before
+     * any part reserves a pool buffer, since the reservation's local_offset is measured from it. */
     uint64_t requested_range_start;
 
     /* Whether requested_range_start has been resolved. */

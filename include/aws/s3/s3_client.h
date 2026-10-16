@@ -1070,8 +1070,12 @@ struct aws_s3_meta_request_options {
      * - The client's buffer pool must support pre-allocated buffers. The default pool does; a custom
      *   pool must implement add_preallocated_buffer. Otherwise creation fails with
      *   AWS_ERROR_UNSUPPORTED_OPERATION.
+     * - Not supported for a GET with partNumber in the query. Creation fails with
+     *   AWS_ERROR_UNSUPPORTED_OPERATION.
      * - The memory must stay valid and in place until the finish callback fires. The client never
      *   allocates or frees it.
+     * - Don't give the same memory, or overlapping memory, to two meta requests in flight at once. The
+     *   client doesn't detect it: both downloads write into it and the data is corrupted.
      */
     struct aws_byte_buf *recv_buffer;
 
