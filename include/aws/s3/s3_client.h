@@ -1353,7 +1353,8 @@ AWS_EXTERN_C_BEGIN
 
 /**
  * Creates a client bootstrap, with its own event loop group and host resolver, to pass to an S3 client.
- * The event loop group has min(processor count / 2, AWS_S3_DEFAULT_MAX_EVENT_LOOPS) event loops.
+ * The event loop group has one event loop per physical core, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
+ * On hosts without SMT, such as Graviton, that is the processor count. With SMT 2 it is half.
  * To use more event loops, create the bootstrap yourself.
  * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.
  */

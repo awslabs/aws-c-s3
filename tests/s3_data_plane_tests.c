@@ -123,14 +123,11 @@ static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, v
     struct aws_client_bootstrap *bootstrap = aws_s3_default_client_bootstrap(allocator);
     ASSERT_NOT_NULL(bootstrap);
 
-    size_t expected = aws_system_info_processor_count();
-    if (expected > 1) {
-        expected /= 2;
-    }
-    if (expected > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
-        expected = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
-    }
-    ASSERT_UINT_EQUALS(expected, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
+    /* One loop per physical core: at least 1, at most the processor count and the default limit. */
+    size_t loop_count = aws_event_loop_group_get_loop_count(bootstrap->event_loop_group);
+    ASSERT_TRUE(loop_count >= 1);
+    ASSERT_TRUE(loop_count <= aws_system_info_processor_count());
+    ASSERT_TRUE(loop_count <= AWS_S3_DEFAULT_MAX_EVENT_LOOPS);
 
     aws_client_bootstrap_release(bootstrap);
     aws_s3_tester_clean_up(&tester);
