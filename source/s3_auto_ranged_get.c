@@ -421,7 +421,9 @@ static bool s_s3_auto_ranged_get_update(
 
             /* If there are parts that have not attempted delivery to the caller, then there is still work being done.
              */
-            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts) {
+            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts ||
+                meta_request->synced_data.num_parts_delivery_completed <
+                    meta_request->synced_data.num_parts_delivery_sent) {
                 goto has_work_remaining;
             }
         } else {

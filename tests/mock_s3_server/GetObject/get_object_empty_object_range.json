@@ -1,0 +1,11 @@
+{
+  "status": 416,
+  "headers": {
+    "Date": "Thu, 12 Jan 2023 00:04:21 GMT",
+    "Content-Type": "application/xml"
+  },
+  "body": [
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<Error><Code>InvalidRange</Code><Message>The requested range is not satisfiable</Message><RangeRequested>bytes=0-65535</RangeRequested><ActualObjectSize>0</ActualObjectSize></Error>"
+  ]
+}
