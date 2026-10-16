@@ -534,8 +534,7 @@ struct aws_s3_client_config {
     /* Region that the client default to. */
     struct aws_byte_cursor region;
 
-    /* Client bootstrap used for common staples such as event loop group, host resolver, etc.
-     * Optional. If NULL, the client creates one with aws_s3_default_client_bootstrap(). */
+    /* Client bootstrap used for common staples such as event loop group, host resolver, etc.. s*/
     struct aws_client_bootstrap *client_bootstrap;
 
     /* How tls should be used while performing the request
@@ -1349,17 +1348,42 @@ struct aws_s3_meta_request_result {
 /* Upper limit on the event loops of the default client bootstrap. */
 #define AWS_S3_DEFAULT_MAX_EVENT_LOOPS 96
 
+/**
+ * Options for aws_s3_default_client_bootstrap(). Zero values select the defaults.
+ */
+struct aws_s3_client_bootstrap_options {
+    /**
+     * Number of event loops in the network event loop group.
+     * 0 selects one per physical core, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS. A larger value is used as given.
+     */
+    uint16_t event_loop_count;
+
+    /**
+     * Maximum number of entries in the host resolver cache. 0 selects 16.
+     */
+    size_t host_resolver_max_entries;
+
+    /**
+     * Target throughput in gigabits per second (Gbps). Must not be negative.
+     * Reserved for sizing the bootstrap from the target. It does not change the event loop count yet.
+     */
+    double throughput_target_gbps;
+};
+
 AWS_EXTERN_C_BEGIN
 
 /**
  * Creates a client bootstrap, with its own event loop group and host resolver, to pass to an S3 client.
- * The event loop group has one event loop per physical core, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
- * On hosts without SMT, such as Graviton, that is the processor count. With SMT 2 it is half.
- * To use more event loops, create the bootstrap yourself.
+ * By default the event loop group has one event loop per physical core, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
+ * On hosts without SMT, such as Graviton, that is the processor count. With 2 threads per core it is half.
+ * To use more event loops, set options->event_loop_count.
+ * options may be NULL to select all defaults.
  * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.
  */
 AWS_S3_API
-struct aws_client_bootstrap *aws_s3_default_client_bootstrap(struct aws_allocator *allocator);
+struct aws_client_bootstrap *aws_s3_default_client_bootstrap(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_bootstrap_options *options);
 
 AWS_S3_API
 struct aws_s3_client *aws_s3_client_new(
