@@ -112,6 +112,58 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_default_client_bootstrap, s_test_s3_default_client_bootstrap)
+static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_client_bootstrap *bootstrap = aws_s3_default_client_bootstrap(allocator);
+    ASSERT_NOT_NULL(bootstrap);
+
+    size_t expected = aws_system_info_processor_count();
+    if (expected > 1) {
+        expected /= 2;
+    }
+    if (expected > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+        expected = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+    }
+    ASSERT_UINT_EQUALS(expected, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
+
+    aws_client_bootstrap_release(bootstrap);
+    aws_s3_tester_clean_up(&tester);
+    aws_thread_join_all_managed();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_client_create_null_bootstrap, s_test_s3_client_create_null_bootstrap)
+static int s_test_s3_client_create_null_bootstrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    client_config.client_bootstrap = NULL;
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+    ASSERT_NOT_NULL(client);
+
+    client = aws_s3_client_release(client);
+
+    aws_s3_tester_clean_up(&tester);
+    aws_thread_join_all_managed();
+
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_client_create_error, s_test_s3_client_create_error)
 static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;

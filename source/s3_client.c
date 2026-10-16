@@ -387,20 +387,50 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     return s3express_provider;
 }
 
+struct aws_client_bootstrap *aws_s3_default_client_bootstrap(struct aws_allocator *allocator) {
+    AWS_PRECONDITION(allocator);
+
+    size_t loop_count = aws_system_info_processor_count();
+    /* Half the processors, to avoid hyper threads for the IO work. */
+    if (loop_count > 1) {
+        loop_count /= 2;
+    }
+    if (loop_count > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+        loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+    }
+
+    struct aws_event_loop_group *event_loop_group =
+        aws_event_loop_group_new_default(allocator, (uint16_t)loop_count, NULL);
+    if (event_loop_group == NULL) {
+        return NULL;
+    }
+
+    struct aws_host_resolver_default_options resolver_options = {
+        .max_entries = 16,
+        .el_group = event_loop_group,
+    };
+    struct aws_host_resolver *host_resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+    struct aws_client_bootstrap *bootstrap = NULL;
+    if (host_resolver != NULL) {
+        struct aws_client_bootstrap_options bootstrap_options = {
+            .event_loop_group = event_loop_group,
+            .host_resolver = host_resolver,
+        };
+        bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+    }
+
+    /* The bootstrap holds its own references. */
+    aws_host_resolver_release(host_resolver);
+    aws_event_loop_group_release(event_loop_group);
+    return bootstrap;
+}
+
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
 
     AWS_PRECONDITION(allocator);
     AWS_PRECONDITION(client_config);
-
-    if (client_config->client_bootstrap == NULL) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT,
-            "Cannot create client from client_config; client_bootstrap provided in options is invalid.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
-    }
 
     /* Cannot be less than zero.  If zero, use default. */
     if (client_config->throughput_target_gbps < 0.0) {
@@ -519,6 +549,17 @@ struct aws_s3_client *aws_s3_client_new(
         return NULL;
     }
 #endif
+
+    /* Without a caller-provided bootstrap, create the default one. The client holds its own reference to it. */
+    struct aws_client_bootstrap *bootstrap = client_config->client_bootstrap;
+    struct aws_client_bootstrap *default_bootstrap = NULL;
+    if (bootstrap == NULL) {
+        default_bootstrap = aws_s3_default_client_bootstrap(allocator);
+        if (default_bootstrap == NULL) {
+            return NULL;
+        }
+        bootstrap = default_bootstrap;
+    }
 
     struct aws_s3_client *client = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_client));
 
@@ -700,9 +741,9 @@ struct aws_s3_client *aws_s3_client_new(
     *((uint32_t *)&client->max_active_connections_override) = client_config->max_active_connections_override;
 
     /* Store our client bootstrap. */
-    client->client_bootstrap = aws_client_bootstrap_acquire(client_config->client_bootstrap);
+    client->client_bootstrap = aws_client_bootstrap_acquire(bootstrap);
 
-    struct aws_event_loop_group *event_loop_group = client_config->client_bootstrap->event_loop_group;
+    struct aws_event_loop_group *event_loop_group = bootstrap->event_loop_group;
     aws_event_loop_group_acquire(event_loop_group);
 
     client->process_work_event_loop = aws_event_loop_group_get_next_loop(event_loop_group);
@@ -851,7 +892,7 @@ struct aws_s3_client *aws_s3_client_new(
                                    : s_default_max_retries;
 
         struct aws_exponential_backoff_retry_options backoff_retry_options = {
-            .el_group = client_config->client_bootstrap->event_loop_group,
+            .el_group = bootstrap->event_loop_group,
             .max_retries = max_retries,
             .backoff_scale_factor_ms = client_config->retry_config.backoff_scale_factor_ms,
             .max_backoff_secs = client_config->retry_config.max_backoff_secs,
@@ -1046,6 +1087,7 @@ struct aws_s3_client *aws_s3_client_new(
             client->initial_read_window);
     }
 
+    aws_client_bootstrap_release(default_bootstrap);
     return client;
 
 on_error:
@@ -1086,6 +1128,7 @@ on_error:
      * point after it. */
     aws_retry_strategy_release(client->retry_strategy);
 
+    aws_client_bootstrap_release(default_bootstrap);
     aws_mem_release(client->allocator, client);
     return NULL;
 }

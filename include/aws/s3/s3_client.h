@@ -534,7 +534,8 @@ struct aws_s3_client_config {
     /* Region that the client default to. */
     struct aws_byte_cursor region;
 
-    /* Client bootstrap used for common staples such as event loop group, host resolver, etc.. s*/
+    /* Client bootstrap used for common staples such as event loop group, host resolver, etc.
+     * Optional. If NULL, the client creates one with aws_s3_default_client_bootstrap(). */
     struct aws_client_bootstrap *client_bootstrap;
 
     /* How tls should be used while performing the request
@@ -1345,7 +1346,19 @@ struct aws_s3_meta_request_result {
     int error_code;
 };
 
+/* Upper limit on the event loops of the default client bootstrap. */
+#define AWS_S3_DEFAULT_MAX_EVENT_LOOPS 96
+
 AWS_EXTERN_C_BEGIN
+
+/**
+ * Creates a client bootstrap, with its own event loop group and host resolver, to pass to an S3 client.
+ * The event loop group has min(processor count / 2, AWS_S3_DEFAULT_MAX_EVENT_LOOPS) event loops.
+ * To use more event loops, create the bootstrap yourself.
+ * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.
+ */
+AWS_S3_API
+struct aws_client_bootstrap *aws_s3_default_client_bootstrap(struct aws_allocator *allocator);
 
 AWS_S3_API
 struct aws_s3_client *aws_s3_client_new(
