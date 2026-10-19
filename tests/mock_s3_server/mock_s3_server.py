@@ -458,6 +458,13 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         # from a response file that spells its Content-Range out.
         return ResponseConfig("/get_object_checksum_suffix_range_head", request=request)
 
+    if parsed_path.path == "/get_object_empty_object":
+        # Zero-byte object, answered the way S3 does: a ranged GET is refused with InvalidRange, so the
+        # client retries with partNumber=1, which succeeds with an empty body.
+        if get_request_header_value(request, "range"):
+            return ResponseConfig("/get_object_empty_object_range", request=request)
+        return ResponseConfig("/get_object_empty_object", request=request)
+
     body_range_value = get_request_header_value(request, "range")
 
     if body_range_value:
