@@ -44,8 +44,6 @@
 
 #include <inttypes.h>
 #include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #ifdef _MSC_VER
 #    pragma warning(disable : 4232) /* function pointer to dll symbol */
@@ -390,51 +388,6 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     return s3express_provider;
 }
 
-/* One event loop per physical core avoids hyper threads for the IO work. aws-c-common does not report whether a host
- * has them, so read the sibling threads of cpu0 from sysfs. A list such as "0" (no SMT), "0,32" or "0-1" names them.
- * If the topology is unknown, assume 2 threads per core, as aws-c-io does. */
-static size_t s_physical_core_count(void) {
-    size_t processors = aws_system_info_processor_count();
-    size_t threads_per_core = 2;
-
-#ifdef __linux__
-    FILE *file = fopen("/sys/devices/system/cpu/cpu0/topology/thread_siblings_list", "r");
-    if (file != NULL) {
-        char list[128];
-        size_t siblings = 0;
-        if (fgets(list, sizeof(list), file) != NULL) {
-            char *cursor = list;
-            while (*cursor != '\0' && *cursor != '\n') {
-                char *end = NULL;
-                unsigned long first = strtoul(cursor, &end, 10);
-                if (end == cursor) {
-                    siblings = 0;
-                    break;
-                }
-                unsigned long last = first;
-                if (*end == '-') {
-                    cursor = end + 1;
-                    last = strtoul(cursor, &end, 10);
-                    if (end == cursor || last < first) {
-                        siblings = 0;
-                        break;
-                    }
-                }
-                siblings += last - first + 1;
-                cursor = (*end == ',') ? end + 1 : end;
-            }
-        }
-        fclose(file);
-        if (siblings > 0) {
-            threads_per_core = siblings;
-        }
-    }
-#endif
-
-    size_t cores = processors / threads_per_core;
-    return cores > 0 ? cores : 1;
-}
-
 struct aws_client_bootstrap *aws_s3_default_client_bootstrap(
     struct aws_allocator *allocator,
     const struct aws_s3_client_bootstrap_options *options) {
@@ -449,7 +402,7 @@ struct aws_client_bootstrap *aws_s3_default_client_bootstrap(
 
     size_t loop_count = options != NULL ? options->event_loop_count : 0;
     if (loop_count == 0) {
-        loop_count = s_physical_core_count();
+        loop_count = aws_system_info_physical_processor_count();
         if (loop_count > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
             loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
         }
