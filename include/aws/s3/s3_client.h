@@ -1354,7 +1354,7 @@ struct aws_s3_meta_request_result {
 struct aws_s3_client_bootstrap_options {
     /**
      * Number of event loops in the network event loop group.
-     * 0 selects one per physical core, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS. A larger value is used as given.
+     * 0 selects one per logical CPU, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS. A larger value is used as given.
      */
     uint16_t event_loop_count;
 
@@ -1374,8 +1374,7 @@ AWS_EXTERN_C_BEGIN
 
 /**
  * Creates a client bootstrap, with its own event loop group and host resolver, to pass to an S3 client.
- * By default the event loop group has one event loop per physical core, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
- * On hosts without SMT, such as Graviton, that is the processor count. With 2 threads per core it is half.
+ * By default the event loop group has one event loop per logical CPU, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
  * To use more event loops, set options->event_loop_count.
  * options may be NULL to select all defaults.
  * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.

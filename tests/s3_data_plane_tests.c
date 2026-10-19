@@ -120,13 +120,14 @@ static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, v
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    /* Default options: one loop per physical core, at least 1, at most the processor count and the default limit. */
+    /* Default options: one loop per logical CPU, up to the default limit. */
     struct aws_client_bootstrap *bootstrap = aws_s3_default_client_bootstrap(allocator, NULL);
     ASSERT_NOT_NULL(bootstrap);
-    size_t loop_count = aws_event_loop_group_get_loop_count(bootstrap->event_loop_group);
-    ASSERT_TRUE(loop_count >= 1);
-    ASSERT_TRUE(loop_count <= aws_system_info_processor_count());
-    ASSERT_TRUE(loop_count <= AWS_S3_DEFAULT_MAX_EVENT_LOOPS);
+    size_t expected = aws_system_info_processor_count();
+    if (expected > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+        expected = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+    }
+    ASSERT_UINT_EQUALS(expected, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
     aws_client_bootstrap_release(bootstrap);
 
     /* A count from the caller is used as given, including a count above the default limit. */

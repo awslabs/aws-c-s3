@@ -402,7 +402,7 @@ struct aws_client_bootstrap *aws_s3_default_client_bootstrap(
 
     size_t loop_count = options != NULL ? options->event_loop_count : 0;
     if (loop_count == 0) {
-        loop_count = aws_system_info_physical_processor_count();
+        loop_count = aws_system_info_processor_count();
         if (loop_count > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
             loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
         }
