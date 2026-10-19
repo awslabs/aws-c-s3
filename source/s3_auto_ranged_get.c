@@ -419,9 +419,11 @@ static bool s_s3_auto_ranged_get_update(
                 goto has_work_remaining;
             }
 
-            /* If there are parts that have not attempted delivery to the caller, then there is still work being done.
-             */
-            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts) {
+            /* If there are parts that have not attempted delivery to the caller or that have not yet completed
+             * delivery, then there is still work being done. */
+            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts ||
+                meta_request->synced_data.num_parts_delivery_completed <
+                    meta_request->synced_data.num_parts_delivery_sent) {
                 goto has_work_remaining;
             }
         } else {
