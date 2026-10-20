@@ -112,8 +112,8 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
-AWS_TEST_CASE(test_s3_default_client_bootstrap, s_test_s3_default_client_bootstrap)
-static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, void *ctx) {
+AWS_TEST_CASE(test_s3_client_bootstrap_default, s_test_s3_client_bootstrap_default)
+static int s_test_s3_client_bootstrap_default(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
     struct aws_s3_tester tester;
@@ -121,7 +121,7 @@ static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, v
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
     /* Default options: one loop per logical CPU, up to the default limit. */
-    struct aws_client_bootstrap *bootstrap = aws_s3_default_client_bootstrap(allocator, NULL);
+    struct aws_client_bootstrap *bootstrap = aws_s3_client_bootstrap_default(allocator, NULL);
     ASSERT_NOT_NULL(bootstrap);
     size_t expected = aws_system_info_processor_count();
     if (expected > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
@@ -136,13 +136,13 @@ static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, v
         .host_resolver_max_entries = 4,
         .throughput_target_gbps = 100.0,
     };
-    bootstrap = aws_s3_default_client_bootstrap(allocator, &options);
+    bootstrap = aws_s3_client_bootstrap_default(allocator, &options);
     ASSERT_NOT_NULL(bootstrap);
     ASSERT_UINT_EQUALS(3, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
     aws_client_bootstrap_release(bootstrap);
 
     options.event_loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS + 1;
-    bootstrap = aws_s3_default_client_bootstrap(allocator, &options);
+    bootstrap = aws_s3_client_bootstrap_default(allocator, &options);
     ASSERT_NOT_NULL(bootstrap);
     ASSERT_UINT_EQUALS(
         AWS_S3_DEFAULT_MAX_EVENT_LOOPS + 1, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
@@ -150,7 +150,7 @@ static int s_test_s3_default_client_bootstrap(struct aws_allocator *allocator, v
 
     /* A negative throughput is invalid. */
     options.throughput_target_gbps = -1.0;
-    ASSERT_NULL(aws_s3_default_client_bootstrap(allocator, &options));
+    ASSERT_NULL(aws_s3_client_bootstrap_default(allocator, &options));
     ASSERT_UINT_EQUALS(AWS_ERROR_INVALID_ARGUMENT, aws_last_error());
 
     aws_s3_tester_clean_up(&tester);

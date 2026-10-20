@@ -1349,7 +1349,7 @@ struct aws_s3_meta_request_result {
 #define AWS_S3_DEFAULT_MAX_EVENT_LOOPS 96
 
 /**
- * Options for aws_s3_default_client_bootstrap(). Zero values select the defaults.
+ * Options for aws_s3_client_bootstrap_default(). Zero values select the defaults.
  */
 struct aws_s3_client_bootstrap_options {
     /**
@@ -1380,7 +1380,7 @@ AWS_EXTERN_C_BEGIN
  * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.
  */
 AWS_S3_API
-struct aws_client_bootstrap *aws_s3_default_client_bootstrap(
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
     struct aws_allocator *allocator,
     const struct aws_s3_client_bootstrap_options *options);
 

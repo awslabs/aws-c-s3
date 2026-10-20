@@ -388,7 +388,7 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     return s3express_provider;
 }
 
-struct aws_client_bootstrap *aws_s3_default_client_bootstrap(
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
     struct aws_allocator *allocator,
     const struct aws_s3_client_bootstrap_options *options) {
     AWS_PRECONDITION(allocator);
