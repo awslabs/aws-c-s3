@@ -369,6 +369,8 @@ static const struct {
     {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, "AZ"},
     {AWS_S3_FEATURE_ID_ON_EC2, "Aa"},
     {AWS_S3_FEATURE_ID_FILE_PATH, "Ab"},
+    {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL, "Aj"},
+    {AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP, "Al"},
 };
 
 void aws_s3_add_user_agent_header(

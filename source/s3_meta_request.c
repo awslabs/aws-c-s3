@@ -685,6 +685,15 @@ int aws_s3_meta_request_init_base(
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
         meta_request->feature_ids = client->feature_ids;
+
+        /* Al: emit CLIENT_CREATED_FOR_OP on the first meta request only. A one-shot client
+         * (created per operation, then destroyed) will have every request tagged. A reused
+         * client tags only the first request, giving the metrics pipeline a signal to
+         * distinguish the two patterns. */
+        if (!client->first_operation_emitted) {
+            client->first_operation_emitted = true;
+            meta_request->feature_ids |= AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;
+        }
     }
 
     /* Per-request feature IDs for the User-Agent m/ section. Derived from what the caller asked for

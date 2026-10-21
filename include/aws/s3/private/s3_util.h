@@ -261,6 +261,8 @@ enum aws_s3_feature_id {
     AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT = (1 << 2), /* AZ - non-default memory pool size configured */
     AWS_S3_FEATURE_ID_ON_EC2 = (1 << 3),              /* Aa - running on EC2 instance */
     AWS_S3_FEATURE_ID_FILE_PATH = (1 << 4),           /* Ab - request used send_filepath or recv_filepath */
+    AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL = (1 << 5),  /* Aj - customer-provided memory pool (not the native default) */
+    AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP = (1 << 6), /* Al - new S3 client created for this operation */
 };
 
 /* Given the response headers list, finds the Content-Range header and parses the range-start, range-end and
