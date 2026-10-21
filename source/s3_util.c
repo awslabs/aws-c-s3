@@ -436,13 +436,13 @@ void aws_s3_add_user_agent_header(
         if (m_pos != NULL) {
             /* Copy everything before the " m/" section */
             struct aws_byte_cursor before_m = {
-                .ptr = header_start,
+                .ptr = (uint8_t *)header_start,
                 .len = (size_t)(m_pos - header_start),
             };
             aws_byte_buf_append_dynamic(&user_agent_buffer, &before_m);
 
             /* The existing IDs start after " m/" (3 bytes) */
-            existing_m_ids.ptr = m_pos + 3;
+            existing_m_ids.ptr = (uint8_t *)(m_pos + 3);
             existing_m_ids.len = (size_t)(header_end - existing_m_ids.ptr);
         } else {
             /* No existing m/ section -- copy the whole header as-is */
