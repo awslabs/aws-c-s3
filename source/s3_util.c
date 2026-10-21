@@ -381,6 +381,7 @@ void aws_s3_add_user_agent_header(
 
     const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+    const struct aws_byte_cursor m_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
     struct aws_byte_cursor platform_cursor = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
     if (!platform_cursor.len) {
         platform_cursor = g_user_agent_header_unknown;
@@ -398,17 +399,61 @@ void aws_s3_add_user_agent_header(
     /* Start with generous initial capacity */
     const size_t initial_capacity = 256;
 
+    /* The SDK may have already written an m/ section (e.g. " m/D,E,Z,b") into the existing
+     * User-Agent header. If we blindly append another " m/AX,Aa" the ingestion pipeline may
+     * only parse the first one, losing the CRT's feature IDs. To fix this:
+     *   1. Find and extract the existing m/ section (everything from " m/" to end-of-string
+     *      or next space-delimited token that doesn't look like a comma-separated ID list).
+     *   2. Copy the header WITHOUT the m/ section into the buffer.
+     *   3. Append the CRT product token.
+     *   4. Emit a single merged m/ section: existing SDK IDs + CRT IDs. */
+    struct aws_byte_cursor existing_m_ids;
+    AWS_ZERO_STRUCT(existing_m_ids);
+
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
         aws_byte_buf_init(
             &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + initial_capacity);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
+
+        /* Scan for " m/" in the existing header to find an SDK-emitted feature ID section.
+         * Per UA 2.1 SEP the m/ section is always the last token, so everything from " m/"
+         * to end-of-string is the ID list. */
+        const uint8_t *header_start = current_user_agent_header.ptr;
+        const uint8_t *header_end = header_start + current_user_agent_header.len;
+        const uint8_t *m_pos = NULL;
+
+        /* Search for " m/" (space + m + slash). We need the leading space to avoid matching
+         * something like "platform/m5.xlarge". */
+        for (const uint8_t *p = header_start; p + 3 <= header_end; ++p) {
+            if (p[0] == ' ' && p[1] == 'm' && p[2] == '/') {
+                m_pos = p;
+                /* Don't break -- take the LAST occurrence in case there are multiple.
+                 * The SDK's m/ is typically the last token before the CRT appends. */
+            }
+        }
+
+        if (m_pos != NULL) {
+            /* Copy everything before the " m/" section */
+            struct aws_byte_cursor before_m = {
+                .ptr = header_start,
+                .len = (size_t)(m_pos - header_start),
+            };
+            aws_byte_buf_append_dynamic(&user_agent_buffer, &before_m);
+
+            /* The existing IDs start after " m/" (3 bytes) */
+            existing_m_ids.ptr = m_pos + 3;
+            existing_m_ids.len = (size_t)(header_end - existing_m_ids.ptr);
+        } else {
+            /* No existing m/ section -- copy the whole header as-is */
+            aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
+        }
+
         aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
         aws_byte_buf_init(&user_agent_buffer, allocator, initial_capacity);
     }
 
-    /* Append the client's user-agent string: aws-c-s3/{version} platform/{instance-type} */
+    /* Append the client's user-agent string: CRTS3NativeClient/{version} platform/{instance-type} */
     {
         aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_product_name);
         aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
@@ -419,23 +464,33 @@ void aws_s3_add_user_agent_header(
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
 
-    /* Append feature IDs m/ section per UA 2.1 SEP.
-     * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas.
-     * The section is omitted entirely when no flags are set. */
-    if (feature_ids != 0) {
-        aws_byte_buf_append_dynamic(
-            &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/"));
+    /* Emit a single merged m/ section: existing SDK IDs (if any) + CRT feature IDs.
+     * Per UA 2.1 SEP: " m/D,E,Z,AX,Aa,Ab" - comma-separated, no spaces around commas.
+     * The section is omitted entirely when neither the SDK nor the CRT set any IDs. */
+    bool has_existing_ids = existing_m_ids.len > 0;
+    bool has_crt_ids = feature_ids != 0;
 
-        bool first = true;
+    if (has_existing_ids || has_crt_ids) {
+        aws_byte_buf_append_dynamic(&user_agent_buffer, &m_prefix);
+
+        bool need_comma = false;
+
+        /* First: existing SDK IDs (preserved verbatim) */
+        if (has_existing_ids) {
+            aws_byte_buf_append_dynamic(&user_agent_buffer, &existing_m_ids);
+            need_comma = true;
+        }
+
+        /* Then: CRT feature IDs */
         for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
             if (feature_ids & s_feature_id_strings[i].flag) {
-                if (!first) {
+                if (need_comma) {
                     aws_byte_buf_append_dynamic(
                         &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(","));
                 }
                 struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
                 aws_byte_buf_append_dynamic(&user_agent_buffer, &id_cursor);
-                first = false;
+                need_comma = true;
             }
         }
     }
