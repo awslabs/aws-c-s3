@@ -1799,7 +1799,8 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
-    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART && !meta_request->is_express) {
+    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART && !meta_request->is_express &&
+        !client->disable_retries) {
         /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause server
          * receive two same part and result in confusing during complete MPU with etag doesn't match.
          * Disable the first byte timeout for s3 express.  */

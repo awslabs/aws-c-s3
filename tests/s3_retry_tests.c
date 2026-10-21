@@ -256,7 +256,7 @@ static int s_test_s3_client_disable_retries(struct aws_allocator *allocator, voi
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
     /* The no-retry strategy branch records single-attempt mode on the client. */
-    ASSERT_TRUE(client->retries_disabled);
+    ASSERT_TRUE(client->disable_retries);
 
     struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
     patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_first;
@@ -302,7 +302,7 @@ static int s_test_s3_client_disable_retries_success(struct aws_allocator *alloca
 
     struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
 
-    ASSERT_TRUE(client->retries_disabled);
+    ASSERT_TRUE(client->disable_retries);
 
     /* No fault injected: the single attempt should succeed. */
     ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(

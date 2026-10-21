@@ -846,7 +846,7 @@ struct aws_s3_client *aws_s3_client_new(
         /* Retries disabled: use the no-retry strategy. Record the mode on the
          * client so the request path makes a single token-less
          * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
-        client->retries_disabled = true;
+        client->disable_retries = true;
 
         struct aws_no_retry_options no_retry_options;
         AWS_ZERO_STRUCT(no_retry_options);
@@ -2848,7 +2848,7 @@ static void s_s3_client_create_connection_for_request_default(
     AWS_ASSERT(result == AWS_OP_SUCCESS);
     (void)result;
 
-    if (client->retries_disabled) {
+    if (client->disable_retries) {
         /* Retries disabled (max attempts = 1): skip retry-token acquisition. The no-retry strategy
          * would deny it (AWS_IO_RETRY_PERMISSION_DENIED) and fail the request before it is ever sent.
          * Send directly through the acquired-token callback with a NULL token (same pattern
@@ -2919,7 +2919,7 @@ static void s_s3_client_acquired_retry_token(
     /* token is NULL when retries are disabled (max attempts = 1): the request is attempted exactly
      * once and the connection-finish path will not schedule a retry (see its NULL retry_token guard
      * in aws_s3_client_notify_connection_finished). Otherwise a successful acquire always has a token. */
-    AWS_ASSERT(token != NULL || client->retries_disabled);
+    AWS_ASSERT(token != NULL || client->disable_retries);
 
     connection->retry_token = token;
 
@@ -3040,7 +3040,7 @@ void aws_s3_client_notify_connection_finished(
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {
-            if (client->retries_disabled) {
+            if (client->disable_retries) {
                 /* Expected when retries are disabled (max attempts = 1): the request was attempted
                  * once with no retry token, so there is nothing to retry. Not an error. */
                 AWS_LOGF_DEBUG(
