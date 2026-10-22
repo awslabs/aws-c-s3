@@ -317,7 +317,7 @@ struct aws_s3_client {
     struct aws_retry_strategy *retry_strategy;
 
     /* When true, retries are disabled: requests make a single attempt with no retry token.
-     * Derived at construction from client_config->retry_config.disable_retries. */
+     * Derived at construction from client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_NONE. */
     bool disable_retries;
 
     /* Bitmask of enum aws_s3_feature_id derived from client_config at construction. Each meta request

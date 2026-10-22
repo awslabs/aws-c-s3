@@ -383,6 +383,21 @@ enum aws_s3_recv_file_options {
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
 
+enum aws_s3_retry_mode {
+    /**
+     * Default Mode(0). Standard Retry strategy.
+     */
+    AWS_S3_RETRY_MODE_STANDARD = 0,
+    /**
+     * Adaptive Retry Mode: Standard + client-side rate limiting.
+     */
+    AWS_S3_RETRY_MODE_ADAPTIVE,
+    /**
+     * No Retry Mode: Each request is attempted exactly once.
+     */
+    AWS_S3_RETRY_MODE_NONE,
+};
+
 /**
  * WARNING: experimental/unstable:
  * Controls how client performance file I/O operations. Only applies to the file based workload.
@@ -658,10 +673,18 @@ struct aws_s3_client_config {
         /** Token bucket capacity per host partition (circuit breaker). 0 = default (500). */
         size_t initial_bucket_capacity;
 
-        /** If true, retries are disabled entirely: each request is attempted exactly
-         *  once (max attempts = 1). Takes precedence over every other retry_config field.
-         *  Ignored if an explicit retry_strategy is supplied (that strategy wins). */
-        bool disable_retries;
+        /**
+         * Retry Mode for choosing different retries strategy.
+         * 0 (AWS_S3_RETRY_MODE_STANDARD) = Standard Retry,
+         * 1 (AWS_S3_RETRY_MODE_ADAPTIVE) = Adaptive Retry,
+         * 2 (AWS_S3_RETRY_MODE_NONE) = No Retry.
+         */
+        enum aws_s3_retry_mode retry_mode;
+
+        /**
+         * Adaptive retry mode only: if true, fail when no send token is available instead of waiting. Default false.
+         */
+        bool fast_fail_if_no_token;
     } retry_config;
 
     /**

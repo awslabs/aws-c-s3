@@ -842,7 +842,7 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->retry_strategy != NULL) {
         aws_retry_strategy_acquire(client_config->retry_strategy);
         client->retry_strategy = client_config->retry_strategy;
-    } else if (client_config->retry_config.disable_retries) {
+    } else if (client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_NONE) {
         /* Retries disabled: use the no-retry strategy. Record the mode on the
          * client so the request path makes a single token-less
          * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
@@ -873,12 +873,20 @@ struct aws_s3_client *aws_s3_client_new(
             .jitter_mode = client_config->retry_config.jitter_mode,
         };
 
-        struct aws_standard_retry_options retry_options = {
+        struct aws_standard_retry_options standard_retry_options = {
             .backoff_retry_options = backoff_retry_options,
             .initial_bucket_capacity = client_config->retry_config.initial_bucket_capacity,
         };
 
-        client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+        if (client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_ADAPTIVE) {
+            struct aws_adaptive_retry_options adaptive_retry_options = {
+                .standard_options = standard_retry_options,
+                .fast_fail_if_no_token = client_config->retry_config.fast_fail_if_no_token,
+            };
+            client->retry_strategy = aws_retry_strategy_new_adaptive(allocator, &adaptive_retry_options);
+        } else {
+            client->retry_strategy = aws_retry_strategy_new_standard(allocator, &standard_retry_options);
+        }
 
         if (client->retry_strategy == NULL) {
             /* if something failed in creation of retry_strategy, we should error instead of having a null
