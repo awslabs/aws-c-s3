@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_checksum_context.h"
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
 #include "aws/s3/private/s3_request_messages.h"
@@ -950,6 +951,16 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
         ASSERT_TRUE(xml_user_data.found_part_number);
     }
 
+    {
+        /* The payload is compact: no indentation or newlines between elements. */
+        const struct aws_byte_cursor expected_body = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+            "<Part><ETag>" ETAG_VALUE "</ETag><PartNumber>1</PartNumber></Part>"
+            "</CompleteMultipartUpload>");
+        ASSERT_BIN_ARRAYS_EQUALS(expected_body.ptr, expected_body.len, body_buffer.buffer, body_buffer.len);
+    }
+
     aws_byte_buf_clean_up(&body_buffer);
     aws_string_destroy(upload_id);
 
@@ -963,6 +974,75 @@ static int s_test_s3_complete_multipart_message_new(struct aws_allocator *alloca
 #undef UPLOAD_ID
 #undef EXPECTED_UPLOAD_PART_PATH
 #undef ETAG_VALUE
+
+    return 0;
+}
+
+AWS_TEST_CASE(
+    test_s3_complete_multipart_message_with_checksums_new,
+    s_test_s3_complete_multipart_message_with_checksums_new)
+static int s_test_s3_complete_multipart_message_with_checksums_new(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_checksum_config_storage checksum_config = {
+        .allocator = allocator,
+        .checksum_algorithm = AWS_SCA_CRC32,
+        .location = AWS_SCL_HEADER,
+        .has_full_object_checksum = false,
+    };
+    AWS_ZERO_STRUCT(checksum_config.full_object_checksum);
+
+    const char *etags[] = {"\"etag1\"", "\"etag2\""};
+    const char *checksums[] = {"AAAAAA==", "AQIDBA=="};
+
+    struct aws_array_list parts;
+    ASSERT_SUCCESS(aws_array_list_init_dynamic(&parts, allocator, 2, sizeof(struct aws_s3_mpu_part_info *)));
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(etags); ++i) {
+        struct aws_s3_mpu_part_info *part = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_mpu_part_info));
+        part->etag = aws_string_new_from_c_str(allocator, etags[i]);
+        part->checksum_context = aws_s3_upload_request_checksum_context_new_with_existing_base64_checksum(
+            allocator, &checksum_config, aws_byte_cursor_from_c_str(checksums[i]), false);
+        ASSERT_NOT_NULL(part->checksum_context);
+        ASSERT_SUCCESS(aws_array_list_push_back(&parts, &part));
+    }
+
+    struct aws_byte_cursor path = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/TestPath");
+    struct aws_http_message *original_message = NULL;
+    ASSERT_SUCCESS(s_create_put_object_message(allocator, &path, &original_message));
+    ASSERT_TRUE(original_message != NULL);
+
+    struct aws_string *upload_id = aws_string_new_from_c_str(allocator, "test_upload_id");
+
+    struct aws_byte_buf body_buffer;
+    aws_byte_buf_init(&body_buffer, allocator, 64);
+
+    struct aws_http_message *complete_multipart_message = aws_s3_complete_multipart_message_new(
+        allocator, original_message, &body_buffer, upload_id, &parts, &checksum_config);
+    ASSERT_NOT_NULL(complete_multipart_message);
+
+    /* The payload is compact: no indentation or newlines between elements, including the per-part checksums. */
+    const struct aws_byte_cursor expected_body = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+        "<Part><ETag>\"etag1\"</ETag><PartNumber>1</PartNumber><ChecksumCRC32>AAAAAA==</ChecksumCRC32></Part>"
+        "<Part><ETag>\"etag2\"</ETag><PartNumber>2</PartNumber><ChecksumCRC32>AQIDBA==</ChecksumCRC32></Part>"
+        "</CompleteMultipartUpload>");
+    ASSERT_BIN_ARRAYS_EQUALS(expected_body.ptr, expected_body.len, body_buffer.buffer, body_buffer.len);
+
+    aws_byte_buf_clean_up(&body_buffer);
+    aws_string_destroy(upload_id);
+
+    aws_http_message_release(complete_multipart_message);
+    aws_http_message_release(original_message);
+
+    for (size_t i = 0; i < aws_array_list_length(&parts); ++i) {
+        struct aws_s3_mpu_part_info *part = NULL;
+        aws_array_list_get_at(&parts, &part, i);
+        aws_s3_upload_request_checksum_context_release(part->checksum_context);
+        aws_string_destroy(part->etag);
+        aws_mem_release(allocator, part);
+    }
+    aws_array_list_clean_up(&parts);
 
     return 0;
 }
