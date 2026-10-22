@@ -419,9 +419,11 @@ static bool s_s3_auto_ranged_get_update(
                 goto has_work_remaining;
             }
 
-            /* If there are parts that have not attempted delivery to the caller, then there is still work being done.
-             */
-            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts) {
+            /* If there are parts that have not attempted delivery to the caller or that have not yet completed
+             * delivery, then there is still work being done. */
+            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts ||
+                meta_request->synced_data.num_parts_delivery_completed <
+                    meta_request->synced_data.num_parts_delivery_sent) {
                 goto has_work_remaining;
             }
         } else {
@@ -683,6 +685,15 @@ static int s_discover_object_range_and_size(
             break;
         case AWS_S3_AUTO_RANGE_GET_REQUEST_TYPE_GET_OBJECT_WITH_PART_NUMBER_1:
             AWS_ASSERT(request->part_number == 1);
+
+            /* A first part too large for the hint-sized buffer is the only failure whose headers still describe the
+             * object, so resurface any other error code. */
+            if (error_code != AWS_ERROR_SUCCESS &&
+                error_code != AWS_ERROR_S3_INTERNAL_BUFFER_SIZE_MISMATCH_RETRYING_WITH_RANGE) {
+                aws_raise_error(error_code);
+                break;
+            }
+
             AWS_ASSERT(request->send_data.response_headers != NULL);
             /* There should be a Content-Length header that indicates the size of first part. */
             if (aws_s3_parse_content_length_response_header(
