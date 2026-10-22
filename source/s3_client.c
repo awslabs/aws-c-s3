@@ -102,6 +102,9 @@ static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 /* Eight threads is enough to saturate most disk setups. Mirroring the full event-loop count on a
  * large host (e.g. 192 vCPUs) wastes threads and file descriptors without improving throughput. */
 static const uint16_t s_default_max_num_file_io_threads = 8;
+/* 16 is the host resolver size that downstream callers already use by default, so we use it too.
+ * We can change it if we find an issue with it. */
+static const size_t s_default_host_resolver_max_entries = 16;
 
 /* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
  * object order. Consulted below both the request and the client setting, so it changes the default rather
@@ -385,6 +388,50 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     struct aws_s3express_credentials_provider *s3express_provider =
         aws_s3express_credentials_provider_new_default(allocator, &options);
     return s3express_provider;
+}
+
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_bootstrap_options *options) {
+    AWS_PRECONDITION(allocator);
+
+    size_t loop_count = options != NULL ? options->event_loop_count : 0;
+    if (loop_count == 0) {
+        loop_count = aws_system_info_processor_count();
+        if (loop_count > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+            loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+        }
+    }
+
+    size_t max_resolver_entries = options != NULL ? options->host_resolver_max_entries : 0;
+    if (max_resolver_entries == 0) {
+        max_resolver_entries = s_default_host_resolver_max_entries;
+    }
+
+    struct aws_event_loop_group *event_loop_group =
+        aws_event_loop_group_new_default(allocator, (uint16_t)loop_count, NULL);
+    if (event_loop_group == NULL) {
+        return NULL;
+    }
+
+    struct aws_host_resolver_default_options resolver_options = {
+        .max_entries = max_resolver_entries,
+        .el_group = event_loop_group,
+    };
+    struct aws_host_resolver *host_resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+    struct aws_client_bootstrap *bootstrap = NULL;
+    if (host_resolver != NULL) {
+        struct aws_client_bootstrap_options bootstrap_options = {
+            .event_loop_group = event_loop_group,
+            .host_resolver = host_resolver,
+        };
+        bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+    }
+
+    /* The bootstrap holds its own references. */
+    aws_host_resolver_release(host_resolver);
+    aws_event_loop_group_release(event_loop_group);
+    return bootstrap;
 }
 
 struct aws_s3_client *aws_s3_client_new(
