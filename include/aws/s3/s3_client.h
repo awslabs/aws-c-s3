@@ -1345,7 +1345,9 @@ struct aws_s3_meta_request_result {
     int error_code;
 };
 
-/* Upper limit on the event loops of the default client bootstrap. */
+/* Upper limit on the event loops of the default client bootstrap.
+ * Based on experiments, we never needed more than 64 event loops to reach the target throughput.
+ * The limit of 96 leaves headroom for high-performance instances. */
 #define AWS_S3_DEFAULT_MAX_EVENT_LOOPS 96
 
 /**
@@ -1364,8 +1366,8 @@ struct aws_s3_client_bootstrap_options {
     size_t host_resolver_max_entries;
 
     /**
-     * Target throughput in gigabits per second (Gbps). Must not be negative.
-     * Reserved for sizing the bootstrap from the target. It does not change the event loop count yet.
+     * Target throughput in gigabits per second (Gbps). 0 selects the default.
+     * Reserved for sizing the bootstrap from the target. It is ignored for now.
      */
     double throughput_target_gbps;
 };

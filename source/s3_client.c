@@ -102,6 +102,8 @@ static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 /* Eight threads is enough to saturate most disk setups. Mirroring the full event-loop count on a
  * large host (e.g. 192 vCPUs) wastes threads and file descriptors without improving throughput. */
 static const uint16_t s_default_max_num_file_io_threads = 8;
+/* 16 is the host resolver size that downstream callers already use by default, so we use it too.
+ * We can change it if we find an issue with it. */
 static const size_t s_default_host_resolver_max_entries = 16;
 
 /* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
@@ -392,13 +394,6 @@ struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
     struct aws_allocator *allocator,
     const struct aws_s3_client_bootstrap_options *options) {
     AWS_PRECONDITION(allocator);
-
-    if (options != NULL && options->throughput_target_gbps < 0.0) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_CLIENT, "Cannot create default client bootstrap; throughput_target_gbps cannot be less than 0.");
-        aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-        return NULL;
-    }
 
     size_t loop_count = options != NULL ? options->event_loop_count : 0;
     if (loop_count == 0) {

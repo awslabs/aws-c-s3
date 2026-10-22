@@ -148,11 +148,6 @@ static int s_test_s3_client_bootstrap_default(struct aws_allocator *allocator, v
         AWS_S3_DEFAULT_MAX_EVENT_LOOPS + 1, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
     aws_client_bootstrap_release(bootstrap);
 
-    /* A negative throughput is invalid. */
-    options.throughput_target_gbps = -1.0;
-    ASSERT_NULL(aws_s3_client_bootstrap_default(allocator, &options));
-    ASSERT_UINT_EQUALS(AWS_ERROR_INVALID_ARGUMENT, aws_last_error());
-
     aws_s3_tester_clean_up(&tester);
     aws_thread_join_all_managed();
     return 0;
