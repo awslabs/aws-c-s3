@@ -621,7 +621,6 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     if (client_config->buffer_pool_factory_fn) {
-        /* A custom memory pool was provided instead of using the native default pool. */
         client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL;
     }
 

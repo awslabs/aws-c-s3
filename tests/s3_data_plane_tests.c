@@ -8677,10 +8677,8 @@ static int s_test_add_user_agent_header_feature_ids(struct aws_allocator *alloca
     return 0;
 }
 
-/* Helper for the business-metrics merge cases: set `input_header` as the inbound User-Agent value
- * (NULL for no existing header), run aws_s3_add_user_agent_header, and assert the result is
- * exactly `expected_kept` (plus a separating space, when non-NULL), then the CRT's own product
- * tokens, then `expected_metrics_suffix` (e.g. " m/D,E,AX", or "" for no section at all). */
+/* Run aws_s3_add_user_agent_header against `input_header` (NULL for none) and assert the result is
+ * `expected_kept` + a space (when non-NULL), the CRT product tokens, then `expected_metrics_suffix`. */
 static int s_assert_merged_user_agent(
     struct aws_allocator *allocator,
     const char *input_header,
@@ -8726,9 +8724,7 @@ static int s_assert_merged_user_agent(
     return AWS_OP_SUCCESS;
 }
 
-/* A business-metrics section the SDK already wrote must be merged into ours rather than
- * duplicated (the ingestion pipeline only reads the first section) or swallowed. UA 2.1 does not
- * require the section to be the last token, so it has to be delimited at the token boundary. */
+/* An SDK-written m/ section must be merged into ours, not duplicated or swallowed. */
 AWS_TEST_CASE(test_add_user_agent_header_merge_existing_metrics, s_test_add_user_agent_header_merge_existing_metrics)
 static int s_test_add_user_agent_header_merge_existing_metrics(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -8737,7 +8733,7 @@ static int s_test_add_user_agent_header_merge_existing_metrics(struct aws_alloca
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    /* Existing section is the final token: the IDs merge and only one m/ is emitted. */
+    /* Section is the last token. */
     ASSERT_SUCCESS(s_assert_merged_user_agent(
         allocator,
         "aws-sdk-java/2.30.0 ua/2.1 m/D,E",
@@ -8745,9 +8741,7 @@ static int s_test_add_user_agent_header_merge_existing_metrics(struct aws_alloca
         "aws-sdk-java/2.30.0 ua/2.1",
         " m/D,E,AX"));
 
-    /* Existing section is followed by appId and framework metadata, which UA 2.1 permits since it
-     * does not order that trailing group. Those tokens must survive rather than being absorbed
-     * into the ID list. */
+    /* app/ and lib/ may legally follow the section; they must not be absorbed into the ID list. */
     ASSERT_SUCCESS(s_assert_merged_user_agent(
         allocator,
         "aws-sdk-java/2.30.0 m/D,E app/myapp lib/foobar",
@@ -8755,22 +8749,22 @@ static int s_test_add_user_agent_header_merge_existing_metrics(struct aws_alloca
         "aws-sdk-java/2.30.0 app/myapp lib/foobar",
         " m/D,E,AX,Ab"));
 
-    /* More than one existing section: every ID is kept, not just the last section's. */
+    /* More than one section: every ID is kept. */
     ASSERT_SUCCESS(s_assert_merged_user_agent(
         allocator, "sdk/1.0 m/D app/x m/E", AWS_S3_FEATURE_ID_ON_EC2, "sdk/1.0 app/x", " m/D,E,Aa"));
 
-    /* A dangling comma upstream must not turn into an empty metric_id. */
+    /* A dangling comma must not become an empty metric_id. */
     ASSERT_SUCCESS(
         s_assert_merged_user_agent(allocator, "sdk/1.0 m/D,", AWS_S3_FEATURE_ID_ON_EC2, "sdk/1.0", " m/D,Aa"));
 
-    /* An empty section with no CRT IDs means no section at all. */
+    /* Empty section, no CRT IDs: no section emitted. */
     ASSERT_SUCCESS(s_assert_merged_user_agent(allocator, "sdk/1.0 m/", 0, "sdk/1.0", ""));
 
-    /* "md/..." and a platform token containing "m/" must not be mistaken for the section. */
+    /* "md/" and "platform/m5.xlarge" must not match. */
     ASSERT_SUCCESS(s_assert_merged_user_agent(
         allocator, "sdk/1.0 md/internal platform/m5.xlarge", 0, "sdk/1.0 md/internal platform/m5.xlarge", ""));
 
-    /* A header that is nothing but the section leaves no leading space behind. */
+    /* Header is only the section: no leading space. */
     ASSERT_SUCCESS(s_assert_merged_user_agent(allocator, "m/D", 0, NULL, " m/D"));
 
     aws_s3_tester_clean_up(&tester);

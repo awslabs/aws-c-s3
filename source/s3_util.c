@@ -373,12 +373,8 @@ static const struct {
     {AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP, "Al"},
 };
 
-/* If `token` is a business-metrics section ("m/" followed by a comma separated ID list, per the
- * UA 2.1 SEP), write the ID list to *out_ids and return true. Otherwise return false.
- *
- * Leading and trailing commas are trimmed off the list so that merging it with our own IDs
- * cannot produce an empty metric_id (the grammar is `"m/" metric_id *("," metric_id)` with
- * `metric_id = 1*m_char`, so "m/D,,Aj" and "m/D,Aj," are both malformed). */
+/* If `token` is an "m/" business-metrics section, set *out_ids to its ID list and return true.
+ * Stray commas are trimmed: merging must not produce an empty metric_id. */
 static bool s_extract_business_metrics_ids(struct aws_byte_cursor token, struct aws_byte_cursor *out_ids) {
     const struct aws_byte_cursor m_token_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("m/");
 
@@ -433,17 +429,10 @@ void aws_s3_add_user_agent_header(
     /* Start with generous initial capacity */
     const size_t initial_capacity = 256;
 
-    /* The SDK may have already written a business-metrics section (e.g. "m/D,E,Z,b") into the
-     * existing User-Agent header, and the metrics ingestion pipeline only reads the first such
-     * section. Appending a second " m/AX,Aa" would therefore silently drop the CRT's IDs. So we
-     * walk the existing header token by token, pass every token except the business-metrics
-     * section(s) through untouched, collect their IDs, and re-emit one merged section below.
-     *
-     * The section must be delimited at the token boundary rather than at end-of-string: UA 2.1
-     * places business-metrics in the same unordered trailing group as appId ("app/...") and
-     * framework metadata ("lib/..."), so "m/D,E app/myapp" is a legal header and the IDs stop at
-     * the first space. Splitting on space also reproduces the original spacing exactly, since
-     * each run of N delimiters yields N-1 empty tokens that are re-joined with single spaces. */
+    /* The SDK may have already written an "m/" section, and ingestion only reads the first one, so
+     * appending a second would drop our IDs. Pass every other token through untouched, collect the
+     * IDs, and re-emit one merged section below. UA 2.1 does not require "m/" to be last (app/ and
+     * lib/ may follow it), so the section ends at the token boundary, not end-of-string. */
     struct aws_byte_buf existing_m_ids;
     AWS_ZERO_STRUCT(existing_m_ids);
 
@@ -461,8 +450,7 @@ void aws_s3_add_user_agent_header(
             AWS_ZERO_STRUCT(token_m_ids);
 
             if (s_extract_business_metrics_ids(token, &token_m_ids)) {
-                /* Hold the IDs aside. Every section found is merged, so a header that already
-                 * carries more than one cannot lose the IDs of all but the last. */
+                /* Merge every section found, not just the last. */
                 if (token_m_ids.len > 0) {
                     if (existing_m_ids.len > 0) {
                         aws_byte_buf_append_dynamic(&existing_m_ids, &comma);
@@ -479,8 +467,7 @@ void aws_s3_add_user_agent_header(
             kept_a_token = true;
         }
 
-        /* Only separate from our own product token if anything survived from the original header.
-         * A header consisting solely of a business-metrics section leaves the buffer empty. */
+        /* Skip the separator if the header was nothing but an m/ section. */
         if (kept_a_token) {
             aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
         }
@@ -500,11 +487,8 @@ void aws_s3_add_user_agent_header(
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
 
-    /* Emit a single merged business-metrics section: existing SDK IDs (if any) + CRT feature IDs.
-     * Per UA 2.1 SEP: " m/D,E,Z,AX,Aa,Ab" - comma separated, no spaces around commas, and no
-     * leading or trailing comma. The section is omitted entirely when neither the SDK nor the
-     * CRT set any IDs. Emitting it last is conformant: UA 2.1 does not fix the order of the
-     * trailing business-metrics / appId / framework-metadata group. */
+    /* One merged m/ section per UA 2.1 SEP: " m/D,E,AX,Aa" - SDK IDs then CRT IDs, comma
+     * separated, no spaces. Omitted when neither sets any IDs. */
     bool has_existing_ids = existing_m_ids.len > 0;
     bool has_crt_ids = feature_ids != 0;
 
@@ -513,14 +497,12 @@ void aws_s3_add_user_agent_header(
 
         bool need_comma = false;
 
-        /* First: existing SDK IDs (preserved verbatim) */
         if (has_existing_ids) {
             struct aws_byte_cursor existing_ids_cursor = aws_byte_cursor_from_buf(&existing_m_ids);
             aws_byte_buf_append_dynamic(&user_agent_buffer, &existing_ids_cursor);
             need_comma = true;
         }
 
-        /* Then: CRT feature IDs */
         for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
             if (feature_ids & s_feature_id_strings[i].flag) {
                 if (need_comma) {

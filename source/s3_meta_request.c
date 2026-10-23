@@ -686,10 +686,7 @@ int aws_s3_meta_request_init_base(
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
         meta_request->feature_ids = client->feature_ids;
 
-        /* Al: emit CLIENT_CREATED_FOR_OP on the first meta request only. A one-shot client
-         * (created per operation, then destroyed) will have every request tagged. A reused
-         * client tags only the first request, giving the metrics pipeline a signal to
-         * distinguish the two patterns. */
+        /* First meta request only: lets the pipeline tell a one-shot client from a reused one. */
         if (!client->first_operation_emitted) {
             client->first_operation_emitted = true;
             meta_request->feature_ids |= AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;

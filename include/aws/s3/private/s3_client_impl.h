@@ -320,9 +320,7 @@ struct aws_s3_client {
      * copies this and ORs in its own per-request flags (see aws_s3_meta_request_init_base). */
     uint32_t feature_ids;
 
-    /* True after the first meta request has been created on this client. Used to emit
-     * AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP (Al) only on the first operation, so
-     * a one-shot client is distinguishable from a reused one in the metrics pipeline. */
+    /* Set once the first meta request is created, so CLIENT_CREATED_FOR_OP (Al) is emitted once. */
     bool first_operation_emitted;
 
     /**
