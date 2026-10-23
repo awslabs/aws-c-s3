@@ -1042,6 +1042,45 @@ struct aws_s3_meta_request_options {
     bool recv_file_delete_on_failure;
 
     /**
+     * Optional. Download the object straight into this caller-owned buffer, without copying.
+     * buffer[0] holds the first byte of the requested range (object byte 0 for a full-object GET).
+     * On success, `len` is set to the number of bytes downloaded (the requested range, cut short at
+     * the end of the object), so the data is [buffer, buffer + len). On failure, `len` stays 0 and the
+     * buffer's contents are undefined.
+     *
+     * With other options:
+     * - With read backpressure enabled, the client opens the read window itself as each part lands in
+     *   the buffer, since there are no body callbacks to call aws_s3_meta_request_increment_read_window()
+     *   from. The caller doesn't need to.
+     * - Resume tokens can't resume this download, but a paused one can be continued manually: the
+     *   first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of the buffer are
+     *   valid, so issue a ranged GET for the rest of the range into a recv_buffer that views the
+     *   rest of the same buffer.
+     *
+     * Requirements:
+     * - GET_OBJECT only, and not combined with body_callback, body_callback_ex, or recv_filepath.
+     *   Otherwise creation fails with AWS_ERROR_INVALID_ARGUMENT.
+     * - `len` must be 0 (reset it to reuse a buffer). Otherwise creation fails with
+     *   AWS_ERROR_INVALID_ARGUMENT.
+     * - Don't set object_size_hint: the client already uses the buffer's capacity as the hint when the
+     *   buffer is smaller than a part. If set, it must equal the capacity. Otherwise creation fails with
+     *   AWS_ERROR_INVALID_ARGUMENT.
+     * - The capacity must hold the whole requested range. Otherwise the meta request fails with
+     *   AWS_ERROR_SHORT_BUFFER. A larger capacity is fine: `len` is set to the bytes downloaded, and the
+     *   rest of the buffer is left untouched.
+     * - The client's buffer pool must support pre-allocated buffers. The default pool does; a custom
+     *   pool must implement add_preallocated_buffer. Otherwise creation fails with
+     *   AWS_ERROR_UNSUPPORTED_OPERATION.
+     * - Not supported for a GET with partNumber in the query. Creation fails with
+     *   AWS_ERROR_UNSUPPORTED_OPERATION.
+     * - The memory must stay valid and in place until the finish callback fires. The client never
+     *   allocates or frees it.
+     * - Don't give the same memory, or overlapping memory, to two meta requests in flight at once. The
+     *   client doesn't detect it: both downloads write into it and the data is corrupted.
+     */
+    struct aws_byte_buf *recv_buffer;
+
+    /**
      * Optional.
      * Per-request override of the client's `out_of_order_delivery`. See that field for what the setting
      * means and what each sink defaults to.
@@ -1258,6 +1297,8 @@ struct aws_s3_meta_request_options {
      * The optimal strategy for downloading a file depends on its size.
      * Set this hint to help the S3 client choose the best strategy for this particular file.
      * This is just used as an estimate, so it's okay to provide an approximate value if the exact size is unknown.
+     * Don't set it with recv_buffer: the client uses the buffer's capacity as the hint when needed, and a hint that
+     * doesn't equal the capacity fails creation with AWS_ERROR_INVALID_ARGUMENT.
      */
     const uint64_t *object_size_hint;
 
