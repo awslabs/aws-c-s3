@@ -370,7 +370,7 @@ static const struct {
     {AWS_S3_FEATURE_ID_ON_EC2, "Aa"},
     {AWS_S3_FEATURE_ID_FILE_PATH, "Ab"},
     {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL, "Aj"},
-    {AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP, "Al"},
+    {AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP, "Al"}, /* per-part only; not emitted in the cached header */
 };
 
 /* If `token` is an "m/" business-metrics section, set *out_ids to its ID list and return true.
@@ -474,8 +474,9 @@ void aws_s3_init_user_agent_header_cached(struct aws_s3_meta_request *meta_reque
     aws_byte_buf_append_dynamic(buf, &forward_slash);
     aws_byte_buf_append_dynamic(buf, &platform_cursor);
 
-    /* Build the merged m/ section from SDK IDs + operation-level CRT IDs. */
-    uint32_t feature_ids = meta_request->feature_ids;
+    /* Build the merged m/ section from SDK IDs + operation-level CRT IDs.
+     * Mask out per-part-only IDs so they never land in the cache. */
+    uint32_t feature_ids = meta_request->feature_ids & ~(uint32_t)AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;
     bool has_existing_ids = existing_m_ids.len > 0;
     bool has_crt_ids = feature_ids != 0;
 
