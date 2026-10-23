@@ -1049,7 +1049,9 @@ struct aws_s3_meta_request_options {
      * buffer's contents are undefined.
      *
      * With other options:
-     * - With read backpressure enabled, the client opens the window itself as data lands.
+     * - With read backpressure enabled, the client opens the read window itself as each part lands in
+     *   the buffer, since there are no body callbacks to call aws_s3_meta_request_increment_read_window()
+     *   from. The caller doesn't need to.
      * - Resume tokens can't resume this download, but a paused one can be continued manually: the
      *   first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of the buffer are
      *   valid, so issue a ranged GET for the rest of the range into a recv_buffer that views the
@@ -1064,9 +1066,8 @@ struct aws_s3_meta_request_options {
      *   buffer is smaller than a part. If set, it must equal the capacity. Otherwise creation fails with
      *   AWS_ERROR_INVALID_ARGUMENT.
      * - The capacity must hold the whole requested range. Otherwise the meta request fails with
-     *   AWS_ERROR_SHORT_BUFFER.
-     * - With a Range header that has no end (bytes=A-), the capacity must also hold one part
-     *   (part_size). Otherwise the meta request fails with AWS_ERROR_SHORT_BUFFER.
+     *   AWS_ERROR_SHORT_BUFFER. A larger capacity is fine: `len` is set to the bytes downloaded, and the
+     *   rest of the buffer is left untouched.
      * - The client's buffer pool must support pre-allocated buffers. The default pool does; a custom
      *   pool must implement add_preallocated_buffer. Otherwise creation fails with
      *   AWS_ERROR_UNSUPPORTED_OPERATION.

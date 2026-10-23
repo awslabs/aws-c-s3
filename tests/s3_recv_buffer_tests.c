@@ -600,12 +600,24 @@ static int s_test_s3_recv_buffer_smaller_than_part_checksum(struct aws_allocator
     return 0;
 }
 
-/* Same buffer, with a Range that has no end (bytes=A-): hints don't apply to ranged GETs, so the first
- * request is a full part, which the buffer can't hold. */
+/* Same buffer, with a Range that has no end (bytes=A-): the first request is capped at the buffer's capacity,
+ * so the rest of the object (485,760 bytes) fits and downloads whole. */
 AWS_TEST_CASE(test_s3_recv_buffer_smaller_than_part_open_range, s_test_s3_recv_buffer_smaller_than_part_open_range)
 static int s_test_s3_recv_buffer_smaller_than_part_open_range(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     struct rb_get get = {.key = g_pre_existing_object_10MB, .range = "bytes=10000000-"};
+    size_t len = MB_TO_BYTES(10) - 10000000;
+    ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SUCCESS, 10000000, len));
+    return 0;
+}
+
+/* Same, but the rest of the object (about 9.5 MB) doesn't fit: fails once the first response gives its length. */
+AWS_TEST_CASE(
+    test_s3_recv_buffer_smaller_than_part_open_range_too_small,
+    s_test_s3_recv_buffer_smaller_than_part_open_range_too_small)
+static int s_test_s3_recv_buffer_smaller_than_part_open_range_too_small(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rb_get get = {.key = g_pre_existing_object_10MB, .range = "bytes=1000000-"};
     ASSERT_SUCCESS(s_rb_expect(allocator, &s_rb_8mb_parts, &get, MB_TO_BYTES(1), AWS_ERROR_SHORT_BUFFER, 0, 0));
     return 0;
 }

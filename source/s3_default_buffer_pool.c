@@ -331,7 +331,7 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
     aws_hash_table_init(
         &buffer_pool->preallocated_buffers,
         buffer_pool->base_allocator,
-        0, /* initial capacity */
+        10, /* initial capacity: one entry per zero-copy meta request in flight */
         aws_hash_ptr,
         aws_ptr_eq,
         NULL,

@@ -65,6 +65,7 @@ void aws_s3_buffer_pool_remove_preallocated_buffer(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_meta_request *meta_request) {
     AWS_PRECONDITION(buffer_pool);
+    AWS_PRECONDITION(meta_request);
 
     if (buffer_pool->vtable->remove_preallocated_buffer != NULL) {
         buffer_pool->vtable->remove_preallocated_buffer(buffer_pool, meta_request);
