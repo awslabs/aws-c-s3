@@ -842,21 +842,6 @@ struct aws_s3_client *aws_s3_client_new(
     if (client_config->retry_strategy != NULL) {
         aws_retry_strategy_acquire(client_config->retry_strategy);
         client->retry_strategy = client_config->retry_strategy;
-    } else if (client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_NONE) {
-        /* Retries disabled: use the no-retry strategy. Record the mode on the
-         * client so the request path makes a single token-less
-         * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
-        client->disable_retries = true;
-
-        struct aws_no_retry_options no_retry_options;
-        AWS_ZERO_STRUCT(no_retry_options);
-        client->retry_strategy = aws_retry_strategy_new_no_retry(allocator, &no_retry_options);
-
-        if (client->retry_strategy == NULL) {
-            /* if something failed in creation of retry_strategy, we should error instead of having a null
-             * retry_strategy attached to the client */
-            goto on_error;
-        }
     } else {
         /* max_retries requires explicit S3 default because passing 0 to aws-c-io's
          * standard retry strategy would use its own default of 3, not the S3 default of 5.
@@ -878,14 +863,38 @@ struct aws_s3_client *aws_s3_client_new(
             .initial_bucket_capacity = client_config->retry_config.initial_bucket_capacity,
         };
 
-        if (client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_ADAPTIVE) {
-            struct aws_adaptive_retry_options adaptive_retry_options = {
-                .standard_options = standard_retry_options,
-                .fast_fail_if_no_token = client_config->retry_config.fast_fail_if_no_token,
-            };
-            client->retry_strategy = aws_retry_strategy_new_adaptive(allocator, &adaptive_retry_options);
-        } else {
-            client->retry_strategy = aws_retry_strategy_new_standard(allocator, &standard_retry_options);
+        switch (client_config->retry_config.retry_mode) {
+            case AWS_S3_RETRY_MODE_NONE: {
+                /* Retries disabled: use the no-retry strategy. Record the mode on the
+                 * client so the request path makes a single token-less
+                 * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
+                client->disable_retries = true;
+
+                struct aws_no_retry_options no_retry_options;
+                AWS_ZERO_STRUCT(no_retry_options);
+                client->retry_strategy = aws_retry_strategy_new_no_retry(allocator, &no_retry_options);
+                break;
+            }
+            case AWS_S3_RETRY_MODE_ADAPTIVE: {
+                /* Adaptive: standard retry plus client-side rate limiting. */
+                struct aws_adaptive_retry_options adaptive_retry_options = {
+                    .standard_options = standard_retry_options,
+                    .fast_fail_if_no_token = client_config->retry_config.fast_fail_if_no_token,
+                };
+                client->retry_strategy = aws_retry_strategy_new_adaptive(allocator, &adaptive_retry_options);
+                break;
+            }
+            case AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF: {
+                /* Exponential backoff: jittered retries up to max_retries, no token bucket. */
+                client->retry_strategy = aws_retry_strategy_new_exponential_backoff(allocator, &backoff_retry_options);
+                break;
+            }
+
+            case AWS_S3_RETRY_MODE_STANDARD:
+            default:
+                /* Standard: exponential backoff plus a per-host token bucket. Also used as default mode. */
+                client->retry_strategy = aws_retry_strategy_new_standard(allocator, &standard_retry_options);
+                break;
         }
 
         if (client->retry_strategy == NULL) {

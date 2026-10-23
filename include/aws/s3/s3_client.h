@@ -393,6 +393,10 @@ enum aws_s3_retry_mode {
      */
     AWS_S3_RETRY_MODE_ADAPTIVE,
     /**
+     * Exponential Backoff mode: Standard retry strategy without token budget.
+     */
+    AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF,
+    /**
      * No Retry Mode: Each request is attempted exactly once.
      */
     AWS_S3_RETRY_MODE_NONE,
@@ -677,7 +681,8 @@ struct aws_s3_client_config {
          * Retry Mode for choosing different retries strategy.
          * 0 (AWS_S3_RETRY_MODE_STANDARD) = Standard Retry,
          * 1 (AWS_S3_RETRY_MODE_ADAPTIVE) = Adaptive Retry,
-         * 2 (AWS_S3_RETRY_MODE_NONE) = No Retry.
+         * 2 (AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF) = Exponential backoff, no token budget.
+         * 3 (AWS_S3_RETRY_MODE_NONE) = No Retry.
          */
         enum aws_s3_retry_mode retry_mode;
 
