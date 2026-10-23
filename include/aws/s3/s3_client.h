@@ -656,7 +656,8 @@ struct aws_s3_client_config {
      *   jitter_mode = FULL, initial_bucket_capacity = 500
      */
     struct {
-        /** Maximum number of retries per request. 0 = S3 default (5).
+        /** Maximum number of retries per request. 0 is using S3 default (5).
+         * 0 does not disable retries; set `retry_mode` to `AWS_S3_RETRY_MODE_NONE` for that.
          *  Note: the S3 client default differs from the aws-c-io exponential backoff default (10)
          *  and the aws-c-io standard retry strategy default (3). */
         size_t max_retries;
