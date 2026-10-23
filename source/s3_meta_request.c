@@ -686,10 +686,11 @@ int aws_s3_meta_request_init_base(
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
         meta_request->feature_ids = client->feature_ids;
 
-        /* First meta request only: lets the pipeline tell a one-shot client from a reused one. */
+        /* Al: tag only the first HTTP request of the first meta-request, not every part.
+         * Stored on the client (first meta-request) and meta-request (first part). */
         if (!client->first_operation_emitted) {
             client->first_operation_emitted = true;
-            meta_request->feature_ids |= AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;
+            meta_request->first_request_for_new_client = true;
         }
     }
 
@@ -1429,7 +1430,16 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     }
 
     /* feature_ids already merges client-level and per-request flags (see aws_s3_meta_request_init_base). */
-    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message, meta_request->feature_ids);
+    uint32_t feature_ids = meta_request->feature_ids;
+
+    /* Al (CLIENT_CREATED_FOR_OP): emit on the first HTTP request only, so the pipeline sees one
+     * request tagged rather than every part of a multipart operation. */
+    if (meta_request->first_request_for_new_client) {
+        meta_request->first_request_for_new_client = false;
+        feature_ids |= AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;
+    }
+
+    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message, feature_ids);
 
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);
