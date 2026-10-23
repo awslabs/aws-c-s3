@@ -230,6 +230,168 @@ static int s_test_s3_client_retry_config_max_retries_exceeded(struct aws_allocat
     return 0;
 }
 
+/* Test that retry_mode = NONE attempts a request once and does not retry the failure. */
+AWS_TEST_CASE(test_s3_client_disable_retries, s_test_s3_client_disable_retries)
+static int s_test_s3_client_disable_retries(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .retry_mode = AWS_S3_RETRY_MODE_NONE,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    /* The no-retry strategy branch records single-attempt mode on the client. */
+    ASSERT_TRUE(client->disable_retries);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_first;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    /* The first (and only) attempt fails; with retries disabled it is NOT retried, so the request fails. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, 0, &meta_request_test_results));
+
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that retry_mode = NONE still makes the single token-less attempt and succeeds. */
+AWS_TEST_CASE(test_s3_client_disable_retries_success, s_test_s3_client_disable_retries_success)
+static int s_test_s3_client_disable_retries_success(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .retry_mode = AWS_S3_RETRY_MODE_NONE,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_TRUE(client->disable_retries);
+
+    /* No fault injected: the single attempt should succeed. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that retry_mode = EXPONENTIAL_BACKOFF ignores the token bucket and keeps retrying. */
+AWS_TEST_CASE(test_s3_client_exponential_backoff_retry, s_test_s3_client_exponential_backoff_retry)
+static int s_test_s3_client_exponential_backoff_retry(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .retry_mode = AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF,
+                .initial_bucket_capacity = 10,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_FALSE(client->disable_retries);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_twice;
+
+    /* A standard bucket of 10 would refuse the second retry; here both retries run and the third attempt succeeds. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that retry_mode = EXPONENTIAL_BACKOFF still stops at max_retries. */
+AWS_TEST_CASE(
+    test_s3_client_exponential_backoff_max_retries_exceeded,
+    s_test_s3_client_exponential_backoff_max_retries_exceeded)
+static int s_test_s3_client_exponential_backoff_max_retries_exceeded(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .retry_mode = AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF,
+                .max_retries = 1,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->acquire_http_connection = s_s3_client_acquire_http_connection_fail_twice;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    /* Two failures need 2 retries, but max_retries=1 only allows 1. */
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, 0, &meta_request_test_results));
+
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_ERROR_UNKNOWN);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 struct s3_fail_prepare_test_data {
     uint32_t num_requests_being_prepared_is_correct : 1;
 };
@@ -622,6 +784,88 @@ AWS_TEST_CASE(test_s3_meta_request_send_request_finish_fail_504, s_test_s3_meta_
 static int s_test_s3_meta_request_send_request_finish_fail_504(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
     return s_test_s3_request_retried_on_status(allocator, AWS_HTTP_STATUS_CODE_504_GATEWAY_TIMEOUT);
+}
+
+/* Test that retry_mode = ADAPTIVE retries a 503 SlowDown and the request succeeds. */
+AWS_TEST_CASE(test_s3_client_adaptive_retry, s_test_s3_client_adaptive_retry)
+static int s_test_s3_client_adaptive_retry(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* 503 maps to THROTTLING, which turns on the adaptive rate limiter. */
+    tester.user_data = (void *)(uintptr_t)AWS_HTTP_STATUS_CODE_503_SERVICE_UNAVAILABLE;
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .retry_mode = AWS_S3_RETRY_MODE_ADAPTIVE,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    ASSERT_FALSE(client->disable_retries);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_send_request_finish_inject_status;
+
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, AWS_S3_TESTER_SEND_META_REQUEST_EXPECT_SUCCESS, NULL));
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
+/* Test that fast_fail_if_no_token = true fails the retry after a 503 instead of waiting for a token. */
+AWS_TEST_CASE(test_s3_client_adaptive_retry_fast_fail, s_test_s3_client_adaptive_retry_fast_fail)
+static int s_test_s3_client_adaptive_retry_fast_fail(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* 503 maps to THROTTLING, which turns on the rate limiter with an empty bucket. */
+    tester.user_data = (void *)(uintptr_t)AWS_HTTP_STATUS_CODE_503_SERVICE_UNAVAILABLE;
+
+    struct aws_s3_client_config client_config = {
+        .part_size = 64 * 1024,
+        .retry_config =
+            {
+                .retry_mode = AWS_S3_RETRY_MODE_ADAPTIVE,
+                .fast_fail_if_no_token = true,
+            },
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
+
+    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
+    patched_client_vtable->meta_request_factory = s_meta_request_factory_patch_send_request_finish_inject_status;
+
+    struct aws_s3_meta_request_test_results meta_request_test_results;
+    aws_s3_meta_request_test_results_init(&meta_request_test_results, allocator);
+
+    ASSERT_SUCCESS(aws_s3_tester_send_get_object_meta_request(
+        &tester, client, g_pre_existing_object_1MB, 0, &meta_request_test_results));
+
+    ASSERT_TRUE(meta_request_test_results.finished_error_code == AWS_IO_RETRY_PERMISSION_DENIED);
+
+    aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
 }
 
 static void s_finished_request_remove_upload_id(
