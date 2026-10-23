@@ -373,6 +373,37 @@ static const struct {
     {AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP, "Al"},
 };
 
+/* If `token` is a business-metrics section ("m/" followed by a comma separated ID list, per the
+ * UA 2.1 SEP), write the ID list to *out_ids and return true. Otherwise return false.
+ *
+ * Leading and trailing commas are trimmed off the list so that merging it with our own IDs
+ * cannot produce an empty metric_id (the grammar is `"m/" metric_id *("," metric_id)` with
+ * `metric_id = 1*m_char`, so "m/D,,Aj" and "m/D,Aj," are both malformed). */
+static bool s_extract_business_metrics_ids(struct aws_byte_cursor token, struct aws_byte_cursor *out_ids) {
+    const struct aws_byte_cursor m_token_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("m/");
+
+    if (token.len < m_token_prefix.len) {
+        return false;
+    }
+
+    struct aws_byte_cursor prefix = {.ptr = token.ptr, .len = m_token_prefix.len};
+    if (!aws_byte_cursor_eq(&prefix, &m_token_prefix)) {
+        return false;
+    }
+
+    aws_byte_cursor_advance(&token, m_token_prefix.len);
+
+    while (token.len > 0 && token.ptr[0] == ',') {
+        aws_byte_cursor_advance(&token, 1);
+    }
+    while (token.len > 0 && token.ptr[token.len - 1] == ',') {
+        --token.len;
+    }
+
+    *out_ids = token;
+    return true;
+}
+
 void aws_s3_add_user_agent_header(
     struct aws_allocator *allocator,
     struct aws_http_message *message,
@@ -383,6 +414,7 @@ void aws_s3_add_user_agent_header(
 
     const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+    const struct aws_byte_cursor comma = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(",");
     const struct aws_byte_cursor m_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
     struct aws_byte_cursor platform_cursor = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
     if (!platform_cursor.len) {
@@ -401,55 +433,57 @@ void aws_s3_add_user_agent_header(
     /* Start with generous initial capacity */
     const size_t initial_capacity = 256;
 
-    /* The SDK may have already written an m/ section (e.g. " m/D,E,Z,b") into the existing
-     * User-Agent header. If we blindly append another " m/AX,Aa" the ingestion pipeline may
-     * only parse the first one, losing the CRT's feature IDs. To fix this:
-     *   1. Find and extract the existing m/ section (everything from " m/" to end-of-string
-     *      or next space-delimited token that doesn't look like a comma-separated ID list).
-     *   2. Copy the header WITHOUT the m/ section into the buffer.
-     *   3. Append the CRT product token.
-     *   4. Emit a single merged m/ section: existing SDK IDs + CRT IDs. */
-    struct aws_byte_cursor existing_m_ids;
+    /* The SDK may have already written a business-metrics section (e.g. "m/D,E,Z,b") into the
+     * existing User-Agent header, and the metrics ingestion pipeline only reads the first such
+     * section. Appending a second " m/AX,Aa" would therefore silently drop the CRT's IDs. So we
+     * walk the existing header token by token, pass every token except the business-metrics
+     * section(s) through untouched, collect their IDs, and re-emit one merged section below.
+     *
+     * The section must be delimited at the token boundary rather than at end-of-string: UA 2.1
+     * places business-metrics in the same unordered trailing group as appId ("app/...") and
+     * framework metadata ("lib/..."), so "m/D,E app/myapp" is a legal header and the IDs stop at
+     * the first space. Splitting on space also reproduces the original spacing exactly, since
+     * each run of N delimiters yields N-1 empty tokens that are re-joined with single spaces. */
+    struct aws_byte_buf existing_m_ids;
     AWS_ZERO_STRUCT(existing_m_ids);
 
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
         aws_byte_buf_init(
             &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + initial_capacity);
+        aws_byte_buf_init(&existing_m_ids, allocator, 0);
 
-        /* Scan for " m/" in the existing header to find an SDK-emitted feature ID section.
-         * Per UA 2.1 SEP the m/ section is always the last token, so everything from " m/"
-         * to end-of-string is the ID list. */
-        const uint8_t *header_start = current_user_agent_header.ptr;
-        const uint8_t *header_end = header_start + current_user_agent_header.len;
-        const uint8_t *m_pos = NULL;
+        struct aws_byte_cursor token;
+        AWS_ZERO_STRUCT(token);
+        bool kept_a_token = false;
 
-        /* Search for " m/" (space + m + slash). We need the leading space to avoid matching
-         * something like "platform/m5.xlarge". */
-        for (const uint8_t *p = header_start; p + 3 <= header_end; ++p) {
-            if (p[0] == ' ' && p[1] == 'm' && p[2] == '/') {
-                m_pos = p;
-                /* Don't break -- take the LAST occurrence in case there are multiple.
-                 * The SDK's m/ is typically the last token before the CRT appends. */
+        while (aws_byte_cursor_next_split(&current_user_agent_header, ' ', &token)) {
+            struct aws_byte_cursor token_m_ids;
+            AWS_ZERO_STRUCT(token_m_ids);
+
+            if (s_extract_business_metrics_ids(token, &token_m_ids)) {
+                /* Hold the IDs aside. Every section found is merged, so a header that already
+                 * carries more than one cannot lose the IDs of all but the last. */
+                if (token_m_ids.len > 0) {
+                    if (existing_m_ids.len > 0) {
+                        aws_byte_buf_append_dynamic(&existing_m_ids, &comma);
+                    }
+                    aws_byte_buf_append_dynamic(&existing_m_ids, &token_m_ids);
+                }
+                continue;
             }
+
+            if (kept_a_token) {
+                aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
+            }
+            aws_byte_buf_append_dynamic(&user_agent_buffer, &token);
+            kept_a_token = true;
         }
 
-        if (m_pos != NULL) {
-            /* Copy everything before the " m/" section */
-            struct aws_byte_cursor before_m = {
-                .ptr = (uint8_t *)header_start,
-                .len = (size_t)(m_pos - header_start),
-            };
-            aws_byte_buf_append_dynamic(&user_agent_buffer, &before_m);
-
-            /* The existing IDs start after " m/" (3 bytes) */
-            existing_m_ids.ptr = (uint8_t *)(m_pos + 3);
-            existing_m_ids.len = (size_t)(header_end - existing_m_ids.ptr);
-        } else {
-            /* No existing m/ section -- copy the whole header as-is */
-            aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
+        /* Only separate from our own product token if anything survived from the original header.
+         * A header consisting solely of a business-metrics section leaves the buffer empty. */
+        if (kept_a_token) {
+            aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
         }
-
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
         aws_byte_buf_init(&user_agent_buffer, allocator, initial_capacity);
@@ -466,9 +500,11 @@ void aws_s3_add_user_agent_header(
         aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
     }
 
-    /* Emit a single merged m/ section: existing SDK IDs (if any) + CRT feature IDs.
-     * Per UA 2.1 SEP: " m/D,E,Z,AX,Aa,Ab" - comma-separated, no spaces around commas.
-     * The section is omitted entirely when neither the SDK nor the CRT set any IDs. */
+    /* Emit a single merged business-metrics section: existing SDK IDs (if any) + CRT feature IDs.
+     * Per UA 2.1 SEP: " m/D,E,Z,AX,Aa,Ab" - comma separated, no spaces around commas, and no
+     * leading or trailing comma. The section is omitted entirely when neither the SDK nor the
+     * CRT set any IDs. Emitting it last is conformant: UA 2.1 does not fix the order of the
+     * trailing business-metrics / appId / framework-metadata group. */
     bool has_existing_ids = existing_m_ids.len > 0;
     bool has_crt_ids = feature_ids != 0;
 
@@ -479,7 +515,8 @@ void aws_s3_add_user_agent_header(
 
         /* First: existing SDK IDs (preserved verbatim) */
         if (has_existing_ids) {
-            aws_byte_buf_append_dynamic(&user_agent_buffer, &existing_m_ids);
+            struct aws_byte_cursor existing_ids_cursor = aws_byte_cursor_from_buf(&existing_m_ids);
+            aws_byte_buf_append_dynamic(&user_agent_buffer, &existing_ids_cursor);
             need_comma = true;
         }
 
@@ -487,8 +524,7 @@ void aws_s3_add_user_agent_header(
         for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
             if (feature_ids & s_feature_id_strings[i].flag) {
                 if (need_comma) {
-                    aws_byte_buf_append_dynamic(
-                        &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(","));
+                    aws_byte_buf_append_dynamic(&user_agent_buffer, &comma);
                 }
                 struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
                 aws_byte_buf_append_dynamic(&user_agent_buffer, &id_cursor);
@@ -500,8 +536,9 @@ void aws_s3_add_user_agent_header(
     /* Apply the updated header. */
     aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&user_agent_buffer));
 
-    /* Clean up the scratch buffer. */
+    /* Clean up the scratch buffers. */
     aws_byte_buf_clean_up(&user_agent_buffer);
+    aws_byte_buf_clean_up(&existing_m_ids);
 }
 
 int aws_s3_parse_content_range_cursor(
