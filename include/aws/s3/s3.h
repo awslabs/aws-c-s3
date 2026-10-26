@@ -143,6 +143,13 @@ AWS_S3_API
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps);
 
 /*
+ * Returns the part size, in bytes, that the client resolves to when
+ * aws_s3_client_config.part_size is left at 0.
+ */
+AWS_S3_API
+uint64_t aws_s3_default_part_size(void);
+
+/*
  * Retrieves a list of EC2 instance types with recommended configuration.
  * Returns aws_array_list<aws_byte_cursor>. The caller is responsible for cleaning up the array list.
  */
