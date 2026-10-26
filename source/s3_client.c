@@ -252,6 +252,10 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #endif
 }
 
+uint64_t aws_s3_default_part_size(void) {
+    return g_default_part_size_fallback;
+}
+
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
     /*
      * Resolve the effective throughput used for default memory pool sizing.
