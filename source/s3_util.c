@@ -369,18 +369,47 @@ static const struct {
     {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_LIMIT, "AZ"},
     {AWS_S3_FEATURE_ID_ON_EC2, "Aa"},
     {AWS_S3_FEATURE_ID_FILE_PATH, "Ab"},
+    {AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL, "Aj"},
+    {AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP, "Al"}, /* per-part only; not emitted in the cached header */
 };
 
-void aws_s3_add_user_agent_header(
-    struct aws_allocator *allocator,
-    struct aws_http_message *message,
-    uint32_t feature_ids) {
+/* If `token` is an "m/" business-metrics section, set *out_ids to its ID list and return true.
+ * Stray commas are trimmed: merging must not produce an empty metric_id. */
+static bool s_extract_business_metrics_ids(struct aws_byte_cursor token, struct aws_byte_cursor *out_ids) {
+    const struct aws_byte_cursor m_token_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("m/");
 
-    AWS_PRECONDITION(allocator);
-    AWS_PRECONDITION(message);
+    if (token.len < m_token_prefix.len) {
+        return false;
+    }
+
+    struct aws_byte_cursor prefix = {.ptr = token.ptr, .len = m_token_prefix.len};
+    if (!aws_byte_cursor_eq(&prefix, &m_token_prefix)) {
+        return false;
+    }
+
+    aws_byte_cursor_advance(&token, m_token_prefix.len);
+
+    while (token.len > 0 && token.ptr[0] == ',') {
+        aws_byte_cursor_advance(&token, 1);
+    }
+    while (token.len > 0 && token.ptr[token.len - 1] == ',') {
+        --token.len;
+    }
+
+    *out_ids = token;
+    return true;
+}
+
+void aws_s3_init_user_agent_header_cached(struct aws_s3_meta_request *meta_request) {
+    AWS_PRECONDITION(meta_request);
+
+    struct aws_allocator *allocator = meta_request->allocator;
+    struct aws_http_message *message = meta_request->initial_request_message;
 
     const struct aws_byte_cursor space_delimiter = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
     const struct aws_byte_cursor forward_slash = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("/");
+    const struct aws_byte_cursor comma = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(",");
+    const struct aws_byte_cursor m_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
     struct aws_byte_cursor platform_cursor = aws_s3_get_current_platform_ec2_intance_type(true /* cached_only */);
     if (!platform_cursor.len) {
         platform_cursor = g_user_agent_header_unknown;
@@ -392,59 +421,143 @@ void aws_s3_add_user_agent_header(
     struct aws_byte_cursor current_user_agent_header;
     AWS_ZERO_STRUCT(current_user_agent_header);
 
-    struct aws_byte_buf user_agent_buffer;
-    AWS_ZERO_STRUCT(user_agent_buffer);
-
-    /* Start with generous initial capacity */
+    struct aws_byte_buf *buf = &meta_request->cached_user_agent;
     const size_t initial_capacity = 256;
 
+    /* Extract and strip any existing m/ sections from the SDK's User-Agent. */
+    struct aws_byte_buf existing_m_ids;
+    AWS_ZERO_STRUCT(existing_m_ids);
+
     if (aws_http_headers_get(headers, g_user_agent_header_name, &current_user_agent_header) == AWS_OP_SUCCESS) {
-        aws_byte_buf_init(
-            &user_agent_buffer, allocator, current_user_agent_header.len + space_delimiter.len + initial_capacity);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &current_user_agent_header);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
+        aws_byte_buf_init(buf, allocator, current_user_agent_header.len + space_delimiter.len + initial_capacity);
+        aws_byte_buf_init(&existing_m_ids, allocator, 0);
+
+        struct aws_byte_cursor token;
+        AWS_ZERO_STRUCT(token);
+        bool kept_a_token = false;
+
+        while (aws_byte_cursor_next_split(&current_user_agent_header, ' ', &token)) {
+            struct aws_byte_cursor token_m_ids;
+            AWS_ZERO_STRUCT(token_m_ids);
+
+            if (s_extract_business_metrics_ids(token, &token_m_ids)) {
+                if (token_m_ids.len > 0) {
+                    if (existing_m_ids.len > 0) {
+                        aws_byte_buf_append_dynamic(&existing_m_ids, &comma);
+                    }
+                    aws_byte_buf_append_dynamic(&existing_m_ids, &token_m_ids);
+                }
+                continue;
+            }
+
+            if (kept_a_token) {
+                aws_byte_buf_append_dynamic(buf, &space_delimiter);
+            }
+            aws_byte_buf_append_dynamic(buf, &token);
+            kept_a_token = true;
+        }
+
+        if (kept_a_token) {
+            aws_byte_buf_append_dynamic(buf, &space_delimiter);
+        }
     } else {
         AWS_ASSERT(aws_last_error() == AWS_ERROR_HTTP_HEADER_NOT_FOUND);
-        aws_byte_buf_init(&user_agent_buffer, allocator, initial_capacity);
+        aws_byte_buf_init(buf, allocator, initial_capacity);
     }
 
-    /* Append the client's user-agent string: aws-c-s3/{version} platform/{instance-type} */
-    {
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_product_name);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &g_s3_client_version);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &space_delimiter);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &g_user_agent_header_platform);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &forward_slash);
-        aws_byte_buf_append_dynamic(&user_agent_buffer, &platform_cursor);
-    }
+    /* Append CRT product token. */
+    aws_byte_buf_append_dynamic(buf, &g_user_agent_header_product_name);
+    aws_byte_buf_append_dynamic(buf, &forward_slash);
+    aws_byte_buf_append_dynamic(buf, &g_s3_client_version);
+    aws_byte_buf_append_dynamic(buf, &space_delimiter);
+    aws_byte_buf_append_dynamic(buf, &g_user_agent_header_platform);
+    aws_byte_buf_append_dynamic(buf, &forward_slash);
+    aws_byte_buf_append_dynamic(buf, &platform_cursor);
 
-    /* Append feature IDs m/ section per UA 2.1 SEP.
-     * Format: " m/AX,AY,AZ" - comma-separated feature IDs, no spaces around commas.
-     * The section is omitted entirely when no flags are set. */
-    if (feature_ids != 0) {
-        aws_byte_buf_append_dynamic(
-            &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/"));
+    /* Build the merged m/ section from SDK IDs + operation-level CRT IDs.
+     * Mask out per-part-only IDs so they never land in the cache. */
+    uint32_t feature_ids = meta_request->feature_ids & ~(uint32_t)AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;
+    bool has_existing_ids = existing_m_ids.len > 0;
+    bool has_crt_ids = feature_ids != 0;
 
-        bool first = true;
+    if (has_existing_ids || has_crt_ids) {
+        aws_byte_buf_append_dynamic(buf, &m_prefix);
+
+        bool need_comma = false;
+
+        if (has_existing_ids) {
+            struct aws_byte_cursor existing_ids_cursor = aws_byte_cursor_from_buf(&existing_m_ids);
+            aws_byte_buf_append_dynamic(buf, &existing_ids_cursor);
+            need_comma = true;
+        }
+
         for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
             if (feature_ids & s_feature_id_strings[i].flag) {
-                if (!first) {
-                    aws_byte_buf_append_dynamic(
-                        &user_agent_buffer, &(struct aws_byte_cursor)AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(","));
+                if (need_comma) {
+                    aws_byte_buf_append_dynamic(buf, &comma);
                 }
                 struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
-                aws_byte_buf_append_dynamic(&user_agent_buffer, &id_cursor);
-                first = false;
+                aws_byte_buf_append_dynamic(buf, &id_cursor);
+                need_comma = true;
             }
+        }
+
+        meta_request->cached_ua_has_metrics = true;
+    }
+
+    aws_byte_buf_clean_up(&existing_m_ids);
+}
+
+void aws_s3_apply_user_agent_header(struct aws_s3_meta_request *meta_request, struct aws_http_message *message) {
+
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(message);
+    AWS_PRECONDITION(meta_request->cached_user_agent.len > 0);
+
+    const struct aws_byte_cursor comma = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(",");
+    const struct aws_byte_cursor m_prefix = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" m/");
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    AWS_ASSERT(headers != NULL);
+
+    /* Determine per-part feature IDs (flags that vary between part requests). */
+    uint32_t per_part_ids = 0;
+    if (meta_request->first_request_for_new_client) {
+        meta_request->first_request_for_new_client = false;
+        per_part_ids |= AWS_S3_FEATURE_ID_CLIENT_CREATED_FOR_OP;
+    }
+
+    if (per_part_ids == 0) {
+        /* Fast path: stamp the cached header as-is. */
+        aws_http_headers_set(
+            headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&meta_request->cached_user_agent));
+        return;
+    }
+
+    /* Slow path: copy cache and append per-part IDs. */
+    struct aws_byte_buf tmp;
+    aws_byte_buf_init_copy(&tmp, meta_request->allocator, &meta_request->cached_user_agent);
+
+    if (!meta_request->cached_ua_has_metrics) {
+        aws_byte_buf_append_dynamic(&tmp, &m_prefix);
+    } else {
+        aws_byte_buf_append_dynamic(&tmp, &comma);
+    }
+
+    bool need_comma = false;
+    for (size_t i = 0; i < AWS_ARRAY_SIZE(s_feature_id_strings); ++i) {
+        if (per_part_ids & s_feature_id_strings[i].flag) {
+            if (need_comma) {
+                aws_byte_buf_append_dynamic(&tmp, &comma);
+            }
+            struct aws_byte_cursor id_cursor = aws_byte_cursor_from_c_str(s_feature_id_strings[i].id);
+            aws_byte_buf_append_dynamic(&tmp, &id_cursor);
+            need_comma = true;
         }
     }
 
-    /* Apply the updated header. */
-    aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&user_agent_buffer));
-
-    /* Clean up the scratch buffer. */
-    aws_byte_buf_clean_up(&user_agent_buffer);
+    aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&tmp));
+    aws_byte_buf_clean_up(&tmp);
 }
 
 int aws_s3_parse_content_range_cursor(
@@ -1082,4 +1195,24 @@ bool aws_s3_is_checksum_value_header_name(struct aws_byte_cursor header_name) {
            !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-type") &&
            !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-mode") &&
            !aws_byte_cursor_eq_c_str_ignore_case(&header_name, "x-amz-checksum-algorithm");
+}
+
+void aws_s3_add_user_agent_header(
+    struct aws_allocator *allocator,
+    struct aws_http_message *message,
+    uint32_t feature_ids) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(message);
+
+    /* Lightweight shim: build a minimal meta_request-like state on the stack, run init, stamp. */
+    struct aws_s3_meta_request fake;
+    AWS_ZERO_STRUCT(fake);
+    fake.allocator = allocator;
+    fake.initial_request_message = message;
+    fake.feature_ids = feature_ids;
+
+    aws_s3_init_user_agent_header_cached(&fake);
+    aws_s3_apply_user_agent_header(&fake, message);
+    aws_byte_buf_clean_up(&fake.cached_user_agent);
 }

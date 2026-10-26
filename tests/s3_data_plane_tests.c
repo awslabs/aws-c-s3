@@ -8677,6 +8677,101 @@ static int s_test_add_user_agent_header_feature_ids(struct aws_allocator *alloca
     return 0;
 }
 
+/* Run aws_s3_add_user_agent_header against `input_header` (NULL for none) and assert the result is
+ * `expected_kept` + a space (when non-NULL), the CRT product tokens, then `expected_metrics_suffix`. */
+static int s_assert_merged_user_agent(
+    struct aws_allocator *allocator,
+    const char *input_header,
+    uint32_t feature_ids,
+    const char *expected_kept,
+    const char *expected_metrics_suffix) {
+
+    const struct aws_byte_cursor single_space = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(" ");
+
+    struct aws_byte_buf crt_tokens;
+    ASSERT_SUCCESS(s_get_expected_user_agent(allocator, &crt_tokens));
+    struct aws_byte_cursor crt_tokens_cursor = aws_byte_cursor_from_buf(&crt_tokens);
+
+    struct aws_byte_buf expected;
+    ASSERT_SUCCESS(aws_byte_buf_init(&expected, allocator, 256));
+    if (expected_kept != NULL) {
+        struct aws_byte_cursor kept_cursor = aws_byte_cursor_from_c_str(expected_kept);
+        ASSERT_SUCCESS(aws_byte_buf_append_dynamic(&expected, &kept_cursor));
+        ASSERT_SUCCESS(aws_byte_buf_append_dynamic(&expected, &single_space));
+    }
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(&expected, &crt_tokens_cursor));
+    struct aws_byte_cursor suffix_cursor = aws_byte_cursor_from_c_str(expected_metrics_suffix);
+    ASSERT_SUCCESS(aws_byte_buf_append_dynamic(&expected, &suffix_cursor));
+
+    struct aws_http_message *message = aws_http_message_new_request(allocator);
+    struct aws_http_headers *headers = aws_http_message_get_headers(message);
+    ASSERT_NOT_NULL(headers);
+    if (input_header != NULL) {
+        ASSERT_SUCCESS(
+            aws_http_headers_add(headers, g_user_agent_header_name, aws_byte_cursor_from_c_str(input_header)));
+    }
+
+    aws_s3_add_user_agent_header(allocator, message, feature_ids);
+
+    struct aws_byte_cursor actual;
+    AWS_ZERO_STRUCT(actual);
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_user_agent_header_name, &actual));
+    ASSERT_BIN_ARRAYS_EQUALS(expected.buffer, expected.len, actual.ptr, actual.len);
+
+    aws_http_message_release(message);
+    aws_byte_buf_clean_up(&expected);
+    aws_byte_buf_clean_up(&crt_tokens);
+    return AWS_OP_SUCCESS;
+}
+
+/* An SDK-written m/ section must be merged into ours, not duplicated or swallowed. */
+AWS_TEST_CASE(test_add_user_agent_header_merge_existing_metrics, s_test_add_user_agent_header_merge_existing_metrics)
+static int s_test_add_user_agent_header_merge_existing_metrics(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Section is the last token. */
+    ASSERT_SUCCESS(s_assert_merged_user_agent(
+        allocator,
+        "aws-sdk-java/2.30.0 ua/2.1 m/D,E",
+        AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE,
+        "aws-sdk-java/2.30.0 ua/2.1",
+        " m/D,E,AX"));
+
+    /* app/ and lib/ may legally follow the section; they must not be absorbed into the ID list. */
+    ASSERT_SUCCESS(s_assert_merged_user_agent(
+        allocator,
+        "aws-sdk-java/2.30.0 m/D,E app/myapp lib/foobar",
+        AWS_S3_FEATURE_ID_CUSTOM_PART_SIZE | AWS_S3_FEATURE_ID_FILE_PATH,
+        "aws-sdk-java/2.30.0 app/myapp lib/foobar",
+        " m/D,E,AX,Ab"));
+
+    /* More than one section: every ID is kept. */
+    ASSERT_SUCCESS(s_assert_merged_user_agent(
+        allocator, "sdk/1.0 m/D app/x m/E", AWS_S3_FEATURE_ID_ON_EC2, "sdk/1.0 app/x", " m/D,E,Aa"));
+
+    /* A dangling comma must not become an empty metric_id. */
+    ASSERT_SUCCESS(
+        s_assert_merged_user_agent(allocator, "sdk/1.0 m/D,", AWS_S3_FEATURE_ID_ON_EC2, "sdk/1.0", " m/D,Aa"));
+
+    /* Empty section, no CRT IDs: no section emitted. */
+    ASSERT_SUCCESS(s_assert_merged_user_agent(allocator, "sdk/1.0 m/", 0, "sdk/1.0", ""));
+
+    /* "md/" and "platform/m5.xlarge" must not match. */
+    ASSERT_SUCCESS(s_assert_merged_user_agent(
+        allocator, "sdk/1.0 md/internal platform/m5.xlarge", 0, "sdk/1.0 md/internal platform/m5.xlarge", ""));
+
+    /* Header is only the section: no leading space. */
+    ASSERT_SUCCESS(s_assert_merged_user_agent(allocator, "m/D", 0, NULL, " m/D"));
+
+    aws_s3_tester_clean_up(&tester);
+
+    return 0;
+}
+
 /* Helper: create a client from a partially filled config and return its feature_ids with the
  * environment-dependent ON_EC2 bit masked off (it depends on the host running the test).
  * Owns a tester per call because aws_s3_tester_bind_client() may only be invoked once per tester. */

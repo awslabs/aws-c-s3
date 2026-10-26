@@ -685,6 +685,13 @@ int aws_s3_meta_request_init_base(
         meta_request->io_event_loop = aws_event_loop_group_get_next_loop(client->body_streaming_elg);
         meta_request->synced_data.read_window_running_total = client->initial_read_window;
         meta_request->feature_ids = client->feature_ids;
+
+        /* Al: tag only the first HTTP request of the first meta-request, not every part.
+         * Stored on the client (first meta-request) and meta-request (first part). */
+        if (!client->first_operation_emitted) {
+            client->first_operation_emitted = true;
+            meta_request->first_request_for_new_client = true;
+        }
     }
 
     /* Per-request feature IDs for the User-Agent m/ section. Derived from what the caller asked for
@@ -702,6 +709,10 @@ int aws_s3_meta_request_init_base(
 
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
+
+    /* Build the cached User-Agent header now that feature_ids and initial_request_message are set.
+     * Per-part stamping will copy this cache instead of re-parsing the SDK header on each request. */
+    aws_s3_init_user_agent_header_cached(meta_request);
 
     if (s_s3_meta_request_init_recv_file(meta_request, options, part_size) != AWS_OP_SUCCESS) {
         goto error;
@@ -979,6 +990,7 @@ static void s_s3_meta_request_destroy(void *user_data) {
     void *meta_request_user_data = meta_request->user_data;
     aws_s3_meta_request_shutdown_fn *shutdown_callback = meta_request->shutdown_callback;
 
+    aws_byte_buf_clean_up(&meta_request->cached_user_agent);
     aws_cached_signing_config_destroy(meta_request->cached_signing_config);
     aws_string_destroy(meta_request->s3express_session_host);
     aws_mutex_clean_up(&meta_request->synced_data.lock);
@@ -1422,8 +1434,7 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
         return;
     }
 
-    /* feature_ids already merges client-level and per-request flags (see aws_s3_meta_request_init_base). */
-    aws_s3_add_user_agent_header(meta_request->allocator, request->send_data.message, meta_request->feature_ids);
+    aws_s3_apply_user_agent_header(meta_request, request->send_data.message);
 
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);

@@ -324,6 +324,9 @@ struct aws_s3_client {
      * copies this and ORs in its own per-request flags (see aws_s3_meta_request_init_base). */
     uint32_t feature_ids;
 
+    /* Set once the first meta request is created, so CLIENT_CREATED_FOR_OP (Al) is emitted once. */
+    bool first_operation_emitted;
+
     /**
      * Optional.
      * Proxy configuration for http connection.
