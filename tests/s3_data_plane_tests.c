@@ -112,6 +112,65 @@ static int s_test_s3_client_create_destroy(struct aws_allocator *allocator, void
     return 0;
 }
 
+AWS_TEST_CASE(test_s3_client_bootstrap_default, s_test_s3_client_bootstrap_default)
+static int s_test_s3_client_bootstrap_default(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* Default options: one loop per logical CPU, up to the default limit. */
+    struct aws_client_bootstrap *bootstrap = aws_s3_client_bootstrap_default(allocator, NULL);
+    ASSERT_NOT_NULL(bootstrap);
+    size_t expected = aws_system_info_processor_count();
+    if (expected > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+        expected = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+    }
+    ASSERT_UINT_EQUALS(expected, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
+    aws_client_bootstrap_release(bootstrap);
+
+    /* A count from the caller is used as given, including a count above the default limit. */
+    struct aws_s3_client_bootstrap_options options = {
+        .event_loop_count = 3,
+        .host_resolver_max_entries = 4,
+        .throughput_target_gbps = 100.0,
+    };
+    bootstrap = aws_s3_client_bootstrap_default(allocator, &options);
+    ASSERT_NOT_NULL(bootstrap);
+    ASSERT_UINT_EQUALS(3, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
+    aws_client_bootstrap_release(bootstrap);
+
+    options.event_loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS + 1;
+    bootstrap = aws_s3_client_bootstrap_default(allocator, &options);
+    ASSERT_NOT_NULL(bootstrap);
+    ASSERT_UINT_EQUALS(
+        AWS_S3_DEFAULT_MAX_EVENT_LOOPS + 1, aws_event_loop_group_get_loop_count(bootstrap->event_loop_group));
+    aws_client_bootstrap_release(bootstrap);
+
+    aws_s3_tester_clean_up(&tester);
+    aws_thread_join_all_managed();
+    return 0;
+}
+
+AWS_TEST_CASE(test_s3_client_create_error_with_null_bootstrap, s_test_s3_client_create_error_with_null_bootstrap)
+static int s_test_s3_client_create_error_with_null_bootstrap(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client_config client_config;
+    AWS_ZERO_STRUCT(client_config);
+
+    ASSERT_NULL(aws_s3_client_new(allocator, &client_config));
+    ASSERT_UINT_EQUALS(AWS_ERROR_INVALID_ARGUMENT, aws_last_error());
+
+    aws_s3_tester_clean_up(&tester);
+    return 0;
+}
+
 AWS_TEST_CASE(test_s3_client_create_error, s_test_s3_client_create_error)
 static int s_test_s3_client_create_error(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
