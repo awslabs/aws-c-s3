@@ -1379,7 +1379,46 @@ struct aws_s3_meta_request_result {
     int error_code;
 };
 
+/* Upper limit on the event loops of the default client bootstrap.
+ * Based on experiments, we never needed more than 64 event loops to reach the target throughput.
+ * The limit of 96 leaves headroom for high-performance instances. */
+#define AWS_S3_DEFAULT_MAX_EVENT_LOOPS 96
+
+/**
+ * Options for aws_s3_client_bootstrap_default(). Zero values select the defaults.
+ */
+struct aws_s3_client_bootstrap_options {
+    /**
+     * Number of event loops in the network event loop group.
+     * 0 selects one per logical CPU, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS. A larger value is used as given.
+     */
+    uint16_t event_loop_count;
+
+    /**
+     * Maximum number of entries in the host resolver cache. 0 selects 16.
+     */
+    size_t host_resolver_max_entries;
+
+    /**
+     * Target throughput in gigabits per second (Gbps). 0 selects the default.
+     * Reserved for sizing the bootstrap from the target. It is ignored for now.
+     */
+    double throughput_target_gbps;
+};
+
 AWS_EXTERN_C_BEGIN
+
+/**
+ * Creates a client bootstrap, with its own event loop group and host resolver, to pass to an S3 client.
+ * By default the event loop group has one event loop per logical CPU, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
+ * To use more event loops, set options->event_loop_count.
+ * options may be NULL to select all defaults.
+ * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.
+ */
+AWS_S3_API
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_bootstrap_options *options);
 
 AWS_S3_API
 struct aws_s3_client *aws_s3_client_new(
