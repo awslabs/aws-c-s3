@@ -383,6 +383,25 @@ enum aws_s3_recv_file_options {
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
 
+enum aws_s3_retry_mode {
+    /**
+     * Default Mode(0). Standard Retry strategy.
+     */
+    AWS_S3_RETRY_MODE_STANDARD = 0,
+    /**
+     * Adaptive Retry Mode: Standard + client-side rate limiting.
+     */
+    AWS_S3_RETRY_MODE_ADAPTIVE,
+    /**
+     * Exponential Backoff mode: Standard retry strategy without token budget.
+     */
+    AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF,
+    /**
+     * No Retry Mode: Each request is attempted exactly once.
+     */
+    AWS_S3_RETRY_MODE_NONE,
+};
+
 /**
  * WARNING: experimental/unstable:
  * Controls how client performance file I/O operations. Only applies to the file based workload.
@@ -637,7 +656,8 @@ struct aws_s3_client_config {
      *   jitter_mode = FULL, initial_bucket_capacity = 500
      */
     struct {
-        /** Maximum number of retries per request. 0 = S3 default (5).
+        /** Maximum number of retries per request. 0 is using S3 default (5).
+         * 0 does not disable retries; set `retry_mode` to `AWS_S3_RETRY_MODE_NONE` for that.
          *  Note: the S3 client default differs from the aws-c-io exponential backoff default (10)
          *  and the aws-c-io standard retry strategy default (3). */
         size_t max_retries;
@@ -657,6 +677,20 @@ struct aws_s3_client_config {
 
         /** Token bucket capacity per host partition (circuit breaker). 0 = default (500). */
         size_t initial_bucket_capacity;
+
+        /**
+         * Retry Mode for choosing different retries strategy.
+         * 0 (AWS_S3_RETRY_MODE_STANDARD) = Standard Retry,
+         * 1 (AWS_S3_RETRY_MODE_ADAPTIVE) = Adaptive Retry,
+         * 2 (AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF) = Exponential backoff, no token budget.
+         * 3 (AWS_S3_RETRY_MODE_NONE) = No Retry.
+         */
+        enum aws_s3_retry_mode retry_mode;
+
+        /**
+         * Adaptive retry mode only: if true, fail when no send token is available instead of waiting. Default false.
+         */
+        bool fast_fail_if_no_token;
     } retry_config;
 
     /**

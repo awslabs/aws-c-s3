@@ -316,9 +316,16 @@ struct aws_s3_client {
     /* Retry strategy used for scheduling request retries. */
     struct aws_retry_strategy *retry_strategy;
 
+    /* When true, retries are disabled: requests make a single attempt with no retry token.
+     * Derived at construction from client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_NONE. */
+    bool disable_retries;
+
     /* Bitmask of enum aws_s3_feature_id derived from client_config at construction. Each meta request
      * copies this and ORs in its own per-request flags (see aws_s3_meta_request_init_base). */
     uint32_t feature_ids;
+
+    /* Set once the first meta request is created, so CLIENT_CREATED_FOR_OP (Al) is emitted once. */
+    bool first_operation_emitted;
 
     /**
      * Optional.

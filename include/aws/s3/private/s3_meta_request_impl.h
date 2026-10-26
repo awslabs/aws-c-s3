@@ -467,6 +467,16 @@ struct aws_s3_meta_request {
      * aws_s3_meta_request_options at creation time. Immutable after init. */
     uint32_t feature_ids;
 
+    /* Pre-built User-Agent header value, computed once at init from the SDK's existing header +
+     * CRT product token + merged m/ section (SDK IDs + operation-level CRT IDs). Per-part
+     * stamping copies this and may append per-part-only feature IDs. */
+    struct aws_byte_buf cached_user_agent;
+    bool cached_ua_has_metrics; /* true if cached_user_agent already contains an m/ section */
+
+    /* True when this is the first meta-request on a newly created client. Consumed (set to false)
+     * on the first HTTP request so CLIENT_CREATED_FOR_OP (Al) appears exactly once. */
+    bool first_request_for_new_client;
+
     /* Destination path for a download. The file itself is created or truncated once at init through a
      * short-lived stdio handle; received bytes are written only through the descriptors in
      * `recv_file_write_fd_slots` and `recv_file_ordered_fds`. */
