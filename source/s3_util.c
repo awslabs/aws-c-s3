@@ -1206,8 +1206,7 @@ void aws_s3_add_user_agent_header(
     AWS_PRECONDITION(message);
 
     /* Lightweight shim: build a minimal meta_request-like state on the stack, run init, stamp. */
-    struct aws_s3_meta_request fake;
-    AWS_ZERO_STRUCT(fake);
+    struct aws_s3_meta_request fake = {0};
     fake.allocator = allocator;
     fake.initial_request_message = message;
     fake.feature_ids = feature_ids;
