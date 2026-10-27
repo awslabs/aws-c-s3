@@ -102,6 +102,9 @@ static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 /* Eight threads is enough to saturate most disk setups. Mirroring the full event-loop count on a
  * large host (e.g. 192 vCPUs) wastes threads and file descriptors without improving throughput. */
 static const uint16_t s_default_max_num_file_io_threads = 8;
+/* 16 is the host resolver size that downstream callers already use by default, so we use it too.
+ * We can change it if we find an issue with it. */
+static const size_t s_default_host_resolver_max_entries = 16;
 
 /* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
  * object order. Consulted below both the request and the client setting, so it changes the default rather
@@ -252,6 +255,10 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #endif
 }
 
+uint64_t aws_s3_default_part_size(void) {
+    return g_default_part_size_fallback;
+}
+
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
     /*
      * Resolve the effective throughput used for default memory pool sizing.
@@ -385,6 +392,50 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     struct aws_s3express_credentials_provider *s3express_provider =
         aws_s3express_credentials_provider_new_default(allocator, &options);
     return s3express_provider;
+}
+
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_bootstrap_options *options) {
+    AWS_PRECONDITION(allocator);
+
+    size_t loop_count = options != NULL ? options->event_loop_count : 0;
+    if (loop_count == 0) {
+        loop_count = aws_system_info_processor_count();
+        if (loop_count > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+            loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+        }
+    }
+
+    size_t max_resolver_entries = options != NULL ? options->host_resolver_max_entries : 0;
+    if (max_resolver_entries == 0) {
+        max_resolver_entries = s_default_host_resolver_max_entries;
+    }
+
+    struct aws_event_loop_group *event_loop_group =
+        aws_event_loop_group_new_default(allocator, (uint16_t)loop_count, NULL);
+    if (event_loop_group == NULL) {
+        return NULL;
+    }
+
+    struct aws_host_resolver_default_options resolver_options = {
+        .max_entries = max_resolver_entries,
+        .el_group = event_loop_group,
+    };
+    struct aws_host_resolver *host_resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+    struct aws_client_bootstrap *bootstrap = NULL;
+    if (host_resolver != NULL) {
+        struct aws_client_bootstrap_options bootstrap_options = {
+            .event_loop_group = event_loop_group,
+            .host_resolver = host_resolver,
+        };
+        bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+    }
+
+    /* The bootstrap holds its own references. */
+    aws_host_resolver_release(host_resolver);
+    aws_event_loop_group_release(event_loop_group);
+    return bootstrap;
 }
 
 struct aws_s3_client *aws_s3_client_new(
@@ -618,6 +669,10 @@ struct aws_s3_client *aws_s3_client_new(
         if (ec2_instance.len > 0) {
             client->feature_ids |= AWS_S3_FEATURE_ID_ON_EC2;
         }
+    }
+
+    if (client_config->buffer_pool_factory_fn) {
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL;
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -858,12 +913,44 @@ struct aws_s3_client *aws_s3_client_new(
             .jitter_mode = client_config->retry_config.jitter_mode,
         };
 
-        struct aws_standard_retry_options retry_options = {
+        struct aws_standard_retry_options standard_retry_options = {
             .backoff_retry_options = backoff_retry_options,
             .initial_bucket_capacity = client_config->retry_config.initial_bucket_capacity,
         };
 
-        client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+        switch (client_config->retry_config.retry_mode) {
+            case AWS_S3_RETRY_MODE_NONE: {
+                /* Retries disabled: use the no-retry strategy. Record the mode on the
+                 * client so the request path makes a single token-less
+                 * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
+                client->disable_retries = true;
+
+                struct aws_no_retry_options no_retry_options;
+                AWS_ZERO_STRUCT(no_retry_options);
+                client->retry_strategy = aws_retry_strategy_new_no_retry(allocator, &no_retry_options);
+                break;
+            }
+            case AWS_S3_RETRY_MODE_ADAPTIVE: {
+                /* Adaptive: standard retry plus client-side rate limiting. */
+                struct aws_adaptive_retry_options adaptive_retry_options = {
+                    .standard_options = standard_retry_options,
+                    .fast_fail_if_no_token = client_config->retry_config.fast_fail_if_no_token,
+                };
+                client->retry_strategy = aws_retry_strategy_new_adaptive(allocator, &adaptive_retry_options);
+                break;
+            }
+            case AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF: {
+                /* Exponential backoff: jittered retries up to max_retries, no token bucket. */
+                client->retry_strategy = aws_retry_strategy_new_exponential_backoff(allocator, &backoff_retry_options);
+                break;
+            }
+
+            case AWS_S3_RETRY_MODE_STANDARD:
+            default:
+                /* Standard: exponential backoff plus a per-host token bucket. Also used as default mode. */
+                client->retry_strategy = aws_retry_strategy_new_standard(allocator, &standard_retry_options);
+                break;
+        }
 
         if (client->retry_strategy == NULL) {
             /* if something failed in creation of retry_strategy, we should error instead of having a null
@@ -2871,6 +2958,15 @@ static void s_s3_client_create_connection_for_request_default(
     AWS_ASSERT(result == AWS_OP_SUCCESS);
     (void)result;
 
+    if (client->disable_retries) {
+        /* Retries disabled (max attempts = 1): skip retry-token acquisition. The no-retry strategy
+         * would deny it (AWS_IO_RETRY_PERMISSION_DENIED) and fail the request before it is ever sent.
+         * Send directly through the acquired-token callback with a NULL token (same pattern
+         * the retry path uses). The connection-finish path will not schedule a retry for a NULL token. */
+        s_s3_client_acquired_retry_token(client->retry_strategy, AWS_ERROR_SUCCESS, NULL /*token*/, connection);
+        return;
+    }
+
     if (aws_retry_strategy_acquire_retry_token(
             client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, connection, 0)) {
 
@@ -2930,7 +3026,10 @@ static void s_s3_client_acquired_retry_token(
         goto error_clean_up;
     }
 
-    AWS_ASSERT(token);
+    /* token is NULL when retries are disabled (max attempts = 1): the request is attempted exactly
+     * once and the connection-finish path will not schedule a retry (see its NULL retry_token guard
+     * in aws_s3_client_notify_connection_finished). Otherwise a successful acquire always has a token. */
+    AWS_ASSERT(token != NULL || client->disable_retries);
 
     connection->retry_token = token;
 
@@ -3051,12 +3150,23 @@ void aws_s3_client_notify_connection_finished(
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
-                (void *)client,
-                (void *)request,
-                (void *)meta_request);
+            if (client->disable_retries) {
+                /* Expected when retries are disabled (max attempts = 1): the request was attempted
+                 * once with no retry token, so there is nothing to retry. Not an error. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Not scheduling retry of request %p for meta request %p: retries are disabled.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            }
 
             goto reset_connection;
         }

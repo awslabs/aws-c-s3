@@ -383,6 +383,25 @@ enum aws_s3_recv_file_options {
     AWS_S3_RECV_FILE_WRITE_TO_POSITION,
 };
 
+enum aws_s3_retry_mode {
+    /**
+     * Default Mode(0). Standard Retry strategy.
+     */
+    AWS_S3_RETRY_MODE_STANDARD = 0,
+    /**
+     * Adaptive Retry Mode: Standard + client-side rate limiting.
+     */
+    AWS_S3_RETRY_MODE_ADAPTIVE,
+    /**
+     * Exponential Backoff mode: Standard retry strategy without token budget.
+     */
+    AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF,
+    /**
+     * No Retry Mode: Each request is attempted exactly once.
+     */
+    AWS_S3_RETRY_MODE_NONE,
+};
+
 /**
  * WARNING: experimental/unstable:
  * Controls how client performance file I/O operations. Only applies to the file based workload.
@@ -637,7 +656,8 @@ struct aws_s3_client_config {
      *   jitter_mode = FULL, initial_bucket_capacity = 500
      */
     struct {
-        /** Maximum number of retries per request. 0 = S3 default (5).
+        /** Maximum number of retries per request. 0 is using S3 default (5).
+         * 0 does not disable retries; set `retry_mode` to `AWS_S3_RETRY_MODE_NONE` for that.
          *  Note: the S3 client default differs from the aws-c-io exponential backoff default (10)
          *  and the aws-c-io standard retry strategy default (3). */
         size_t max_retries;
@@ -657,6 +677,20 @@ struct aws_s3_client_config {
 
         /** Token bucket capacity per host partition (circuit breaker). 0 = default (500). */
         size_t initial_bucket_capacity;
+
+        /**
+         * Retry Mode for choosing different retries strategy.
+         * 0 (AWS_S3_RETRY_MODE_STANDARD) = Standard Retry,
+         * 1 (AWS_S3_RETRY_MODE_ADAPTIVE) = Adaptive Retry,
+         * 2 (AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF) = Exponential backoff, no token budget.
+         * 3 (AWS_S3_RETRY_MODE_NONE) = No Retry.
+         */
+        enum aws_s3_retry_mode retry_mode;
+
+        /**
+         * Adaptive retry mode only: if true, fail when no send token is available instead of waiting. Default false.
+         */
+        bool fast_fail_if_no_token;
     } retry_config;
 
     /**
@@ -1049,7 +1083,9 @@ struct aws_s3_meta_request_options {
      * buffer's contents are undefined.
      *
      * With other options:
-     * - With read backpressure enabled, the client opens the window itself as data lands.
+     * - With read backpressure enabled, the client opens the read window itself as each part lands in
+     *   the buffer, since there are no body callbacks to call aws_s3_meta_request_increment_read_window()
+     *   from. The caller doesn't need to.
      * - Resume tokens can't resume this download, but a paused one can be continued manually: the
      *   first aws_s3_meta_request_resume_token_continuous_downloaded_bytes() bytes of the buffer are
      *   valid, so issue a ranged GET for the rest of the range into a recv_buffer that views the
@@ -1064,9 +1100,8 @@ struct aws_s3_meta_request_options {
      *   buffer is smaller than a part. If set, it must equal the capacity. Otherwise creation fails with
      *   AWS_ERROR_INVALID_ARGUMENT.
      * - The capacity must hold the whole requested range. Otherwise the meta request fails with
-     *   AWS_ERROR_SHORT_BUFFER.
-     * - With a Range header that has no end (bytes=A-), the capacity must also hold one part
-     *   (part_size). Otherwise the meta request fails with AWS_ERROR_SHORT_BUFFER.
+     *   AWS_ERROR_SHORT_BUFFER. A larger capacity is fine: `len` is set to the bytes downloaded, and the
+     *   rest of the buffer is left untouched.
      * - The client's buffer pool must support pre-allocated buffers. The default pool does; a custom
      *   pool must implement add_preallocated_buffer. Otherwise creation fails with
      *   AWS_ERROR_UNSUPPORTED_OPERATION.
@@ -1390,7 +1425,46 @@ struct aws_s3_meta_request_result {
     int error_code;
 };
 
+/* Upper limit on the event loops of the default client bootstrap.
+ * Based on experiments, we never needed more than 64 event loops to reach the target throughput.
+ * The limit of 96 leaves headroom for high-performance instances. */
+#define AWS_S3_DEFAULT_MAX_EVENT_LOOPS 96
+
+/**
+ * Options for aws_s3_client_bootstrap_default(). Zero values select the defaults.
+ */
+struct aws_s3_client_bootstrap_options {
+    /**
+     * Number of event loops in the network event loop group.
+     * 0 selects one per logical CPU, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS. A larger value is used as given.
+     */
+    uint16_t event_loop_count;
+
+    /**
+     * Maximum number of entries in the host resolver cache. 0 selects 16.
+     */
+    size_t host_resolver_max_entries;
+
+    /**
+     * Target throughput in gigabits per second (Gbps). 0 selects the default.
+     * Reserved for sizing the bootstrap from the target. It is ignored for now.
+     */
+    double throughput_target_gbps;
+};
+
 AWS_EXTERN_C_BEGIN
+
+/**
+ * Creates a client bootstrap, with its own event loop group and host resolver, to pass to an S3 client.
+ * By default the event loop group has one event loop per logical CPU, up to AWS_S3_DEFAULT_MAX_EVENT_LOOPS.
+ * To use more event loops, set options->event_loop_count.
+ * options may be NULL to select all defaults.
+ * Release the result with aws_client_bootstrap_release(). Returns NULL on failure, with an error raised.
+ */
+AWS_S3_API
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_bootstrap_options *options);
 
 AWS_S3_API
 struct aws_s3_client *aws_s3_client_new(

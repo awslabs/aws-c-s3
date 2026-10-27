@@ -144,7 +144,7 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_get_new(
         /* The first request is normally one full part, which a recv_buffer smaller than a part can't hold.
          * Set the hint to the buffer's capacity so the first request asks for at most that much. A bigger
          * object wouldn't fit anyway. (A caller's hint must already equal the capacity.) Hints are only used
-         * without a Range header. */
+         * without a Range header; a Range with no end is capped the same way where its first request is built. */
         auto_ranged_get->object_size_hint_available = true;
         auto_ranged_get->object_size_hint = auto_ranged_get->base.recv_buffer->capacity;
     }
@@ -356,6 +356,12 @@ static bool s_s3_auto_ranged_get_update(
                                     first_part_size,
                                     auto_ranged_get->initial_range_end - auto_ranged_get->initial_range_start + 1);
                             }
+                            /* Ask for no more than recv_buffer can hold. Without an end, the range's length isn't
+                             * known yet: a range that fits is then downloaded whole, and one that doesn't fails with
+                             * AWS_ERROR_SHORT_BUFFER once the first response gives its length. */
+                            if (meta_request->recv_buffer != NULL) {
+                                first_part_size = aws_min_u64(first_part_size, meta_request->recv_buffer->capacity);
+                            }
 
                             auto_ranged_get->synced_data.first_part_size = first_part_size;
                         }
@@ -440,9 +446,11 @@ static bool s_s3_auto_ranged_get_update(
                 goto has_work_remaining;
             }
 
-            /* If there are parts that have not attempted delivery to the caller, then there is still work being done.
-             */
-            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts) {
+            /* If there are parts that have not attempted delivery to the caller or that have not yet completed
+             * delivery, then there is still work being done. */
+            if (meta_request->synced_data.num_parts_delivery_completed < auto_ranged_get->synced_data.total_num_parts ||
+                meta_request->synced_data.num_parts_delivery_completed <
+                    meta_request->synced_data.num_parts_delivery_sent) {
                 goto has_work_remaining;
             }
         } else {
