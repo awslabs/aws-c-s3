@@ -150,7 +150,7 @@ struct aws_s3_buffer_pool_vtable {
     int (*add_preallocated_buffer)(
         struct aws_s3_buffer_pool *pool,
         struct aws_s3_meta_request *meta_request,
-        const struct aws_byte_buf *buffer);
+        struct aws_byte_buf *buffer);
 
     /**
      * Required if add_preallocated_buffer is implemented. Stop serving `meta_request` from its
@@ -180,7 +180,7 @@ AWS_S3_API void aws_s3_buffer_pool_trim(struct aws_s3_buffer_pool *buffer_pool);
 AWS_S3_API int aws_s3_buffer_pool_add_preallocated_buffer(
     struct aws_s3_buffer_pool *buffer_pool,
     struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_buf *buffer);
+    struct aws_byte_buf *buffer);
 
 /**
  * Stop serving `meta_request` from its pre-allocated buffer. No-op if the pool doesn't implement it.

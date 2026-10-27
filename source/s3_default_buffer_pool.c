@@ -167,7 +167,7 @@ static uint64_t s_default_pool_derive_aligned_buffer_size(
 static int s_default_pool_add_preallocated_buffer(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_buf *buffer);
+    struct aws_byte_buf *buffer);
 static void s_default_pool_remove_preallocated_buffer(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_meta_request *meta_request);
@@ -791,7 +791,7 @@ static struct aws_future_s3_buffer_ticket *s_reserve_from_preallocated_buffer(
 static int s_default_pool_add_preallocated_buffer(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_buf *buffer) {
+    struct aws_byte_buf *buffer) {
 
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
     struct aws_s3_preallocated_entry *entry =

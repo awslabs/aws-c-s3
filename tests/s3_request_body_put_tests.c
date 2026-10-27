@@ -56,7 +56,7 @@ static void s_rbp_wrapper_trim(struct aws_s3_buffer_pool *pool) {
 static int s_rbp_wrapper_add_preallocated(
     struct aws_s3_buffer_pool *pool,
     struct aws_s3_meta_request *meta_request,
-    const struct aws_byte_buf *buffer) {
+    struct aws_byte_buf *buffer) {
     struct rbp_wrapper_pool *impl = pool->impl;
     ++s_rbp_pool_stats.num_adds;
     return aws_s3_buffer_pool_add_preallocated_buffer(impl->inner, meta_request, buffer);
