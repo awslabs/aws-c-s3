@@ -377,13 +377,13 @@ static int s_test_s3_request_body_put_multipart_pool_unsupported(struct aws_allo
     aws_http_message_release(message);
 
     /* Single PUT (at or below the multipart threshold): works without the pool. */
-    struct aws_byte_cursor small = aws_byte_cursor_from_array(data, MB_TO_BYTES(1));
+    struct aws_byte_cursor small_body = aws_byte_cursor_from_array(data, MB_TO_BYTES(1));
     int error_code = AWS_ERROR_UNKNOWN;
     ASSERT_SUCCESS(s_rbp_put(
         allocator,
         &env,
         aws_byte_cursor_from_buf(&key),
-        small,
+        small_body,
         AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         AWS_SCA_NONE,
         NULL /*resume_token*/,
@@ -394,7 +394,7 @@ static int s_test_s3_request_body_put_multipart_pool_unsupported(struct aws_allo
     /* Verify with a client on the default pool. */
     struct rbp_env download_env;
     ASSERT_SUCCESS(s_rbp_env_init(allocator, &download_env, NULL));
-    ASSERT_SUCCESS(s_rbp_expect_object(allocator, &download_env, aws_byte_cursor_from_buf(&key), small));
+    ASSERT_SUCCESS(s_rbp_expect_object(allocator, &download_env, aws_byte_cursor_from_buf(&key), small_body));
     s_rbp_env_clean_up(&download_env);
 
     aws_mem_release(allocator, data);
