@@ -1067,15 +1067,11 @@ static void s_s3_auto_ranged_get_request_finished(
                     "id=%p ETag received for the meta request. value is: " PRInSTR "",
                     (void *)meta_request,
                     AWS_BYTE_CURSOR_PRI(etag_header_value));
-
-                if (!auto_ranged_get->initial_message_has_if_match_header) {
-                    /* Store ETag if needed for If-Match header. A second discovery request can
-                     * finish after an empty-file redo: free any previously captured value so the
-                     * latest discovery wins and nothing leaks. */
-                    aws_string_destroy(auto_ranged_get->etag);
-                    auto_ranged_get->etag =
-                        aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
-                }
+                /* Always store the ETag, even when the caller set their own If-Match, since the resume token needs it.
+                 * A second discovery request can finish after an empty-file redo: free any previously captured value so
+                 * the latest discovery wins and nothing leaks. */
+                aws_string_destroy(auto_ranged_get->etag);
+                auto_ranged_get->etag = aws_string_new_from_cursor(auto_ranged_get->base.allocator, &etag_header_value);
             } else {
                 AWS_LOGF_ERROR(AWS_LS_S3_META_REQUEST, "id=%p ETag headers are missing", (void *)meta_request);
                 aws_raise_error(AWS_ERROR_S3_MISSING_ETAG);
