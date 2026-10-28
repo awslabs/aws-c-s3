@@ -586,13 +586,10 @@ void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, s
     char request_value[64];
     uint32_t attempt = request->num_times_prepared + 1;
     uint32_t max_attempts = meta_request->client->max_attempts;
-    int len = max_attempts > 0 ? snprintf(
-                                     request_value,
-                                     sizeof(request_value),
-                                     "attempt=%" PRIu32 "; max=%" PRIu32,
-                                     attempt,
-                                     max_attempts)
-                               : snprintf(request_value, sizeof(request_value), "attempt=%" PRIu32, attempt);
+    int len =
+        max_attempts > 0
+            ? snprintf(request_value, sizeof(request_value), "attempt=%" PRIu32 "; max=%" PRIu32, attempt, max_attempts)
+            : snprintf(request_value, sizeof(request_value), "attempt=%" PRIu32, attempt);
     AWS_ASSERT(len > 0 && (size_t)len < sizeof(request_value));
 
     aws_http_headers_set(
