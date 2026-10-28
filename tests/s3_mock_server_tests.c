@@ -4420,9 +4420,8 @@ static struct aws_s3_meta_request *s_get_pause_token_mock_meta_request_factory(
     return meta_request;
 }
 
-TEST_CASE(get_pause_token_mock_server) {
-    (void)ctx;
-
+/* When `if_match` is non-NULL, the initial message carries the caller's own If-Match header. */
+static int s_get_pause_token_mock_server_helper(struct aws_allocator *allocator, const char *if_match) {
     struct aws_s3_tester tester;
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
@@ -4455,6 +4454,21 @@ TEST_CASE(get_pause_token_mock_server) {
         .mock_server = true,
         .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE,
     };
+
+    struct aws_uri mock_server;
+    AWS_ZERO_STRUCT(mock_server);
+    struct aws_http_message *message = NULL;
+    if (if_match != NULL) {
+        ASSERT_SUCCESS(aws_uri_init_parse(&mock_server, allocator, &g_mock_server_uri));
+        message = aws_s3_test_get_object_request_new(allocator, *aws_uri_authority(&mock_server), object_path);
+        struct aws_http_header if_match_header = {
+            .name = g_if_match_header_name,
+            .value = aws_byte_cursor_from_c_str(if_match),
+        };
+        ASSERT_SUCCESS(aws_http_message_add_header(message, if_match_header));
+        get_options.message = message;
+    }
+
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
     ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &get_options, &out_results));
@@ -4477,16 +4491,33 @@ TEST_CASE(get_pause_token_mock_server) {
     ASSERT_UINT_EQUALS(256 * 1024 - 1, aws_s3_meta_request_resume_token_object_range_end(token));
     ASSERT_UINT_EQUALS(256 * 1024, aws_s3_meta_request_resume_token_object_size(token));
 
+    /* The token carries the ETag from the response whether or not the caller set its own If-Match. */
     struct aws_byte_cursor etag = aws_s3_meta_request_resume_token_etag(token);
     ASSERT_TRUE(aws_byte_cursor_eq_c_str(&etag, "pausetokenmocketag"));
 
     aws_s3_meta_request_resume_token_release(test_data->resume_token);
     aws_mutex_clean_up(&test_data->mutex);
     aws_s3_meta_request_test_results_clean_up(&out_results);
+    if (message != NULL) {
+        aws_http_message_release(message);
+        aws_uri_clean_up(&mock_server);
+    }
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
+}
+
+TEST_CASE(get_pause_token_mock_server) {
+    (void)ctx;
+    return s_get_pause_token_mock_server_helper(allocator, NULL);
+}
+
+/* A caller-supplied If-Match must not cost the resume token its ETag: callers persist the token and send
+ * the ETag as If-Match on resume, and the token from a paused resumed download is built the same way. */
+TEST_CASE(get_pause_token_with_if_match_mock_server) {
+    (void)ctx;
+    return s_get_pause_token_mock_server_helper(allocator, "pausetokenmocketag");
 }
 
 /* GET pause while writing to a file out of object order: the token's two byte counters must diverge.
