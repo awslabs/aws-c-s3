@@ -120,6 +120,35 @@ static struct aws_s3_buffer_pool *s_rbp_pool_with_preallocated(
     return s_rbp_wrapper_pool_new(allocator, config, &s_rbp_vtable_preallocated);
 }
 
+/* A pool that hands the first two parts each other's slot, as a buggy or racing pool might: a reservation at
+ * local_offset 0 gets the view meant for the second part (at the 8 MiB part size), and the second part gets the
+ * view at 0. */
+static struct aws_future_s3_buffer_ticket *s_rbp_swapping_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+    if (meta.local_offset == 0) {
+        meta.local_offset = MB_TO_BYTES(8);
+    } else if (meta.local_offset == MB_TO_BYTES(8)) {
+        meta.local_offset = 0;
+    }
+    return s_rbp_wrapper_reserve(pool, meta);
+}
+
+static struct aws_s3_buffer_pool_vtable s_rbp_vtable_swapping = {
+    .reserve = s_rbp_swapping_reserve,
+    .trim = s_rbp_wrapper_trim,
+    .add_preallocated_buffer = s_rbp_wrapper_add_preallocated,
+    .remove_preallocated_buffer = s_rbp_wrapper_remove_preallocated,
+};
+
+static struct aws_s3_buffer_pool *s_rbp_swapping_pool(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
+    (void)user_data;
+    return s_rbp_wrapper_pool_new(allocator, config, &s_rbp_vtable_swapping);
+}
+
 /* ---------------------------------------------------------------------------------------------------
  * Helpers
  * ------------------------------------------------------------------------------------------------ */
@@ -303,6 +332,39 @@ static int s_test_s3_request_body_put_multipart(struct aws_allocator *allocator,
         AWS_SCA_NONE));
     /* The upload registered request_body with the pool (the download's recv_buffer is the second add). */
     ASSERT_INT_EQUALS(2, s_rbp_pool_stats.num_adds);
+    s_rbp_env_clean_up(&env);
+    return 0;
+}
+
+/* A pool that gives the first two parts each other's slot: the meta request must catch the wrong address and fail
+ * with AWS_ERROR_INVALID_STATE instead of sending a part from the wrong place. The same pool without the swap is
+ * test_s3_request_body_put_multipart, which succeeds. */
+AWS_TEST_CASE(test_s3_request_body_put_pool_swaps_parts, s_test_s3_request_body_put_pool_swaps_parts)
+static int s_test_s3_request_body_put_pool_swaps_parts(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct rbp_env env;
+    ASSERT_SUCCESS(s_rbp_env_init(allocator, &env, s_rbp_swapping_pool));
+
+    struct aws_byte_buf key;
+    ASSERT_SUCCESS(aws_s3_tester_upload_file_path_init(
+        allocator, &key, aws_byte_cursor_from_c_str("/request-body-put-pool-swaps-parts.bin")));
+    uint8_t *data = aws_mem_acquire(allocator, RBP_MULTIPART_SIZE);
+    s_rbp_fill(data, RBP_MULTIPART_SIZE);
+
+    int error_code = AWS_ERROR_UNKNOWN;
+    ASSERT_SUCCESS(s_rbp_put(
+        allocator,
+        &env,
+        aws_byte_cursor_from_buf(&key),
+        aws_byte_cursor_from_array(data, RBP_MULTIPART_SIZE),
+        AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        AWS_SCA_NONE,
+        NULL /*resume_token*/,
+        &error_code));
+    ASSERT_INT_EQUALS(AWS_ERROR_INVALID_STATE, error_code);
+
+    aws_mem_release(allocator, data);
+    aws_byte_buf_clean_up(&key);
     s_rbp_env_clean_up(&env);
     return 0;
 }

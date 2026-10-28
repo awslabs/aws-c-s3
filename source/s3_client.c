@@ -2455,7 +2455,49 @@ struct aws_s3_reserve_memory_payload {
     struct aws_future_s3_buffer_ticket *buffer_future;
     aws_s3_meta_request_prepare_request_callback_fn *callback;
     void *user_data;
+    /* What was reserved: checked against the ticket's buffer when the request has a pre-allocated buffer. */
+    uint64_t local_offset;
+    size_t size;
 };
+
+/* For a meta request served from a pre-allocated buffer (recv_buffer or request_body), the ticket's buffer must be
+ * exactly that memory at the reserved local_offset, with room for the reserved size. Anything else (ex. a custom pool
+ * handing one part another part's slot) would put data in the wrong place, so it must be caught before it's used. */
+static bool s_ticket_is_expected_view(
+    struct aws_s3_meta_request *meta_request,
+    struct aws_s3_buffer_ticket *ticket,
+    uint64_t local_offset,
+    size_t size) {
+
+    const uint8_t *base = NULL;
+    size_t capacity = 0;
+    if (meta_request->recv_buffer != NULL) {
+        base = meta_request->recv_buffer->buffer;
+        capacity = meta_request->recv_buffer->capacity;
+    } else if (meta_request->request_body.ptr != NULL) {
+        base = meta_request->request_body.ptr;
+        capacity = meta_request->request_body.len;
+    } else {
+        return true; /* Pool memory: nothing to check against. */
+    }
+
+    struct aws_byte_buf view = aws_s3_buffer_ticket_claim(ticket);
+    if (local_offset > capacity || size > capacity - local_offset || view.buffer != base + local_offset ||
+        view.capacity < size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: The buffer pool returned the wrong buffer for a reservation of %zu bytes at local_offset %" PRIu64
+            " (got %p with capacity %zu, expected %p).",
+            (void *)meta_request,
+            size,
+            local_offset,
+            (void *)view.buffer,
+            view.capacity,
+            (void *)(local_offset <= capacity ? base + local_offset : NULL));
+        return false;
+    }
+    return true;
+}
 
 static void s_s3_prepare_acquire_mem_callback_and_destroy(
     struct aws_s3_reserve_memory_payload *payload,
@@ -2581,6 +2623,14 @@ static void s_on_pool_buffer_reserved(void *user_data) {
 
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
 
+    /* Fail the request through the same path as a failed reservation (which also takes it off the pending list),
+     * before any data is written or read. The request releases the ticket when it's destroyed. */
+    if (!s_ticket_is_expected_view(meta_request, request->ticket, payload->local_offset, payload->size)) {
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, AWS_ERROR_INVALID_STATE);
+        s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
+        return;
+    }
+
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -2687,6 +2737,8 @@ void s_acquire_mem_and_prepare_request(
                 .size = aws_min_size(request->buffer_size, request_size),
                 .local_offset = local_offset,
             };
+            payload->local_offset = meta.local_offset;
+            payload->size = meta.size;
             payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
         }
 

@@ -354,6 +354,36 @@ static struct aws_s3_buffer_pool *s_rb_recording_pool(
     return s_rb_wrapper_pool_new(allocator, config, &s_rb_wrapper_vtable_recording);
 }
 
+/* A custom pool that hands the first two parts each other's slot, as a buggy or racing pool might: a reservation at
+ * local_offset 0 gets the view meant for the second part, and the second part gets the view at 0. */
+static uint64_t s_rb_swap_part_size;
+
+static struct aws_future_s3_buffer_ticket *s_rb_swapping_reserve(
+    struct aws_s3_buffer_pool *pool,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+    if (meta.local_offset == 0) {
+        meta.local_offset = s_rb_swap_part_size;
+    } else if (meta.local_offset == s_rb_swap_part_size) {
+        meta.local_offset = 0;
+    }
+    return s_rb_wrapper_reserve(pool, meta);
+}
+
+static struct aws_s3_buffer_pool_vtable s_rb_wrapper_vtable_swapping = {
+    .reserve = s_rb_swapping_reserve,
+    .trim = s_rb_wrapper_trim,
+    .add_preallocated_buffer = s_rb_wrapper_add_preallocated,
+    .remove_preallocated_buffer = s_rb_wrapper_remove_preallocated,
+};
+
+static struct aws_s3_buffer_pool *s_rb_swapping_pool(
+    struct aws_allocator *allocator,
+    struct aws_s3_buffer_pool_config config,
+    void *user_data) {
+    (void)user_data;
+    return s_rb_wrapper_pool_new(allocator, config, &s_rb_wrapper_vtable_swapping);
+}
+
 static int s_rb_expect_create_fails(
     struct aws_allocator *allocator,
     struct aws_s3_meta_request_options *options,
@@ -808,6 +838,22 @@ static int s_test_s3_recv_buffer_custom_pool_with_preallocated(struct aws_alloca
     };
     struct rb_get get = {.key = g_pre_existing_object_10MB};
     ASSERT_SUCCESS(s_rb_expect(allocator, &opts, &get, MB_TO_BYTES(10), AWS_ERROR_SUCCESS, 0, MB_TO_BYTES(10)));
+    return 0;
+}
+
+/* A custom pool that gives the first two parts each other's slot: the meta request must catch the wrong address and
+ * fail with AWS_ERROR_INVALID_STATE before writing anything, so the buffer is left untouched. The same pool without
+ * the swap is test_s3_recv_buffer_custom_pool_with_preallocated, which succeeds. */
+AWS_TEST_CASE(test_s3_recv_buffer_pool_swaps_parts, s_test_s3_recv_buffer_pool_swaps_parts)
+static int s_test_s3_recv_buffer_pool_swaps_parts(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    s_rb_swap_part_size = MB_TO_BYTES(1);
+    struct rb_env_options opts = {
+        .part_size = MB_TO_BYTES(1),
+        .buffer_pool_factory_fn = s_rb_swapping_pool,
+    };
+    struct rb_get get = {.key = g_pre_existing_object_10MB};
+    ASSERT_SUCCESS(s_rb_expect(allocator, &opts, &get, MB_TO_BYTES(10), AWS_ERROR_INVALID_STATE, 0, 0));
     return 0;
 }
 
