@@ -12,6 +12,7 @@
 #include <aws/common/mutex.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
+#include <aws/common/uuid.h>
 #include <aws/http/request_response.h>
 
 #include "aws/s3/private/s3_checksums.h"
@@ -481,6 +482,11 @@ struct aws_s3_meta_request {
      * stamping copies this and may append per-part-only feature IDs. */
     struct aws_byte_buf cached_user_agent;
     bool cached_ua_has_metrics; /* true if cached_user_agent already contains an m/ section */
+
+    /* amz-sdk-invocation-id text for this operation, shared by all of its requests and retries.
+     * Empty when the caller set their own id. */
+    uint8_t invocation_id_storage[AWS_UUID_STR_LEN];
+    struct aws_byte_buf invocation_id;
 
     /* True when this is the first meta-request on a newly created client. Consumed (set to false)
      * on the first HTTP request so CLIENT_CREATED_FOR_OP (Al) appears exactly once. */

@@ -1078,39 +1078,7 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     return AWS_OP_SUCCESS;
 }
 
-/* Stub factory: stop after the client has applied its headers. */
-static struct aws_s3_meta_request *s_meta_request_factory_fail(
-    struct aws_s3_client *client,
-    const struct aws_s3_meta_request_options *options) {
-    (void)client;
-    (void)options;
-    aws_raise_error(AWS_ERROR_INVALID_STATE);
-    return NULL;
-}
-
-/* Run make_meta_request on message so the invocation id is applied. */
-static void s_make_meta_request_with_message(struct aws_s3_client *client, struct aws_http_message *message) {
-    struct aws_s3_meta_request_options options;
-    AWS_ZERO_STRUCT(options);
-    options.type = AWS_S3_META_REQUEST_TYPE_DEFAULT;
-    options.message = message;
-
-    AWS_FATAL_ASSERT(aws_s3_client_make_meta_request(client, &options) == NULL);
-    aws_reset_error();
-}
-
-/* Build a request message with a Host header. */
-static struct aws_http_message *s_new_message_with_host(struct aws_allocator *allocator) {
-    struct aws_http_message *message = aws_http_message_new_request(allocator);
-    struct aws_http_header host_header = {
-        .name = g_host_header_name,
-        .value = aws_byte_cursor_from_c_str("example-bucket.s3.us-west-2.amazonaws.com"),
-    };
-    AWS_FATAL_ASSERT(aws_http_message_add_header(message, host_header) == AWS_OP_SUCCESS);
-    return message;
-}
-
-/* Test amz-sdk-invocation-id is set once per operation and a caller-set id is kept. */
+/* Test amz-sdk-invocation-id is set once per operation and the caller's message is never modified. */
 AWS_TEST_CASE(test_s3_invocation_id_header, s_test_s3_invocation_id_header)
 static int s_test_s3_invocation_id_header(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1119,57 +1087,63 @@ static int s_test_s3_invocation_id_header(struct aws_allocator *allocator, void 
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client_config client_config;
-    AWS_ZERO_STRUCT(client_config);
-    /* No request is sent, so TLS is not needed. */
-    client_config.tls_mode = AWS_MR_TLS_DISABLED;
-    ASSERT_SUCCESS(aws_s3_tester_bind_client(
-        &tester, &client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+    /* No caller id: each operation built from the same message gets its own UUID. */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+            .message = message,
+        };
 
-    struct aws_s3_client *client = aws_s3_client_new(allocator, &client_config);
-    ASSERT_NOT_NULL(client);
+        struct aws_s3_meta_request *first = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(first);
+        struct aws_byte_cursor first_cursor = aws_byte_cursor_from_buf(&first->invocation_id);
+        ASSERT_UINT_EQUALS(AWS_UUID_STR_LEN - 1, first_cursor.len);
+        struct aws_uuid first_id;
+        ASSERT_SUCCESS(aws_uuid_init_from_str(&first_id, &first_cursor));
 
-    struct aws_s3_client_vtable *patched_client_vtable = aws_s3_tester_patch_client_vtable(&tester, client, NULL);
-    patched_client_vtable->meta_request_factory = s_meta_request_factory_fail;
+        struct aws_s3_meta_request *second = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(second);
+        struct aws_byte_cursor second_cursor = aws_byte_cursor_from_buf(&second->invocation_id);
+        struct aws_uuid second_id;
+        ASSERT_SUCCESS(aws_uuid_init_from_str(&second_id, &second_cursor));
+        ASSERT_FALSE(aws_uuid_equals(&first_id, &second_id));
 
-    struct aws_byte_cursor value;
-    AWS_ZERO_STRUCT(value);
+        /* Caller's message is never modified. */
+        ASSERT_FALSE(aws_http_headers_has(aws_http_message_get_headers(message), g_amz_sdk_invocation_id_header_name));
 
-    /* No caller id: a UUID is generated. */
-    struct aws_http_message *first_message = s_new_message_with_host(allocator);
-    s_make_meta_request_with_message(client, first_message);
-    ASSERT_SUCCESS(
-        aws_http_headers_get(aws_http_message_get_headers(first_message), g_amz_sdk_invocation_id_header_name, &value));
-    ASSERT_UINT_EQUALS(AWS_UUID_STR_LEN - 1, value.len);
-    struct aws_uuid first_id;
-    ASSERT_SUCCESS(aws_uuid_init_from_str(&first_id, &value));
+        aws_s3_meta_request_release(second);
+        aws_s3_meta_request_release(first);
+        aws_http_message_release(message);
+    }
 
-    /* Another operation gets a different id. */
-    struct aws_http_message *second_message = s_new_message_with_host(allocator);
-    s_make_meta_request_with_message(client, second_message);
-    ASSERT_SUCCESS(aws_http_headers_get(
-        aws_http_message_get_headers(second_message), g_amz_sdk_invocation_id_header_name, &value));
-    struct aws_uuid second_id;
-    ASSERT_SUCCESS(aws_uuid_init_from_str(&second_id, &value));
-    ASSERT_FALSE(aws_uuid_equals(&first_id, &second_id));
+    /* Caller-set id: no UUID is generated and the caller's value is left as is. */
+    {
+        struct aws_http_message *message = aws_http_message_new_request(allocator);
+        struct aws_http_header caller_id_header = {
+            .name = g_amz_sdk_invocation_id_header_name,
+            .value = aws_byte_cursor_from_c_str("caller-invocation-id"),
+        };
+        ASSERT_SUCCESS(aws_http_message_add_header(message, caller_id_header));
+        struct aws_s3_meta_request_options options = {
+            .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
+            .message = message,
+        };
 
-    /* Caller-set id is kept as is. */
-    struct aws_http_message *caller_message = s_new_message_with_host(allocator);
-    struct aws_http_header caller_id_header = {
-        .name = g_amz_sdk_invocation_id_header_name,
-        .value = aws_byte_cursor_from_c_str("caller-invocation-id"),
-    };
-    ASSERT_SUCCESS(aws_http_message_add_header(caller_message, caller_id_header));
-    s_make_meta_request_with_message(client, caller_message);
-    struct aws_http_headers *caller_headers = aws_http_message_get_headers(caller_message);
-    ASSERT_SUCCESS(aws_http_headers_get(caller_headers, g_amz_sdk_invocation_id_header_name, &value));
-    ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "caller-invocation-id");
-    ASSERT_UINT_EQUALS(2, aws_http_headers_count(caller_headers));
+        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
+        ASSERT_NOT_NULL(meta_request);
+        ASSERT_UINT_EQUALS(0, meta_request->invocation_id.len);
 
-    aws_http_message_release(caller_message);
-    aws_http_message_release(second_message);
-    aws_http_message_release(first_message);
-    aws_s3_client_release(client);
+        struct aws_http_headers *headers = aws_http_message_get_headers(message);
+        struct aws_byte_cursor value;
+        ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_invocation_id_header_name, &value));
+        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "caller-invocation-id");
+        ASSERT_UINT_EQUALS(1, aws_http_headers_count(headers));
+
+        aws_s3_meta_request_release(meta_request);
+        aws_http_message_release(message);
+    }
+
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;
