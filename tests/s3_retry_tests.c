@@ -1058,10 +1058,10 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
     ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=1; max=6");
 
-    /* Retry: attempt goes up, header replaced not duplicated. */
+    /* Retry: attempt goes up, headers replaced not duplicated (amz-sdk-request + amz-sdk-invocation-id). */
     request.num_times_prepared = 1;
     ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
-    ASSERT_UINT_EQUALS(1, aws_http_headers_count(headers));
+    ASSERT_UINT_EQUALS(2, aws_http_headers_count(headers));
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
     ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=2; max=6");
 
