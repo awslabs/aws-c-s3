@@ -574,7 +574,7 @@ static void s_append_sdk_request_pair(struct aws_byte_buf *header_value, const c
     aws_byte_buf_write(header_value, (const uint8_t *)pair_str, (size_t)pair_len);
 }
 
-void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+int aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->client);
     AWS_PRECONDITION(request);
@@ -582,6 +582,31 @@ void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, s
 
     struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
     AWS_ASSERT(headers != NULL);
+
+    /* New invocation id on the first attempt only, reused on retries. */
+    if (request->num_times_prepared == 0 && aws_uuid_init(&request->invocation_id)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not generate 'amz-sdk-invocation-id' for request %p due to error %d (%s).",
+            (void *)meta_request,
+            (void *)request,
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
+        return AWS_OP_ERR;
+    }
+
+    /* CRT owns the attempts, so replace any caller-provided id. */
+    uint8_t id_storage[AWS_UUID_STR_LEN] = {0};
+    struct aws_byte_buf id_buf = aws_byte_buf_from_empty_array(id_storage, sizeof(id_storage));
+    aws_uuid_to_str(&request->invocation_id, &id_buf);
+    aws_http_headers_set(headers, g_amz_sdk_invocation_id_header_name, aws_byte_cursor_from_buf(&id_buf));
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Using 'amz-sdk-invocation-id' " PRInSTR " for request %p attempt %" PRIu32 ".",
+        (void *)meta_request,
+        AWS_BYTE_BUF_PRI(id_buf),
+        (void *)request,
+        request->num_times_prepared + 1);
 
     struct aws_s3_sdk_request_info info = {
         .attempt = request->num_times_prepared + 1,
@@ -595,6 +620,7 @@ void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, s
     s_append_sdk_request_pair(&header_value, "max", info.max);
 
     aws_http_headers_set(headers, g_amz_sdk_request_header_name, aws_byte_cursor_from_buf(&header_value));
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_parse_content_range_cursor(

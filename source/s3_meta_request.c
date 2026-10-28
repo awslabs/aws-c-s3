@@ -525,41 +525,6 @@ static int s_s3_meta_request_init_recv_file(
     return AWS_OP_SUCCESS;
 }
 
-/* Set up this operation's amz-sdk-invocation-id and log the one that will be sent. */
-static int s_init_invocation_id(struct aws_s3_meta_request *meta_request) {
-    meta_request->invocation_id =
-        aws_byte_buf_from_empty_array(meta_request->invocation_id_storage, sizeof(meta_request->invocation_id_storage));
-
-    struct aws_http_headers *headers = aws_http_message_get_headers(meta_request->initial_request_message);
-    struct aws_byte_cursor caller_id;
-    if (aws_http_headers_get(headers, g_amz_sdk_invocation_id_header_name, &caller_id) == AWS_OP_SUCCESS) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Using caller-provided 'amz-sdk-invocation-id' " PRInSTR " for this operation.",
-            (void *)meta_request,
-            AWS_BYTE_CURSOR_PRI(caller_id));
-        return AWS_OP_SUCCESS;
-    }
-
-    struct aws_uuid uuid;
-    if (aws_uuid_init(&uuid) || aws_uuid_to_str(&uuid, &meta_request->invocation_id)) {
-        AWS_LOGF_ERROR(
-            AWS_LS_S3_META_REQUEST,
-            "id=%p Could not generate 'amz-sdk-invocation-id' due to error %d (%s).",
-            (void *)meta_request,
-            aws_last_error_or_unknown(),
-            aws_error_str(aws_last_error_or_unknown()));
-        return AWS_OP_ERR;
-    }
-
-    AWS_LOGF_DEBUG(
-        AWS_LS_S3_META_REQUEST,
-        "id=%p Generated 'amz-sdk-invocation-id' " PRInSTR " for this operation.",
-        (void *)meta_request,
-        AWS_BYTE_BUF_PRI(meta_request->invocation_id));
-    return AWS_OP_SUCCESS;
-}
-
 int aws_s3_meta_request_init_base(
     struct aws_allocator *allocator,
     struct aws_s3_client *client,
@@ -744,11 +709,6 @@ int aws_s3_meta_request_init_base(
 
     /* Keep original message around, for headers, method, and synchronous body-stream (if any) */
     meta_request->initial_request_message = aws_http_message_acquire(options->message);
-
-    /* One invocation id per operation. */
-    if (s_init_invocation_id(meta_request)) {
-        goto error;
-    }
 
     /* Not known yet: the derived meta request sets it once it knows where the requested range starts. */
     meta_request->requested_range_start = 0;
@@ -1561,15 +1521,10 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     }
 
     aws_s3_apply_user_agent_header(meta_request, request->send_data.message);
-
-    /* Caller's id (copied from the original message) wins; else use this operation's id. */
-    struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
-    if (meta_request->invocation_id.len > 0 && !aws_http_headers_has(headers, g_amz_sdk_invocation_id_header_name)) {
-        aws_http_headers_set(
-            headers, g_amz_sdk_invocation_id_header_name, aws_byte_cursor_from_buf(&meta_request->invocation_id));
+    if (aws_s3_apply_retry_info_headers(meta_request, request)) {
+        s_s3_prepare_request_payload_callback_and_destroy(payload, aws_last_error_or_unknown());
+        return;
     }
-
-    aws_s3_apply_retry_info_headers(meta_request, request);
 
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);

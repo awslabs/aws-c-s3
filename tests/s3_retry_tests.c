@@ -1054,13 +1054,13 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     AWS_ZERO_STRUCT(value);
 
     /* First attempt. */
-    aws_s3_apply_retry_info_headers(&meta_request, &request);
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
     ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=1; max=6");
 
     /* Retry: attempt goes up, header replaced not duplicated. */
     request.num_times_prepared = 1;
-    aws_s3_apply_retry_info_headers(&meta_request, &request);
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
     ASSERT_UINT_EQUALS(1, aws_http_headers_count(headers));
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
     ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=2; max=6");
@@ -1068,7 +1068,7 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     /* Unknown max (custom strategy): max omitted. */
     client.max_attempts = 0;
     request.num_times_prepared = 2;
-    aws_s3_apply_retry_info_headers(&meta_request, &request);
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
     ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=3");
 
@@ -1078,7 +1078,7 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     return AWS_OP_SUCCESS;
 }
 
-/* Test amz-sdk-invocation-id is set once per operation and the caller's message is never modified. */
+/* Test amz-sdk-invocation-id is new per request, reused on retries, and replaces a caller-set value. */
 AWS_TEST_CASE(test_s3_invocation_id_header, s_test_s3_invocation_id_header)
 static int s_test_s3_invocation_id_header(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -1087,63 +1087,70 @@ static int s_test_s3_invocation_id_header(struct aws_allocator *allocator, void 
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    /* No caller id: each operation built from the same message gets its own UUID. */
-    {
-        struct aws_http_message *message = aws_http_message_new_request(allocator);
-        struct aws_s3_meta_request_options options = {
-            .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-            .message = message,
-        };
+    struct aws_s3_client client;
+    AWS_ZERO_STRUCT(client);
 
-        struct aws_s3_meta_request *first = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
-        ASSERT_NOT_NULL(first);
-        struct aws_byte_cursor first_cursor = aws_byte_cursor_from_buf(&first->invocation_id);
-        ASSERT_UINT_EQUALS(AWS_UUID_STR_LEN - 1, first_cursor.len);
-        struct aws_uuid first_id;
-        ASSERT_SUCCESS(aws_uuid_init_from_str(&first_id, &first_cursor));
+    struct aws_s3_meta_request meta_request;
+    AWS_ZERO_STRUCT(meta_request);
+    meta_request.client = &client;
 
-        struct aws_s3_meta_request *second = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
-        ASSERT_NOT_NULL(second);
-        struct aws_byte_cursor second_cursor = aws_byte_cursor_from_buf(&second->invocation_id);
-        struct aws_uuid second_id;
-        ASSERT_SUCCESS(aws_uuid_init_from_str(&second_id, &second_cursor));
-        ASSERT_FALSE(aws_uuid_equals(&first_id, &second_id));
+    struct aws_s3_request first;
+    AWS_ZERO_STRUCT(first);
+    first.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_headers *first_headers = aws_http_message_get_headers(first.send_data.message);
 
-        /* Caller's message is never modified. */
-        ASSERT_FALSE(aws_http_headers_has(aws_http_message_get_headers(message), g_amz_sdk_invocation_id_header_name));
+    struct aws_s3_request second;
+    AWS_ZERO_STRUCT(second);
+    second.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_headers *second_headers = aws_http_message_get_headers(second.send_data.message);
 
-        aws_s3_meta_request_release(second);
-        aws_s3_meta_request_release(first);
-        aws_http_message_release(message);
-    }
+    struct aws_byte_cursor value;
+    AWS_ZERO_STRUCT(value);
 
-    /* Caller-set id: no UUID is generated and the caller's value is left as is. */
-    {
-        struct aws_http_message *message = aws_http_message_new_request(allocator);
-        struct aws_http_header caller_id_header = {
-            .name = g_amz_sdk_invocation_id_header_name,
-            .value = aws_byte_cursor_from_c_str("caller-invocation-id"),
-        };
-        ASSERT_SUCCESS(aws_http_message_add_header(message, caller_id_header));
-        struct aws_s3_meta_request_options options = {
-            .type = AWS_S3_META_REQUEST_TYPE_DEFAULT,
-            .message = message,
-        };
+    /* First attempt: header is a valid UUID. */
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &first));
+    ASSERT_SUCCESS(aws_http_headers_get(first_headers, g_amz_sdk_invocation_id_header_name, &value));
+    ASSERT_UINT_EQUALS(AWS_UUID_STR_LEN - 1, value.len);
+    struct aws_uuid first_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&first_id, &value));
 
-        struct aws_s3_meta_request *meta_request = aws_s3_tester_mock_meta_request_new_with_options(&tester, &options);
-        ASSERT_NOT_NULL(meta_request);
-        ASSERT_UINT_EQUALS(0, meta_request->invocation_id.len);
+    /* Retry: same id, headers replaced not duplicated. */
+    first.num_times_prepared = 1;
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &first));
+    ASSERT_UINT_EQUALS(2, aws_http_headers_count(first_headers));
+    ASSERT_SUCCESS(aws_http_headers_get(first_headers, g_amz_sdk_invocation_id_header_name, &value));
+    struct aws_uuid retry_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&retry_id, &value));
+    ASSERT_TRUE(aws_uuid_equals(&first_id, &retry_id));
 
-        struct aws_http_headers *headers = aws_http_message_get_headers(message);
-        struct aws_byte_cursor value;
-        ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_invocation_id_header_name, &value));
-        ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "caller-invocation-id");
-        ASSERT_UINT_EQUALS(1, aws_http_headers_count(headers));
+    /* Another request of the same meta request gets a different id. */
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &second));
+    ASSERT_SUCCESS(aws_http_headers_get(second_headers, g_amz_sdk_invocation_id_header_name, &value));
+    struct aws_uuid second_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&second_id, &value));
+    ASSERT_FALSE(aws_uuid_equals(&first_id, &second_id));
 
-        aws_s3_meta_request_release(meta_request);
-        aws_http_message_release(message);
-    }
+    /* Caller-set id is replaced with CRT's own. */
+    struct aws_s3_request caller;
+    AWS_ZERO_STRUCT(caller);
+    caller.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_header caller_id_header = {
+        .name = g_amz_sdk_invocation_id_header_name,
+        .value = aws_byte_cursor_from_c_str("caller-invocation-id"),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(caller.send_data.message, caller_id_header));
+    struct aws_http_headers *caller_headers = aws_http_message_get_headers(caller.send_data.message);
 
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &caller));
+    ASSERT_UINT_EQUALS(2, aws_http_headers_count(caller_headers));
+    ASSERT_SUCCESS(aws_http_headers_get(caller_headers, g_amz_sdk_invocation_id_header_name, &value));
+    /* Parses as a UUID, so the caller's value is gone. */
+    struct aws_uuid caller_replaced_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&caller_replaced_id, &value));
+
+    aws_http_message_release(caller.send_data.message);
+    aws_http_message_release(second.send_data.message);
+    aws_http_message_release(first.send_data.message);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;

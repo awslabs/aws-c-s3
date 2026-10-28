@@ -262,9 +262,9 @@ struct aws_s3_sdk_request_info {
     uint32_t max;
 };
 
-/* Sets amz-sdk-request (attempt, max) on the request message. */
+/* Sets amz-sdk-invocation-id and amz-sdk-request (attempt, max) on the request message. */
 AWS_S3_API
-void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
+int aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
 /* Test-only: one-shot build-and-stamp without a meta_request. Exercises the same parsing logic as
  * aws_s3_init_user_agent_header_cached + aws_s3_apply_user_agent_header in a single call. */
