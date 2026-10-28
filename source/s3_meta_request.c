@@ -1521,6 +1521,7 @@ static void s_s3_meta_request_on_request_prepared(void *user_data) {
     }
 
     aws_s3_apply_user_agent_header(meta_request, request->send_data.message);
+    aws_s3_apply_retry_info_headers(meta_request, request);
 
     /* Next step is to sign the newly created message (completion callback could happen on any thread) */
     s_s3_meta_request_sign_request(meta_request, request, s_s3_meta_request_request_on_signed, payload);

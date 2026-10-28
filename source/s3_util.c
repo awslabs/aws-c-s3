@@ -62,6 +62,9 @@ const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITER
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");
 
 const struct aws_byte_cursor g_user_agent_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("User-Agent");
+const struct aws_byte_cursor g_amz_sdk_invocation_id_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("amz-sdk-invocation-id");
+const struct aws_byte_cursor g_amz_sdk_request_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("amz-sdk-request");
 const struct aws_byte_cursor g_user_agent_header_product_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRTS3NativeClient");
 const struct aws_byte_cursor g_user_agent_header_platform = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("platform");
@@ -558,6 +561,42 @@ void aws_s3_apply_user_agent_header(struct aws_s3_meta_request *meta_request, st
 
     aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&tmp));
     aws_byte_buf_clean_up(&tmp);
+}
+
+void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->client);
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(request->send_data.message);
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
+    AWS_ASSERT(headers != NULL);
+
+    /* New invocation id on the first attempt only, reused on retries. */
+    if (request->num_times_prepared == 0) {
+        aws_uuid_init(&request->invocation_id);
+    }
+
+    uint8_t id_storage[AWS_UUID_STR_LEN] = {0};
+    struct aws_byte_buf id_buf = aws_byte_buf_from_empty_array(id_storage, sizeof(id_storage));
+    aws_uuid_to_str(&request->invocation_id, &id_buf);
+    aws_http_headers_set(headers, g_amz_sdk_invocation_id_header_name, aws_byte_cursor_from_buf(&id_buf));
+
+    /* attempt is 1-based; max is omitted when unknown. */
+    char request_value[64];
+    uint32_t attempt = request->num_times_prepared + 1;
+    uint32_t max_attempts = meta_request->client->max_attempts;
+    int len = max_attempts > 0 ? snprintf(
+                                     request_value,
+                                     sizeof(request_value),
+                                     "attempt=%" PRIu32 "; max=%" PRIu32,
+                                     attempt,
+                                     max_attempts)
+                               : snprintf(request_value, sizeof(request_value), "attempt=%" PRIu32, attempt);
+    AWS_ASSERT(len > 0 && (size_t)len < sizeof(request_value));
+
+    aws_http_headers_set(
+        headers, g_amz_sdk_request_header_name, aws_byte_cursor_from_array(request_value, (size_t)len));
 }
 
 int aws_s3_parse_content_range_cursor(

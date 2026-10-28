@@ -81,6 +81,12 @@ AWS_S3_API
 extern const struct aws_byte_cursor g_user_agent_header_name;
 
 AWS_S3_API
+extern const struct aws_byte_cursor g_amz_sdk_invocation_id_header_name;
+
+AWS_S3_API
+extern const struct aws_byte_cursor g_amz_sdk_request_header_name;
+
+AWS_S3_API
 extern const struct aws_byte_cursor g_user_agent_header_product_name;
 
 AWS_S3_API
@@ -247,6 +253,10 @@ void aws_s3_init_user_agent_header_cached(struct aws_s3_meta_request *meta_reque
 
 AWS_S3_API
 void aws_s3_apply_user_agent_header(struct aws_s3_meta_request *meta_request, struct aws_http_message *message);
+
+/* Sets amz-sdk-invocation-id and amz-sdk-request (attempt, max) on the request message. */
+AWS_S3_API
+void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
 /* Test-only: one-shot build-and-stamp without a meta_request. Exercises the same parsing logic as
  * aws_s3_init_user_agent_header_cached + aws_s3_apply_user_agent_header in a single call. */
