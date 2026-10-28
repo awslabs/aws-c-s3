@@ -563,6 +563,17 @@ void aws_s3_apply_user_agent_header(struct aws_s3_meta_request *meta_request, st
     aws_byte_buf_clean_up(&tmp);
 }
 
+/* Append "key=value" to header_value, with "; " before every pair except the first. Skip when value is 0. */
+static void s_append_sdk_request_pair(struct aws_byte_buf *header_value, const char *key, uint32_t value) {
+    if (value == 0) {
+        return;
+    }
+    char pair_str[32];
+    int pair_len = snprintf(pair_str, sizeof(pair_str), "%s%s=%" PRIu32, header_value->len > 0 ? "; " : "", key, value);
+    AWS_ASSERT(pair_len > 0 && (size_t)pair_len < sizeof(pair_str));
+    aws_byte_buf_write(header_value, (const uint8_t *)pair_str, (size_t)pair_len);
+}
+
 void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(meta_request->client);
@@ -572,28 +583,18 @@ void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, s
     struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
     AWS_ASSERT(headers != NULL);
 
-    /* New invocation id on the first attempt only, reused on retries. */
-    if (request->num_times_prepared == 0) {
-        aws_uuid_init(&request->invocation_id);
-    }
+    struct aws_s3_sdk_request_info info = {
+        .attempt = request->num_times_prepared + 1,
+        .max = meta_request->client->max_attempts,
+    };
 
-    uint8_t id_storage[AWS_UUID_STR_LEN] = {0};
-    struct aws_byte_buf id_buf = aws_byte_buf_from_empty_array(id_storage, sizeof(id_storage));
-    aws_uuid_to_str(&request->invocation_id, &id_buf);
-    aws_http_headers_set(headers, g_amz_sdk_invocation_id_header_name, aws_byte_cursor_from_buf(&id_buf));
+    uint8_t header_value_storage[64] = {0};
+    struct aws_byte_buf header_value =
+        aws_byte_buf_from_empty_array(header_value_storage, sizeof(header_value_storage));
+    s_append_sdk_request_pair(&header_value, "attempt", info.attempt);
+    s_append_sdk_request_pair(&header_value, "max", info.max);
 
-    /* attempt is 1-based; max is omitted when unknown. */
-    char request_value[64];
-    uint32_t attempt = request->num_times_prepared + 1;
-    uint32_t max_attempts = meta_request->client->max_attempts;
-    int len =
-        max_attempts > 0
-            ? snprintf(request_value, sizeof(request_value), "attempt=%" PRIu32 "; max=%" PRIu32, attempt, max_attempts)
-            : snprintf(request_value, sizeof(request_value), "attempt=%" PRIu32, attempt);
-    AWS_ASSERT(len > 0 && (size_t)len < sizeof(request_value));
-
-    aws_http_headers_set(
-        headers, g_amz_sdk_request_header_name, aws_byte_cursor_from_array(request_value, (size_t)len));
+    aws_http_headers_set(headers, g_amz_sdk_request_header_name, aws_byte_cursor_from_buf(&header_value));
 }
 
 int aws_s3_parse_content_range_cursor(

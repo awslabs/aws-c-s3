@@ -11,7 +11,6 @@
 #include <aws/common/ref_count.h>
 #include <aws/common/task_scheduler.h>
 #include <aws/common/thread.h>
-#include <aws/common/uuid.h>
 #include <aws/http/connection_manager.h>
 #include <aws/s3/s3.h>
 
@@ -270,9 +269,6 @@ struct aws_s3_request {
     /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual
      * prepare function, this will be 0.*/
     uint32_t num_times_prepared;
-
-    /* amz-sdk-invocation-id, same across all attempts of this request. */
-    struct aws_uuid invocation_id;
 
     /* checksum found in the header of an individual get part http request */
     struct aws_byte_buf request_level_response_header_checksum;

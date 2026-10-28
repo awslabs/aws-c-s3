@@ -29,6 +29,7 @@
 #include <aws/common/priority_queue.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
+#include <aws/common/uuid.h>
 #include <aws/http/connection.h>
 #include <aws/http/connection_manager.h>
 #include <aws/http/proxy.h>
@@ -1435,6 +1436,50 @@ int s_apply_endpoint_override(
     return AWS_OP_SUCCESS;
 }
 
+/* Keep the caller's amz-sdk-invocation-id; else create one for this operation. */
+static int s_apply_invocation_id(const struct aws_s3_client *client, struct aws_http_headers *message_headers) {
+    AWS_PRECONDITION(message_headers);
+
+    if (aws_http_headers_has(message_headers, g_amz_sdk_invocation_id_header_name)) {
+        AWS_LOGF_DEBUG(AWS_LS_S3_CLIENT, "id=%p Using caller-provided 'amz-sdk-invocation-id' header.", (void *)client);
+        return AWS_OP_SUCCESS;
+    }
+
+    struct aws_uuid invocation_id;
+    if (aws_uuid_init(&invocation_id)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; failed to generate 'amz-sdk-invocation-id'.",
+            (void *)client);
+        return AWS_OP_ERR;
+    }
+
+    uint8_t id_storage[AWS_UUID_STR_LEN] = {0};
+    struct aws_byte_buf id_buf = aws_byte_buf_from_empty_array(id_storage, sizeof(id_storage));
+    if (aws_uuid_to_str(&invocation_id, &id_buf)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; failed to format 'amz-sdk-invocation-id'.",
+            (void *)client);
+        return AWS_OP_ERR;
+    }
+
+    if (aws_http_headers_set(message_headers, g_amz_sdk_invocation_id_header_name, aws_byte_cursor_from_buf(&id_buf))) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Cannot create meta s3 request; failed to set 'amz-sdk-invocation-id' header.",
+            (void *)client);
+        return AWS_OP_ERR;
+    }
+
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_CLIENT,
+        "id=%p Set 'amz-sdk-invocation-id' header to " PRInSTR,
+        (void *)client,
+        AWS_BYTE_BUF_PRI(id_buf));
+    return AWS_OP_SUCCESS;
+}
+
 /* Public facing make-meta-request function. */
 struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     struct aws_s3_client *client,
@@ -1493,6 +1538,11 @@ struct aws_s3_meta_request *aws_s3_client_make_meta_request(
     }
 
     if (s_apply_endpoint_override(client, message_headers, options->endpoint)) {
+        return NULL;
+    }
+
+    /* One invocation id per operation, shared by all of its requests. */
+    if (s_apply_invocation_id(client, message_headers)) {
         return NULL;
     }
 

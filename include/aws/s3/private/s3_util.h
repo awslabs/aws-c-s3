@@ -254,7 +254,15 @@ void aws_s3_init_user_agent_header_cached(struct aws_s3_meta_request *meta_reque
 AWS_S3_API
 void aws_s3_apply_user_agent_header(struct aws_s3_meta_request *meta_request, struct aws_http_message *message);
 
-/* Sets amz-sdk-invocation-id and amz-sdk-request (attempt, max) on the request message. */
+/* Values for the amz-sdk-request header. A field set to 0 is not sent. */
+struct aws_s3_sdk_request_info {
+    /* 1-based attempt number of this HTTP request. */
+    uint32_t attempt;
+    /* Max attempts; 0 when unknown (custom retry strategy). */
+    uint32_t max;
+};
+
+/* Sets amz-sdk-request (attempt, max) on the request message. */
 AWS_S3_API
 void aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request);
 
