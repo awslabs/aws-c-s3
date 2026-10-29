@@ -5,6 +5,7 @@
 
 #include "aws/s3/private/s3_client_impl.h"
 #include "aws/s3/private/s3_meta_request_impl.h"
+#include "aws/s3/private/s3_request.h"
 #include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
 #include <aws/common/atomics.h>
@@ -12,8 +13,10 @@
 #include <aws/common/clock.h>
 #include <aws/common/common.h>
 #include <aws/common/ref_count.h>
+#include <aws/common/uuid.h>
 #include <aws/http/connection_manager.h>
 #include <aws/http/request_response.h>
+#include <aws/io/retry_strategy.h>
 #include <aws/io/stream.h>
 #include <aws/io/tls_channel_handler.h>
 #include <aws/testing/aws_test_harness.h>
@@ -942,6 +945,212 @@ static int s_test_s3_auto_range_put_missing_upload_id(struct aws_allocator *allo
     aws_s3_meta_request_test_results_clean_up(&meta_request_test_results);
 
     aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Creates a client from the config and returns its max_attempts. */
+static int s_get_client_max_attempts(
+    struct aws_allocator *allocator,
+    struct aws_s3_client_config *client_config,
+    uint32_t *out_max_attempts) {
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    /* No request is sent, so TLS is not needed. */
+    client_config->tls_mode = AWS_MR_TLS_DISABLED;
+
+    ASSERT_SUCCESS(aws_s3_tester_bind_client(
+        &tester, client_config, AWS_S3_TESTER_BIND_CLIENT_REGION | AWS_S3_TESTER_BIND_CLIENT_SIGNING));
+
+    struct aws_s3_client *client = aws_s3_client_new(allocator, client_config);
+    ASSERT_NOT_NULL(client);
+
+    *out_max_attempts = client->max_attempts;
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Test client->max_attempts for each way the retry strategy is set up. */
+AWS_TEST_CASE(test_s3_client_max_attempts, s_test_s3_client_max_attempts)
+static int s_test_s3_client_max_attempts(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    uint32_t max_attempts = 0;
+
+    /* Default: 5 retries + 1. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        ASSERT_SUCCESS(s_get_client_max_attempts(allocator, &config, &max_attempts));
+        ASSERT_UINT_EQUALS(6, max_attempts);
+    }
+
+    /* Configured max_retries + 1. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.retry_config.max_retries = 2;
+        ASSERT_SUCCESS(s_get_client_max_attempts(allocator, &config, &max_attempts));
+        ASSERT_UINT_EQUALS(3, max_attempts);
+    }
+
+    /* Retries disabled: single attempt. */
+    {
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.retry_config.retry_mode = AWS_S3_RETRY_MODE_NONE;
+        ASSERT_SUCCESS(s_get_client_max_attempts(allocator, &config, &max_attempts));
+        ASSERT_UINT_EQUALS(1, max_attempts);
+    }
+
+    /* Custom strategy: max is unknown. */
+    {
+        struct aws_no_retry_options no_retry_options;
+        AWS_ZERO_STRUCT(no_retry_options);
+        struct aws_retry_strategy *custom_strategy = aws_retry_strategy_new_no_retry(allocator, &no_retry_options);
+        ASSERT_NOT_NULL(custom_strategy);
+
+        struct aws_s3_client_config config;
+        AWS_ZERO_STRUCT(config);
+        config.retry_strategy = custom_strategy;
+        ASSERT_SUCCESS(s_get_client_max_attempts(allocator, &config, &max_attempts));
+        ASSERT_UINT_EQUALS(0, max_attempts);
+
+        aws_retry_strategy_release(custom_strategy);
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test amz-sdk-request values across attempts. */
+AWS_TEST_CASE(test_s3_apply_retry_info_headers, s_test_s3_apply_retry_info_headers)
+static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client client;
+    AWS_ZERO_STRUCT(client);
+    client.max_attempts = 6;
+
+    struct aws_s3_meta_request meta_request;
+    AWS_ZERO_STRUCT(meta_request);
+    meta_request.client = &client;
+
+    struct aws_s3_request request;
+    AWS_ZERO_STRUCT(request);
+    request.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_headers *headers = aws_http_message_get_headers(request.send_data.message);
+
+    struct aws_byte_cursor value;
+    AWS_ZERO_STRUCT(value);
+
+    /* First attempt. */
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
+    ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=1; max=6");
+
+    /* Retry: attempt goes up, headers replaced not duplicated (amz-sdk-request + amz-sdk-invocation-id). */
+    request.num_times_prepared = 1;
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
+    ASSERT_UINT_EQUALS(2, aws_http_headers_count(headers));
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
+    ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=2; max=6");
+
+    /* Unknown max (custom strategy): max omitted. */
+    client.max_attempts = 0;
+    request.num_times_prepared = 2;
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
+    ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=3");
+
+    aws_http_message_release(request.send_data.message);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Test amz-sdk-invocation-id is new per request, reused on retries, and replaces a caller-set value. */
+AWS_TEST_CASE(test_s3_invocation_id_header, s_test_s3_invocation_id_header)
+static int s_test_s3_invocation_id_header(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+
+    struct aws_s3_client client;
+    AWS_ZERO_STRUCT(client);
+
+    struct aws_s3_meta_request meta_request;
+    AWS_ZERO_STRUCT(meta_request);
+    meta_request.client = &client;
+
+    struct aws_s3_request first;
+    AWS_ZERO_STRUCT(first);
+    first.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_headers *first_headers = aws_http_message_get_headers(first.send_data.message);
+
+    struct aws_s3_request second;
+    AWS_ZERO_STRUCT(second);
+    second.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_headers *second_headers = aws_http_message_get_headers(second.send_data.message);
+
+    struct aws_byte_cursor value;
+    AWS_ZERO_STRUCT(value);
+
+    /* First attempt: header is a valid UUID. */
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &first));
+    ASSERT_SUCCESS(aws_http_headers_get(first_headers, g_amz_sdk_invocation_id_header_name, &value));
+    ASSERT_UINT_EQUALS(AWS_UUID_STR_LEN - 1, value.len);
+    struct aws_uuid first_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&first_id, &value));
+
+    /* Retry: same id, headers replaced not duplicated. */
+    first.num_times_prepared = 1;
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &first));
+    ASSERT_UINT_EQUALS(2, aws_http_headers_count(first_headers));
+    ASSERT_SUCCESS(aws_http_headers_get(first_headers, g_amz_sdk_invocation_id_header_name, &value));
+    struct aws_uuid retry_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&retry_id, &value));
+    ASSERT_TRUE(aws_uuid_equals(&first_id, &retry_id));
+
+    /* Another request of the same meta request gets a different id. */
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &second));
+    ASSERT_SUCCESS(aws_http_headers_get(second_headers, g_amz_sdk_invocation_id_header_name, &value));
+    struct aws_uuid second_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&second_id, &value));
+    ASSERT_FALSE(aws_uuid_equals(&first_id, &second_id));
+
+    /* Caller-set id is replaced with CRT's own. */
+    struct aws_s3_request caller;
+    AWS_ZERO_STRUCT(caller);
+    caller.send_data.message = aws_http_message_new_request(allocator);
+    struct aws_http_header caller_id_header = {
+        .name = g_amz_sdk_invocation_id_header_name,
+        .value = aws_byte_cursor_from_c_str("caller-invocation-id"),
+    };
+    ASSERT_SUCCESS(aws_http_message_add_header(caller.send_data.message, caller_id_header));
+    struct aws_http_headers *caller_headers = aws_http_message_get_headers(caller.send_data.message);
+
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &caller));
+    ASSERT_UINT_EQUALS(2, aws_http_headers_count(caller_headers));
+    ASSERT_SUCCESS(aws_http_headers_get(caller_headers, g_amz_sdk_invocation_id_header_name, &value));
+    /* Parses as a UUID, so the caller's value is gone. */
+    struct aws_uuid caller_replaced_id;
+    ASSERT_SUCCESS(aws_uuid_init_from_str(&caller_replaced_id, &value));
+
+    aws_http_message_release(caller.send_data.message);
+    aws_http_message_release(second.send_data.message);
+    aws_http_message_release(first.send_data.message);
     aws_s3_tester_clean_up(&tester);
 
     return AWS_OP_SUCCESS;

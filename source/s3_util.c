@@ -62,6 +62,9 @@ const struct aws_byte_cursor g_head_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITER
 const struct aws_byte_cursor g_delete_method = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("DELETE");
 
 const struct aws_byte_cursor g_user_agent_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("User-Agent");
+const struct aws_byte_cursor g_amz_sdk_invocation_id_header_name =
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("amz-sdk-invocation-id");
+const struct aws_byte_cursor g_amz_sdk_request_header_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("amz-sdk-request");
 const struct aws_byte_cursor g_user_agent_header_product_name =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("CRTS3NativeClient");
 const struct aws_byte_cursor g_user_agent_header_platform = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("platform");
@@ -558,6 +561,66 @@ void aws_s3_apply_user_agent_header(struct aws_s3_meta_request *meta_request, st
 
     aws_http_headers_set(headers, g_user_agent_header_name, aws_byte_cursor_from_buf(&tmp));
     aws_byte_buf_clean_up(&tmp);
+}
+
+/* Append "key=value" to header_value, with "; " before every pair except the first. Skip when value is 0. */
+static void s_append_sdk_request_pair(struct aws_byte_buf *header_value, const char *key, uint32_t value) {
+    if (value == 0) {
+        return;
+    }
+    char pair_str[32];
+    int pair_len = snprintf(pair_str, sizeof(pair_str), "%s%s=%" PRIu32, header_value->len > 0 ? "; " : "", key, value);
+    AWS_ASSERT(pair_len > 0 && (size_t)pair_len < sizeof(pair_str));
+    aws_byte_buf_write(header_value, (const uint8_t *)pair_str, (size_t)pair_len);
+}
+
+int aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(meta_request->client);
+    AWS_PRECONDITION(request);
+    AWS_PRECONDITION(request->send_data.message);
+
+    struct aws_http_headers *headers = aws_http_message_get_headers(request->send_data.message);
+    AWS_ASSERT(headers != NULL);
+
+    /* New invocation id on the first attempt only, reused on retries. */
+    if (request->num_times_prepared == 0 && aws_uuid_init(&request->invocation_id)) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p Could not generate 'amz-sdk-invocation-id' for request %p due to error %d (%s).",
+            (void *)meta_request,
+            (void *)request,
+            aws_last_error_or_unknown(),
+            aws_error_str(aws_last_error_or_unknown()));
+        return AWS_OP_ERR;
+    }
+
+    /* CRT owns the attempts, so replace any caller-provided id. */
+    uint8_t id_storage[AWS_UUID_STR_LEN] = {0};
+    struct aws_byte_buf id_buf = aws_byte_buf_from_empty_array(id_storage, sizeof(id_storage));
+    aws_uuid_to_str(&request->invocation_id, &id_buf);
+    aws_http_headers_set(headers, g_amz_sdk_invocation_id_header_name, aws_byte_cursor_from_buf(&id_buf));
+    AWS_LOGF_DEBUG(
+        AWS_LS_S3_META_REQUEST,
+        "id=%p Using 'amz-sdk-invocation-id' " PRInSTR " for request %p attempt %" PRIu32 ".",
+        (void *)meta_request,
+        AWS_BYTE_BUF_PRI(id_buf),
+        (void *)request,
+        request->num_times_prepared + 1);
+
+    struct aws_s3_sdk_request_info info = {
+        .attempt = request->num_times_prepared + 1,
+        .max = meta_request->client->max_attempts,
+    };
+
+    uint8_t header_value_storage[64] = {0};
+    struct aws_byte_buf header_value =
+        aws_byte_buf_from_empty_array(header_value_storage, sizeof(header_value_storage));
+    s_append_sdk_request_pair(&header_value, "attempt", info.attempt);
+    s_append_sdk_request_pair(&header_value, "max", info.max);
+
+    aws_http_headers_set(headers, g_amz_sdk_request_header_name, aws_byte_cursor_from_buf(&header_value));
+    return AWS_OP_SUCCESS;
 }
 
 int aws_s3_parse_content_range_cursor(
