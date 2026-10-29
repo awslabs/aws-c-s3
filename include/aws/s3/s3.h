@@ -150,6 +150,39 @@ AWS_S3_API
 uint64_t aws_s3_default_part_size(void);
 
 /*
+ * Returns the largest part size, in bytes, the client allows for a given
+ * resolved memory limit.
+ *
+ * A caller that sets aws_s3_client_config.max_part_size explicitly overrides
+ * this, so this reports the default rather than the effective limit.
+ */
+AWS_S3_API
+uint64_t aws_s3_default_max_part_size_for_memory_limit(uint64_t memory_limit);
+
+/*
+ * Resolves the memory limit the client takes from configuration, in the same
+ * order aws_s3_client_new applies: configured_limit when non-zero, otherwise
+ * the AWS_CRT_S3_MEMORY_LIMIT_IN_MB environment variable, otherwise
+ * AWS_CRT_S3_MEMORY_LIMIT_IN_GIB.
+ *
+ * Writes 0 when none of the three is set. That is not an error: it means the
+ * caller should size from aws_s3_default_memory_limit_for_throughput, which
+ * is what the client does. The two are kept separate because a configured
+ * limit and a derived one are not interchangeable.
+ *
+ * Returns AWS_OP_ERR, having raised an error, when an environment variable is
+ * present but not a non-negative integer, or overflows when scaled to bytes.
+ * aws_s3_client_new fails client creation in that case, so a binding that
+ * resolves the limit ahead of the client should treat it the same way rather
+ * than silently falling back.
+ */
+AWS_S3_API
+int aws_s3_resolve_configured_memory_limit(
+    struct aws_allocator *allocator,
+    uint64_t configured_limit,
+    uint64_t *out_memory_limit);
+
+/*
  * Retrieves a list of EC2 instance types with recommended configuration.
  * Returns aws_array_list<aws_byte_cursor>. The caller is responsible for cleaning up the array list.
  */

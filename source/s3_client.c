@@ -259,6 +259,91 @@ uint64_t aws_s3_default_part_size(void) {
     return g_default_part_size_fallback;
 }
 
+uint64_t aws_s3_default_max_part_size_for_memory_limit(uint64_t memory_limit) {
+    return aws_min_u64(memory_limit / 2, g_default_max_part_size);
+}
+
+int aws_s3_resolve_configured_memory_limit(
+    struct aws_allocator *allocator,
+    uint64_t configured_limit,
+    uint64_t *out_memory_limit) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(out_memory_limit);
+
+    *out_memory_limit = 0;
+
+    if (configured_limit != 0) {
+        *out_memory_limit = configured_limit;
+        return AWS_OP_SUCCESS;
+    }
+
+    /*
+     * Try to read from the environment variable for memory limit.
+     * First we try _IN_MB (allows sub-GiB values, e.g. 256 for 256 MiB).
+     */
+    struct aws_string *mem_limit_mb_str = aws_get_env_nonempty(allocator, s_memory_limit_mb_env_var);
+    if (mem_limit_mb_str) {
+        uint64_t mem_limit_in_mb = 0;
+        if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_mb_str), &mem_limit_in_mb)) {
+            aws_string_destroy(mem_limit_mb_str);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "Cannot resolve memory limit; environment variable: %s, is not set correctly, only "
+                "integers supported.",
+                s_memory_limit_mb_env_var);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+        aws_string_destroy(mem_limit_mb_str);
+        /* Convert MiB to bytes */
+        uint64_t mem_limit_from_env = 0;
+        if (aws_mul_u64_checked(mem_limit_in_mb, 1024, &mem_limit_from_env) ||
+            aws_mul_u64_checked(mem_limit_from_env, 1024, &mem_limit_from_env)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "Cannot resolve memory limit; environment variable: %s, overflows when converted "
+                "to bytes.",
+                s_memory_limit_mb_env_var);
+            return aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
+        }
+        *out_memory_limit = mem_limit_from_env;
+    }
+
+    /* _IN_GIB is only checked if _IN_MB was not set */
+    if (*out_memory_limit == 0) {
+        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
+        if (memory_limit_from_env_var) {
+            uint64_t mem_limit_in_gib = 0;
+            if (aws_byte_cursor_utf8_parse_u64(
+                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                aws_string_destroy(memory_limit_from_env_var);
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot resolve memory limit; environment variable: %s, is not set correctly, only "
+                    "integers supported.",
+                    s_memory_limit_gib_env_var);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+            aws_string_destroy(memory_limit_from_env_var);
+            uint64_t mem_limit_in_bytes = 0;
+            /* Convert mem_limit_in_gib to bytes */
+            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot resolve memory limit; environment variable: %s, overflow detected.",
+                    s_memory_limit_gib_env_var);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+
+            *out_memory_limit = mem_limit_in_bytes;
+        }
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
     /*
      * Resolve the effective throughput used for default memory pool sizing.
@@ -490,75 +575,10 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     uint64_t mem_limit_configured = 0;
-    if (client_config->memory_limit_in_bytes == 0) {
-        /*
-         * Try to read from the environment variable for memory limit.
-         * First we try _IN_MB (allows sub-GiB values, e.g. 256 for 256 MiB).
-         */
-        struct aws_string *mem_limit_mb_str = aws_get_env_nonempty(allocator, s_memory_limit_mb_env_var);
-        if (mem_limit_mb_str) {
-            uint64_t mem_limit_in_mb = 0;
-            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_mb_str), &mem_limit_in_mb)) {
-                aws_string_destroy(mem_limit_mb_str);
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
-                    "integers supported.",
-                    s_memory_limit_mb_env_var);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-            aws_string_destroy(mem_limit_mb_str);
-            /* Convert MiB to bytes */
-            uint64_t mem_limit_from_env = 0;
-            if (aws_mul_u64_checked(mem_limit_in_mb, 1024, &mem_limit_from_env) ||
-                aws_mul_u64_checked(mem_limit_from_env, 1024, &mem_limit_from_env)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, overflows when converted "
-                    "to bytes.",
-                    s_memory_limit_mb_env_var);
-                aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
-                return NULL;
-            }
-            mem_limit_configured = mem_limit_from_env;
-        }
-
-        /* _IN_GIB is only checked if _IN_MB was not set */
-        if (mem_limit_configured == 0) {
-            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
-            if (memory_limit_from_env_var) {
-                uint64_t mem_limit_in_gib = 0;
-                if (aws_byte_cursor_utf8_parse_u64(
-                        aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
-                    aws_string_destroy(memory_limit_from_env_var);
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
-                        "integers supported.",
-                        s_memory_limit_gib_env_var);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-                aws_string_destroy(memory_limit_from_env_var);
-                uint64_t mem_limit_in_bytes = 0;
-                /* Convert mem_limit_in_gib to bytes */
-                if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
-                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
-                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "Cannot create client from client_config; environment variable: %s, overflow detected.",
-                        s_memory_limit_gib_env_var);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-
-                mem_limit_configured = mem_limit_in_bytes;
-            }
-        }
-    } else {
-        mem_limit_configured = client_config->memory_limit_in_bytes;
+    if (aws_s3_resolve_configured_memory_limit(
+            allocator, client_config->memory_limit_in_bytes, &mem_limit_configured)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot create client from client_config; memory limit is not valid.");
+        return NULL;
     }
 #ifdef BYO_CRYPTO
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
@@ -614,8 +634,9 @@ struct aws_s3_client *aws_s3_client_new(
         client->part_size_set = true;
     }
 
-    /* default max part size is the smallest of either half of mem limit or default max part size */
-    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)g_default_max_part_size);
+    /* default max part size is the smallest of either half of mem limit or default max part size.
+     * The result is at most mem_limit / 2, so narrowing back to size_t cannot truncate. */
+    size_t max_part_size = (size_t)aws_s3_default_max_part_size_for_memory_limit(mem_limit);
     if (client_config->max_part_size != 0) {
         if (client_config->max_part_size > SIZE_MAX) {
             max_part_size = SIZE_MAX;

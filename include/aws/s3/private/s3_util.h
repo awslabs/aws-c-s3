@@ -131,6 +131,7 @@ extern const struct aws_byte_cursor g_s3express_service_name;
 AWS_S3_API
 extern const struct aws_byte_cursor g_range_header_name;
 
+AWS_S3_API
 extern const struct aws_byte_cursor g_if_match_header_name;
 
 extern const struct aws_byte_cursor g_request_id_header_name;
