@@ -320,6 +320,9 @@ struct aws_s3_client {
      * Derived at construction from client_config->retry_config.retry_mode == AWS_S3_RETRY_MODE_NONE. */
     bool disable_retries;
 
+    /* Max attempts sent in amz-sdk-request; 0 = unknown (custom retry strategy), max is omitted. */
+    uint32_t max_attempts;
+
     /* Bitmask of enum aws_s3_feature_id derived from client_config at construction. Each meta request
      * copies this and ORs in its own per-request flags (see aws_s3_meta_request_init_base). */
     uint32_t feature_ids;
