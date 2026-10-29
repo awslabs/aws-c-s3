@@ -995,7 +995,7 @@ struct aws_s3_checksum_config {
  * 3) If the data is available, but copying each chunk is asynchronous, set `send_async_stream`.
  * 4) If you're not sure when each chunk of data will be available, use `send_using_async_writes`.
  * 5) If the data is already in memory and you want the client to upload it with no extra copy or
- *    allocation, set `request_body` (DEFAULT meta request only).
+ *    allocation, set `request_body` (DEFAULT and PUT_OBJECT meta requests).
  */
 struct aws_s3_meta_request_options {
     /* The type of meta request we will be trying to accelerate. */
@@ -1191,8 +1191,13 @@ struct aws_s3_meta_request_options {
      *   passed when the meta request was created); it is invoked once the meta request is fully torn
      *   down, after the request and all its retries are done.
      *
-     * This is currently only supported for an AWS_S3_META_REQUEST_TYPE_DEFAULT meta request, which
-     * sends the body as a single request.
+     * Supported for:
+     * - AWS_S3_META_REQUEST_TYPE_DEFAULT: sent as a single request.
+     * - AWS_S3_META_REQUEST_TYPE_PUT_OBJECT: sent as a single PutObject at or below the multipart upload
+     *   threshold. Above it, sent as a multipart upload with parts sent in parallel, each straight from its slice
+     *   of this memory. That requires the client's buffer pool to support pre-allocated buffers (the default
+     *   pool does); otherwise creation fails with AWS_ERROR_UNSUPPORTED_OPERATION. A paused upload can be resumed
+     *   with its resume token and the same memory.
      *
      * Do not set if the body is being passed by other means (i.e. the message body-stream,
      * send_filepath, send_async_stream, or send_using_async_writes).

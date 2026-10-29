@@ -449,13 +449,38 @@ struct aws_s3_meta_request *aws_s3_meta_request_auto_ranged_put_new(
     auto_ranged_put->base.requested_range_start = 0;
     auto_ranged_put->base.requested_range_start_resolved = true;
 
+    /* request_body: each part is sent straight from the caller's memory, so the client's buffer pool must
+     * serve it as a pre-allocated buffer. A pool that can't is rejected (AWS_ERROR_UNSUPPORTED_OPERATION), as
+     * for recv_buffer. The pool keeps its own copy of the view, which is only ever read, never written. */
+    if (options->request_body.ptr != NULL) {
+        struct aws_byte_buf view = aws_byte_buf_from_array(options->request_body.ptr, options->request_body.len);
+        if (aws_s3_buffer_pool_add_preallocated_buffer(client->buffer_pool, &auto_ranged_put->base, &view)) {
+            int error_code = aws_last_error_or_unknown();
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p Could not create auto-ranged-put meta request; the client's buffer pool doesn't support "
+                "request_body (error %d: %s).",
+                (void *)&auto_ranged_put->base,
+                error_code,
+                aws_error_str(error_code));
+            /* Release before raising: aws_s3_meta_request_release runs destructors that can
+             * overwrite the thread-local error, and the caller reads aws_last_error(). */
+            aws_s3_meta_request_release(&auto_ranged_put->base);
+            aws_raise_error(error_code);
+            return NULL;
+        }
+        /* Set only once the pool has it, so destroy removes it exactly when it was added. */
+        auto_ranged_put->base.request_body = options->request_body;
+    }
+
     /* The buffer reserved for each request is meta_request->part_size, EXCEPT when the body
      * streams from a file: aws_s3_request_new then sizes it at 2 * g_streaming_buffer_size
-     * regardless of part size, so a part larger than max_part_size costs nothing extra. */
+     * regardless of part size, so a part larger than max_part_size costs nothing extra. Parts sent
+     * straight from request_body don't use pool memory at all. */
     bool file_streaming =
         auto_ranged_put->base.fio_opts.should_stream && auto_ranged_put->base.request_body_parallel_stream != NULL;
 
-    if (!file_streaming && part_size > client->max_part_size) {
+    if (!file_streaming && auto_ranged_put->base.request_body.ptr == NULL && part_size > client->max_part_size) {
         AWS_LOGF_ERROR(
             AWS_LS_S3_META_REQUEST,
             "id=%p Could not create auto-ranged-put meta request; part size of %" PRIu64
@@ -946,12 +971,17 @@ void s_s3_auto_ranged_put_schedule_prepare_request(
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
 
-    /* When the body stream supports reading in parallel, and it's upload parts, do parallel preparation to speed up
-     * reading. */
-    bool parallel_prepare =
-        (meta_request->request_body_parallel_stream && request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART);
-    /* A part that fits in its buffer is read in full instead of streamed through it. */
-    if (parallel_prepare && meta_request->fio_opts.should_stream && request->content_length > request->buffer_size) {
+    /* A meta request has exactly one body source (creation rejects more than one). */
+    bool from_file = meta_request->request_body_parallel_stream != NULL; /* send_filepath */
+    bool from_memory = meta_request->request_body.ptr != NULL;           /* request_body */
+    bool is_part = request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART;
+
+    /* Both a file and request_body can be read at any offset, so their upload parts are prepared in parallel. */
+    bool parallel_prepare = (from_file || from_memory) && is_part;
+    /* Streaming straight from disk while sending applies to files only. A part that fits in its buffer is read in
+     * full instead of streamed through it. */
+    if (from_file && is_part && meta_request->fio_opts.should_stream &&
+        request->content_length > request->buffer_size) {
         request->fio_streaming = true;
     }
 
