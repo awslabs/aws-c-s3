@@ -925,6 +925,8 @@ struct aws_s3_client *aws_s3_client_new(
         uint32_t max_retries = client_config->retry_config.max_retries > 0
                                    ? (uint32_t)client_config->retry_config.max_retries
                                    : s_default_max_retries;
+        /* Max attempts = max retries + 1 (the initial attempt). */
+        client->max_attempts = max_retries + 1;
 
         struct aws_exponential_backoff_retry_options backoff_retry_options = {
             .el_group = client_config->client_bootstrap->event_loop_group,
@@ -945,6 +947,8 @@ struct aws_s3_client *aws_s3_client_new(
                  * client so the request path makes a single token-less
                  * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
                 client->disable_retries = true;
+                /* No retries, so only the initial attempt. */
+                client->max_attempts = 1;
 
                 struct aws_no_retry_options no_retry_options;
                 AWS_ZERO_STRUCT(no_retry_options);
