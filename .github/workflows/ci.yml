@@ -195,7 +195,7 @@ jobs:
         python .\aws-c-s3\build\deps\aws-c-common\scripts\appverifier_ctest.py --build_directory .\aws-c-s3\build\aws-c-s3
 
   macos:
-    runs-on: macos-14 # latest
+    runs-on: macos-15 # latest
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -212,7 +212,7 @@ jobs:
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   macos-x64:
-    runs-on: macos-14-large # latest
+    runs-on: macos-15-large # latest
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -229,7 +229,7 @@ jobs:
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON --cmake-extra=-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON
 
   macos-s2n:
-    runs-on: macos-14 # latest
+    runs-on: macos-15 # latest
     env:
       AWS_CRT_USE_NON_FIPS_TLS_13: 1
     steps:
@@ -248,7 +248,7 @@ jobs:
         ./builder build -p ${{ env.PACKAGE_NAME }} --cmake-extra=-DASSERT_LOCK_HELD=ON
 
   macos-x64-s2n:
-    runs-on: macos-14-large # latest
+    runs-on: macos-15-large # latest
     env:
       AWS_CRT_USE_NON_FIPS_TLS_13: 1
     steps:
