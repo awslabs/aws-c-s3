@@ -214,10 +214,15 @@ struct aws_s3_meta_request {
      * 1) request_body_async_stream: if set, then async stream 1 part at a time
      * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel
      * 3) request_body_using_async_writes: if set, then synchronously copy async_write data from 1 part at a time
-     * 4) initial_request_message's body_stream: else synchronously stream parts */
+     * 4) request_body: if set, the caller's memory holding the whole body (multipart PUT_OBJECT only). It's
+     *    added to the client's buffer pool as a pre-allocated buffer, so each part's buffer is already a view of
+     *    this memory at the part's offset and nothing is copied; parts are prepared in parallel. Set only once
+     *    the pool has accepted it, so destroy removes it from the pool exactly when it was added.
+     * 5) initial_request_message's body_stream: else synchronously stream parts */
     struct aws_async_input_stream *request_body_async_stream;
     struct aws_parallel_input_stream *request_body_parallel_stream;
     bool request_body_using_async_writes;
+    struct aws_byte_cursor request_body;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;

@@ -1798,11 +1798,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return NULL;
     }
     if (options->request_body.ptr != NULL) {
-        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "Could not create meta request."
-                " request_body is only supported for DEFAULT meta requests.");
+                " request_body is only supported for DEFAULT and PUT_OBJECT meta requests.");
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
         }
@@ -1889,7 +1889,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "Could not create auto-ranged-put meta request."
-                    " Body must be set via filepath, async stream, or body stream.");
+                    " Body must be set via filepath, async stream, body stream, or request_body.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
@@ -2482,6 +2482,52 @@ struct aws_s3_reserve_memory_payload {
     void *user_data;
 };
 
+/**
+ * Validates the buffer pool ticket received for a request:
+ *
+ * 1. For a meta request backed by a pre-allocated buffer (recv_buffer or request_body), the
+ *    ticket's buffer must be exactly the region for this request's part. This catches a
+ *    misbehaving pool (e.g. a custom pool handing one part another part's slot) before the
+ *    buffer is used and the corruption spreads.
+ * 2. When the pool allocates its own memory, this check is a no-op.
+ */
+static int s_validate_ticket(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    const uint8_t *base = NULL;
+    size_t capacity = 0;
+    if (meta_request->recv_buffer != NULL) {
+        base = meta_request->recv_buffer->buffer;
+        capacity = meta_request->recv_buffer->capacity;
+    } else if (meta_request->request_body.ptr != NULL) {
+        base = meta_request->request_body.ptr;
+        capacity = meta_request->request_body.len;
+    } else {
+        return AWS_OP_SUCCESS; /* Pool memory: nothing to check against. */
+    }
+
+    /* The region this part was reserved for, derived the same way as the reservation. */
+    uint64_t local_offset = 0;
+    size_t size = aws_min_size(request->buffer_size, (size_t)aws_s3_request_get_payload_size(request));
+    struct aws_byte_buf view = aws_s3_buffer_ticket_claim(request->ticket);
+    if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset) ||
+        local_offset > capacity || size > capacity - local_offset || view.buffer != base + local_offset ||
+        view.capacity != size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: The buffer pool returned the wrong buffer for request %p (%zu bytes at local_offset %" PRIu64
+            "): got %p with capacity %zu.",
+            (void *)meta_request,
+            (void *)request,
+            size,
+            local_offset,
+            (void *)view.buffer,
+            view.capacity);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+    return AWS_OP_SUCCESS;
+}
+
 static void s_s3_prepare_acquire_mem_callback_and_destroy(
     struct aws_s3_reserve_memory_payload *payload,
     int error_code) {
@@ -2606,6 +2652,14 @@ static void s_on_pool_buffer_reserved(void *user_data) {
 
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
 
+    /* Fail the request through the same path as a failed reservation (which also takes it off the pending list),
+     * before any data is written or read. The request releases the ticket when it's destroyed. */
+    if (s_validate_ticket(request)) {
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, aws_last_error_or_unknown());
+        s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
+        return;
+    }
+
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -2625,9 +2679,10 @@ static void s_on_pool_buffer_reserved(void *user_data) {
      * We can revisit whether it makes sense for get and add it later.
      */
 
+    /* request_body is read at any offset, like a parallel stream, so its parts don't need ordering. */
     bool needs_ordered_prepare = request->part_number > 0 &&
                                  meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-                                 !meta_request->request_body_parallel_stream;
+                                 !meta_request->request_body_parallel_stream && meta_request->request_body.ptr == NULL;
 
     if (needs_ordered_prepare) {
         /* Insert into priority queue and drain in order to ensure sequential
