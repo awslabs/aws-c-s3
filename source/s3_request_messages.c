@@ -23,6 +23,7 @@ const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-metadata-directive"),
@@ -62,6 +63,7 @@ const struct aws_byte_cursor g_s3_upload_part_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-metadata-directive"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging-directive"),
@@ -235,6 +237,7 @@ const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
@@ -732,26 +735,26 @@ error_cleanup:
     return NULL;
 }
 
+/* The payload is written without indentation or newlines: whitespace between elements carries no meaning, and with
+ * up to 10,000 parts it would add ~290-390KB, enough to push the request past body-size limits of some S3-compatible
+ * services. */
 static const struct aws_byte_cursor s_complete_payload_begin = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n");
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">");
 
 static const struct aws_byte_cursor s_complete_payload_end =
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</CompleteMultipartUpload>");
 
-static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    <Part>\n"
-                                                                                                    "        <ETag>");
+static const struct aws_byte_cursor s_part_section_string_0 = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("<Part><ETag>");
 
 static const struct aws_byte_cursor s_part_section_string_1 =
-    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag>\n"
-                                          "         <PartNumber>");
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</ETag><PartNumber>");
 
-static const struct aws_byte_cursor s_close_part_number_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>\n");
-static const struct aws_byte_cursor s_close_part_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("    </Part>\n");
-static const struct aws_byte_cursor s_open_start_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("         <");
+static const struct aws_byte_cursor s_close_part_number_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</PartNumber>");
+static const struct aws_byte_cursor s_close_part_tag = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</Part>");
+static const struct aws_byte_cursor s_open_start_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("<");
 static const struct aws_byte_cursor s_open_end_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("</");
 static const struct aws_byte_cursor s_close_bracket = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">");
-static const struct aws_byte_cursor s_close_bracket_new_line = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL(">\n");
 /* Create a complete-multipart message, which includes an XML payload of all completed parts. */
 struct aws_http_message *aws_s3_complete_multipart_message_with_object_size_new(
     struct aws_allocator *allocator,
@@ -901,7 +904,7 @@ struct aws_http_message *aws_s3_complete_multipart_message_with_object_size_new(
                 if (aws_byte_buf_append_dynamic(body_buffer, &mpu_algorithm_checksum_name)) {
                     goto error_clean_up;
                 }
-                if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket_new_line)) {
+                if (aws_byte_buf_append_dynamic(body_buffer, &s_close_bracket)) {
                     goto error_clean_up;
                 }
             }
