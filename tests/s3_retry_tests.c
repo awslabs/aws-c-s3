@@ -1037,12 +1037,10 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client client;
-    AWS_ZERO_STRUCT(client);
+    struct aws_s3_client client = {0};
     client.max_attempts = 6;
 
-    struct aws_s3_meta_request meta_request;
-    AWS_ZERO_STRUCT(meta_request);
+    struct aws_s3_meta_request meta_request = {0};
     meta_request.client = &client;
 
     struct aws_s3_request request;
@@ -1087,11 +1085,9 @@ static int s_test_s3_invocation_id_header(struct aws_allocator *allocator, void 
     AWS_ZERO_STRUCT(tester);
     ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
 
-    struct aws_s3_client client;
-    AWS_ZERO_STRUCT(client);
+    struct aws_s3_client client = {0};
 
-    struct aws_s3_meta_request meta_request;
-    AWS_ZERO_STRUCT(meta_request);
+    struct aws_s3_meta_request meta_request = {0};
     meta_request.client = &client;
 
     struct aws_s3_request first;
