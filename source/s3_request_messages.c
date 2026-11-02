@@ -23,6 +23,7 @@ const struct aws_byte_cursor g_s3_create_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-sdk-checksum-algorithm"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-metadata-directive"),
@@ -62,6 +63,7 @@ const struct aws_byte_cursor g_s3_upload_part_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-retain-until-date"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-object-lock-legal-hold"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-metadata-directive"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-tagging-directive"),
@@ -235,6 +237,7 @@ const struct aws_byte_cursor g_s3_abort_multipart_upload_excluded_headers[] = {
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-copy-source-range"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-none-match"),
+    AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("if-match"),
     AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-create-session-mode"),
 };
 
@@ -265,6 +268,10 @@ static const struct {
     {
         .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-source-expected-bucket-owner"),
         .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("x-amz-expected-bucket-owner"),
+    },
+    {
+        .src_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("amz-sdk-invocation-id"),
+        .dst_name = AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("amz-sdk-invocation-id"),
     },
 };
 
@@ -559,6 +566,7 @@ static const struct aws_byte_cursor s_slash_char = AWS_BYTE_CUR_INIT_FROM_STRING
  *  - x-amz-source-expected-bucket-owner: on a CopyObject this asserts the *source* bucket owner, which maps to
  *    x-amz-expected-bucket-owner on a HEAD of the source object. (The plain x-amz-expected-bucket-owner on a CopyObject
  *    asserts the *destination* owner and must NOT be forwarded to the source HEAD.)
+ *  - amz-sdk-invocation-id: the HEAD is part of the same SDK operation, so it shares the operation's id.
  */
 static int s_s3_copy_source_object_head_forward_headers(
     struct aws_http_message *base_message,

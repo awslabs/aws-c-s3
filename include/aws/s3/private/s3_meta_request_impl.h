@@ -214,10 +214,15 @@ struct aws_s3_meta_request {
      * 1) request_body_async_stream: if set, then async stream 1 part at a time
      * 2) request_body_parallel_stream: if set, then stream multiple parts in parallel
      * 3) request_body_using_async_writes: if set, then synchronously copy async_write data from 1 part at a time
-     * 4) initial_request_message's body_stream: else synchronously stream parts */
+     * 4) request_body: if set, the caller's memory holding the whole body (multipart PUT_OBJECT only). It's
+     *    added to the client's buffer pool as a pre-allocated buffer, so each part's buffer is already a view of
+     *    this memory at the part's offset and nothing is copied; parts are prepared in parallel. Set only once
+     *    the pool has accepted it, so destroy removes it from the pool exactly when it was added.
+     * 5) initial_request_message's body_stream: else synchronously stream parts */
     struct aws_async_input_stream *request_body_async_stream;
     struct aws_parallel_input_stream *request_body_parallel_stream;
     bool request_body_using_async_writes;
+    struct aws_byte_cursor request_body;
 
     /* Part size to use for uploads and downloads.  Passed down by the creating client. */
     const size_t part_size;
@@ -467,6 +472,25 @@ struct aws_s3_meta_request {
      * aws_s3_meta_request_options at creation time. Immutable after init. */
     uint32_t feature_ids;
 
+    /* Optional caller-provided in-memory download destination (zero-copy).
+     * Non-NULL means each part is written directly into this buffer at
+     * (part range start - requested_range_start); the client neither allocates nor frees it.
+     * Set only once it has been added to the client's buffer pool, so destroy removes it then.
+     * See aws_s3_meta_request_options.recv_buffer. */
+    struct aws_byte_buf *recv_buffer;
+    /* Number of bytes the download will write into recv_buffer (the discovered range length; 0 for an
+     * empty object). Copied into recv_buffer->len when the meta request succeeds. */
+    uint64_t recv_buffer_expected_len;
+    /* Pre-built User-Agent header value, computed once at init from the SDK's existing header +
+     * CRT product token + merged m/ section (SDK IDs + operation-level CRT IDs). Per-part
+     * stamping copies this and may append per-part-only feature IDs. */
+    struct aws_byte_buf cached_user_agent;
+    bool cached_ua_has_metrics; /* true if cached_user_agent already contains an m/ section */
+
+    /* True when this is the first meta-request on a newly created client. Consumed (set to false)
+     * on the first HTTP request so CLIENT_CREATED_FOR_OP (Al) appears exactly once. */
+    bool first_request_for_new_client;
+
     /* Destination path for a download. The file itself is created or truncated once at init through a
      * short-lived stdio handle; received bytes are written only through the descriptors in
      * `recv_file_write_fd_slots` and `recv_file_ordered_fds`. */
@@ -524,15 +548,18 @@ struct aws_s3_meta_request {
      * existing file size for CREATE_OR_APPEND. */
     uint64_t recv_file_base_offset;
 
-    /* The object range from s3 start that maps to `recv_file_base_offset` in the file. Zero for a
-     * whole-object download; for a ranged one it is the range's start, because a part is delivered at
-     * its absolute position in the object and the caller expects the range's first byte at the base
-     * offset rather than that many bytes into the file. Set by the derived meta request when it
-     * resolves the object range, which happens before any body is delivered. */
-    uint64_t recv_file_object_range_origin;
+    /* The object range start that maps to the start of the download's destination: offset
+     * `recv_file_base_offset` in the file, or offset 0 in `recv_buffer`. Zero for a whole-object
+     * download; for a ranged one it is the range's start, because a part has its absolute position in
+     * the object and the caller expects the range's first byte at the destination's start. Set by the
+     * derived meta request when it resolves the object range, before any body is delivered; for
+     * recv_buffer it is set at creation when already known, since a part is placed when its buffer is
+     * reserved, before the first response. Zero for an upload, set at creation. Must be resolved before
+     * any part reserves a pool buffer, since the reservation's local_offset is measured from it. */
+    uint64_t requested_range_start;
 
-    /* Whether the origin above has been resolved. */
-    bool recv_file_object_range_origin_resolved;
+    /* Whether requested_range_start has been resolved. */
+    bool requested_range_start_resolved;
 
     /* Counter for how many times we fell back from O_DIRECT to buffered I/O for a single part.
      * Init-time fallbacks (non-Linux, unaligned part_size, unaligned WRITE_TO_POSITION/APPEND offset)

@@ -6,6 +6,7 @@
 #include <aws/s3/private/s3_default_buffer_pool.h>
 
 #include <aws/common/array_list.h>
+#include <aws/common/hash_table.h>
 #include <aws/common/ref_count.h>
 #include <aws/common/system_info.h>
 #include <aws/io/future.h>
@@ -163,12 +164,22 @@ static uint64_t s_default_pool_derive_aligned_buffer_size(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     uint64_t size);
 
+static int s_default_pool_add_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer);
+static void s_default_pool_remove_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request);
+
 static struct aws_s3_buffer_pool_vtable s_default_pool_vtable = {
     .reserve = s_default_pool_reserve,
     .trim = s_default_pool_trim,
     .add_special_size = s_default_pool_add_special_size,
     .release_special_size = s_default_pool_release_special_size,
     .derive_aligned_buffer_size = s_default_pool_derive_aligned_buffer_size,
+    .add_preallocated_buffer = s_default_pool_add_preallocated_buffer,
+    .remove_preallocated_buffer = s_default_pool_remove_preallocated_buffer,
 };
 
 static void s_destroy_special_block_list(void *val) {
@@ -187,6 +198,18 @@ static void s_destroy_special_block_list(void *val) {
 
 static void s_aws_s3_default_buffer_pool_destroy_wrap(void *user_data) {
     aws_s3_default_buffer_pool_destroy(user_data);
+}
+
+/* The pool's own copy of a pre-allocated buffer's description, so the caller's struct aws_byte_buf only has
+ * to live for the add call. The memory it describes is the caller's and is never freed here. */
+struct aws_s3_preallocated_entry {
+    struct aws_allocator *allocator;
+    struct aws_byte_buf buffer;
+};
+
+static void s_preallocated_entry_destroy(void *value) {
+    struct aws_s3_preallocated_entry *entry = value;
+    aws_mem_release(entry->allocator, entry);
 }
 
 struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
@@ -316,6 +339,17 @@ struct aws_s3_buffer_pool *aws_s3_default_buffer_pool_new(
         NULL,
         s_destroy_special_block_list);
 
+    /* Pre-allocated buffers: meta request pointer (a key only) -> the pool's own copy of the caller's
+     * buffer description (struct aws_s3_preallocated_entry). The memory it describes stays caller-owned. */
+    aws_hash_table_init(
+        &buffer_pool->preallocated_buffers,
+        buffer_pool->base_allocator,
+        10, /* initial capacity: one entry per zero-copy meta request in flight */
+        aws_hash_ptr,
+        aws_ptr_eq,
+        NULL,
+        s_preallocated_entry_destroy);
+
     struct aws_s3_buffer_pool *pool = aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_buffer_pool));
     pool->impl = buffer_pool;
     pool->vtable = &s_default_pool_vtable;
@@ -354,6 +388,7 @@ void aws_s3_default_buffer_pool_destroy(struct aws_s3_buffer_pool *buffer_pool_w
 
     /* Clean up special blocks */
     aws_hash_table_clean_up(&buffer_pool->special_blocks);
+    aws_hash_table_clean_up(&buffer_pool->preallocated_buffers);
 
     aws_mutex_clean_up(&buffer_pool->mutex);
     struct aws_allocator *base = buffer_pool->base_allocator;
@@ -686,6 +721,124 @@ struct aws_s3_default_buffer_ticket *s_try_reserve_synced(
     return ticket;
 }
 
+/* ---- Pre-allocated buffers (aws_s3_buffer_pool_add_preallocated_buffer) ----
+ * A meta request can register a caller-owned buffer (e.g. aws_s3_meta_request_options.recv_buffer).
+ * Its reservations then get a ticket that views that buffer at the reservation's local_offset instead of pool
+ * memory. That memory is the caller's, so it doesn't count against the pool's memory limit, and
+ * releasing the ticket only frees the ticket's bookkeeping. The meta request pointer is only used as a
+ * map key; the pool never looks inside it. */
+struct aws_s3_preallocated_ticket_impl {
+    struct aws_allocator *allocator;
+    uint8_t *base; /* preallocated buffer + local_offset */
+    size_t size;
+};
+
+static struct aws_byte_buf s_preallocated_ticket_claim(struct aws_s3_buffer_ticket *ticket) {
+    struct aws_s3_preallocated_ticket_impl *impl = ticket->impl;
+    struct aws_byte_buf buf;
+    AWS_ZERO_STRUCT(buf);
+    buf.buffer = impl->base;
+    buf.capacity = impl->size;
+    buf.allocator = NULL; /* not owned: never freed by the client */
+    return buf;
+}
+
+static void s_preallocated_ticket_destroy(void *data) {
+    struct aws_s3_buffer_ticket *ticket = data;
+    struct aws_s3_preallocated_ticket_impl *impl = ticket->impl;
+    struct aws_allocator *allocator = impl->allocator;
+    aws_mem_release(allocator, impl);
+    aws_mem_release(allocator, ticket);
+}
+
+static struct aws_s3_buffer_ticket_vtable s_preallocated_ticket_vtable = {.claim = s_preallocated_ticket_claim};
+
+static struct aws_future_s3_buffer_ticket *s_reserve_from_preallocated_buffer(
+    struct aws_allocator *allocator,
+    const struct aws_byte_buf *buffer,
+    struct aws_s3_buffer_pool_reserve_meta meta) {
+
+    struct aws_future_s3_buffer_ticket *future = aws_future_s3_buffer_ticket_new(allocator);
+
+    /* Never hand out a view past the end of the caller's buffer. */
+    if (meta.local_offset > buffer->capacity || meta.size > buffer->capacity - meta.local_offset) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_CLIENT,
+            "id=%p Pre-allocated buffer can't hold a reservation of %zu bytes at offset %" PRIu64 " (capacity %zu).",
+            (void *)meta.meta_request,
+            meta.size,
+            meta.local_offset,
+            buffer->capacity);
+        aws_future_s3_buffer_ticket_set_error(future, AWS_ERROR_SHORT_BUFFER);
+        return future;
+    }
+
+    struct aws_s3_preallocated_ticket_impl *impl =
+        aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_preallocated_ticket_impl));
+    impl->allocator = allocator;
+    impl->base = buffer->buffer + meta.local_offset;
+    impl->size = meta.size;
+
+    struct aws_s3_buffer_ticket *ticket = aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_buffer_ticket));
+    ticket->impl = impl;
+    ticket->vtable = &s_preallocated_ticket_vtable;
+    aws_ref_count_init(&ticket->ref_count, ticket, s_preallocated_ticket_destroy);
+
+    aws_future_s3_buffer_ticket_set_result_by_move(future, &ticket);
+    return future;
+}
+
+static int s_default_pool_add_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *buffer) {
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+    struct aws_s3_preallocated_entry *entry =
+        aws_mem_calloc(buffer_pool->base_allocator, 1, sizeof(struct aws_s3_preallocated_entry));
+    entry->allocator = buffer_pool->base_allocator;
+    entry->buffer = *buffer;
+    aws_mutex_lock(&buffer_pool->mutex);
+    int result = aws_hash_table_put(&buffer_pool->preallocated_buffers, meta_request, entry, NULL);
+    aws_mutex_unlock(&buffer_pool->mutex);
+    if (result != AWS_OP_SUCCESS) {
+        aws_mem_release(buffer_pool->base_allocator, entry);
+    }
+    return result;
+}
+
+static void s_default_pool_remove_preallocated_buffer(
+    struct aws_s3_buffer_pool *buffer_pool_wrapper,
+    struct aws_s3_meta_request *meta_request) {
+
+    struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
+    aws_mutex_lock(&buffer_pool->mutex);
+    aws_hash_table_remove(&buffer_pool->preallocated_buffers, meta_request, NULL, NULL);
+    aws_mutex_unlock(&buffer_pool->mutex);
+}
+
+/* Copies out the pre-allocated buffer registered for `meta_request`. Returns false if there is none. The copy
+ * is taken under the lock, so a concurrent remove can't free it while it's in use. */
+static bool s_find_preallocated_buffer(
+    struct aws_s3_default_buffer_pool *buffer_pool,
+    struct aws_s3_meta_request *meta_request,
+    struct aws_byte_buf *out_buffer) {
+
+    if (meta_request == NULL) {
+        return false;
+    }
+    bool found = false;
+    aws_mutex_lock(&buffer_pool->mutex);
+    struct aws_hash_element *elem = NULL;
+    aws_hash_table_find(&buffer_pool->preallocated_buffers, meta_request, &elem);
+    if (elem != NULL) {
+        *out_buffer = ((struct aws_s3_preallocated_entry *)elem->value)->buffer;
+        found = true;
+    }
+    aws_mutex_unlock(&buffer_pool->mutex);
+    return found;
+}
+
 struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_buffer_pool *buffer_pool_wrapper,
     struct aws_s3_buffer_pool_reserve_meta meta) {
@@ -694,6 +847,12 @@ struct aws_future_s3_buffer_ticket *aws_s3_default_buffer_pool_reserve(
     struct aws_s3_default_buffer_pool *buffer_pool = buffer_pool_wrapper->impl;
 
     AWS_FATAL_ASSERT(meta.size != 0);
+
+    /* A meta request with a pre-allocated buffer is served from it, not from pool memory. */
+    struct aws_byte_buf preallocated;
+    if (s_find_preallocated_buffer(buffer_pool, meta.meta_request, &preallocated)) {
+        return s_reserve_from_preallocated_buffer(buffer_pool->base_allocator, &preallocated, meta);
+    }
 
     /* A reservation bigger than the pool's usable limit can never be satisfied: even releasing
      * every outstanding buffer would not make room. s_try_reserve_synced would return NULL and

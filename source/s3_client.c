@@ -102,6 +102,9 @@ static const char *s_memory_limit_mb_env_var = "AWS_CRT_S3_MEMORY_LIMIT_IN_MB";
 /* Eight threads is enough to saturate most disk setups. Mirroring the full event-loop count on a
  * large host (e.g. 192 vCPUs) wastes threads and file descriptors without improving throughput. */
 static const uint16_t s_default_max_num_file_io_threads = 8;
+/* 16 is the host resolver size that downstream callers already use by default, so we use it too.
+ * We can change it if we find an issue with it. */
+static const size_t s_default_host_resolver_max_entries = 16;
 
 /* Set to anything non-empty and a download that expressed no preference of its own delivers its body in
  * object order. Consulted below both the request and the client setting, so it changes the default rather
@@ -252,6 +255,95 @@ static size_t s_get_default_mem_limit_from_throughput(double throughput_gbps) {
 #endif
 }
 
+uint64_t aws_s3_default_part_size(void) {
+    return g_default_part_size_fallback;
+}
+
+uint64_t aws_s3_default_max_part_size_for_memory_limit(uint64_t memory_limit) {
+    return aws_min_u64(memory_limit / 2, g_default_max_part_size);
+}
+
+int aws_s3_resolve_configured_memory_limit(
+    struct aws_allocator *allocator,
+    uint64_t configured_limit,
+    uint64_t *out_memory_limit) {
+
+    AWS_PRECONDITION(allocator);
+    AWS_PRECONDITION(out_memory_limit);
+
+    *out_memory_limit = 0;
+
+    if (configured_limit != 0) {
+        *out_memory_limit = configured_limit;
+        return AWS_OP_SUCCESS;
+    }
+
+    /*
+     * Try to read from the environment variable for memory limit.
+     * First we try _IN_MB (allows sub-GiB values, e.g. 256 for 256 MiB).
+     */
+    struct aws_string *mem_limit_mb_str = aws_get_env_nonempty(allocator, s_memory_limit_mb_env_var);
+    if (mem_limit_mb_str) {
+        uint64_t mem_limit_in_mb = 0;
+        if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_mb_str), &mem_limit_in_mb)) {
+            aws_string_destroy(mem_limit_mb_str);
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "Cannot resolve memory limit; environment variable: %s, is not set correctly, only "
+                "integers supported.",
+                s_memory_limit_mb_env_var);
+            return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+        }
+        aws_string_destroy(mem_limit_mb_str);
+        /* Convert MiB to bytes */
+        uint64_t mem_limit_from_env = 0;
+        if (aws_mul_u64_checked(mem_limit_in_mb, 1024, &mem_limit_from_env) ||
+            aws_mul_u64_checked(mem_limit_from_env, 1024, &mem_limit_from_env)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_CLIENT,
+                "Cannot resolve memory limit; environment variable: %s, overflows when converted "
+                "to bytes.",
+                s_memory_limit_mb_env_var);
+            return aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
+        }
+        *out_memory_limit = mem_limit_from_env;
+    }
+
+    /* _IN_GIB is only checked if _IN_MB was not set */
+    if (*out_memory_limit == 0) {
+        struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
+        if (memory_limit_from_env_var) {
+            uint64_t mem_limit_in_gib = 0;
+            if (aws_byte_cursor_utf8_parse_u64(
+                    aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
+                aws_string_destroy(memory_limit_from_env_var);
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot resolve memory limit; environment variable: %s, is not set correctly, only "
+                    "integers supported.",
+                    s_memory_limit_gib_env_var);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+            aws_string_destroy(memory_limit_from_env_var);
+            uint64_t mem_limit_in_bytes = 0;
+            /* Convert mem_limit_in_gib to bytes */
+            if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
+                aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "Cannot resolve memory limit; environment variable: %s, overflow detected.",
+                    s_memory_limit_gib_env_var);
+                return aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
+            }
+
+            *out_memory_limit = mem_limit_in_bytes;
+        }
+    }
+
+    return AWS_OP_SUCCESS;
+}
+
 size_t aws_s3_default_memory_limit_for_throughput(double throughput_target_gbps) {
     /*
      * Resolve the effective throughput used for default memory pool sizing.
@@ -387,6 +479,50 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     return s3express_provider;
 }
 
+struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client_bootstrap_options *options) {
+    AWS_PRECONDITION(allocator);
+
+    size_t loop_count = options != NULL ? options->event_loop_count : 0;
+    if (loop_count == 0) {
+        loop_count = aws_system_info_processor_count();
+        if (loop_count > AWS_S3_DEFAULT_MAX_EVENT_LOOPS) {
+            loop_count = AWS_S3_DEFAULT_MAX_EVENT_LOOPS;
+        }
+    }
+
+    size_t max_resolver_entries = options != NULL ? options->host_resolver_max_entries : 0;
+    if (max_resolver_entries == 0) {
+        max_resolver_entries = s_default_host_resolver_max_entries;
+    }
+
+    struct aws_event_loop_group *event_loop_group =
+        aws_event_loop_group_new_default(allocator, (uint16_t)loop_count, NULL);
+    if (event_loop_group == NULL) {
+        return NULL;
+    }
+
+    struct aws_host_resolver_default_options resolver_options = {
+        .max_entries = max_resolver_entries,
+        .el_group = event_loop_group,
+    };
+    struct aws_host_resolver *host_resolver = aws_host_resolver_new_default(allocator, &resolver_options);
+    struct aws_client_bootstrap *bootstrap = NULL;
+    if (host_resolver != NULL) {
+        struct aws_client_bootstrap_options bootstrap_options = {
+            .event_loop_group = event_loop_group,
+            .host_resolver = host_resolver,
+        };
+        bootstrap = aws_client_bootstrap_new(allocator, &bootstrap_options);
+    }
+
+    /* The bootstrap holds its own references. */
+    aws_host_resolver_release(host_resolver);
+    aws_event_loop_group_release(event_loop_group);
+    return bootstrap;
+}
+
 struct aws_s3_client *aws_s3_client_new(
     struct aws_allocator *allocator,
     const struct aws_s3_client_config *client_config) {
@@ -439,75 +575,10 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     uint64_t mem_limit_configured = 0;
-    if (client_config->memory_limit_in_bytes == 0) {
-        /*
-         * Try to read from the environment variable for memory limit.
-         * First we try _IN_MB (allows sub-GiB values, e.g. 256 for 256 MiB).
-         */
-        struct aws_string *mem_limit_mb_str = aws_get_env_nonempty(allocator, s_memory_limit_mb_env_var);
-        if (mem_limit_mb_str) {
-            uint64_t mem_limit_in_mb = 0;
-            if (aws_byte_cursor_utf8_parse_u64(aws_byte_cursor_from_string(mem_limit_mb_str), &mem_limit_in_mb)) {
-                aws_string_destroy(mem_limit_mb_str);
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
-                    "integers supported.",
-                    s_memory_limit_mb_env_var);
-                aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                return NULL;
-            }
-            aws_string_destroy(mem_limit_mb_str);
-            /* Convert MiB to bytes */
-            uint64_t mem_limit_from_env = 0;
-            if (aws_mul_u64_checked(mem_limit_in_mb, 1024, &mem_limit_from_env) ||
-                aws_mul_u64_checked(mem_limit_from_env, 1024, &mem_limit_from_env)) {
-                AWS_LOGF_ERROR(
-                    AWS_LS_S3_CLIENT,
-                    "Cannot create client from client_config; environment variable: %s, overflows when converted "
-                    "to bytes.",
-                    s_memory_limit_mb_env_var);
-                aws_raise_error(AWS_ERROR_OVERFLOW_DETECTED);
-                return NULL;
-            }
-            mem_limit_configured = mem_limit_from_env;
-        }
-
-        /* _IN_GIB is only checked if _IN_MB was not set */
-        if (mem_limit_configured == 0) {
-            struct aws_string *memory_limit_from_env_var = aws_get_env_nonempty(allocator, s_memory_limit_gib_env_var);
-            if (memory_limit_from_env_var) {
-                uint64_t mem_limit_in_gib = 0;
-                if (aws_byte_cursor_utf8_parse_u64(
-                        aws_byte_cursor_from_string(memory_limit_from_env_var), &mem_limit_in_gib)) {
-                    aws_string_destroy(memory_limit_from_env_var);
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "Cannot create client from client_config; environment variable: %s, is not set correctly, only "
-                        "integers supported.",
-                        s_memory_limit_gib_env_var);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-                aws_string_destroy(memory_limit_from_env_var);
-                uint64_t mem_limit_in_bytes = 0;
-                /* Convert mem_limit_in_gib to bytes */
-                if (aws_mul_u64_checked(mem_limit_in_gib, 1024, &mem_limit_in_bytes) ||
-                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes) ||
-                    aws_mul_u64_checked(mem_limit_in_bytes, 1024, &mem_limit_in_bytes)) {
-                    AWS_LOGF_ERROR(
-                        AWS_LS_S3_CLIENT,
-                        "Cannot create client from client_config; environment variable: %s, overflow detected.",
-                        s_memory_limit_gib_env_var);
-                    aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
-                    return NULL;
-                }
-
-                mem_limit_configured = mem_limit_in_bytes;
-            }
-        }
-    } else {
-        mem_limit_configured = client_config->memory_limit_in_bytes;
+    if (aws_s3_resolve_configured_memory_limit(
+            allocator, client_config->memory_limit_in_bytes, &mem_limit_configured)) {
+        AWS_LOGF_ERROR(AWS_LS_S3_CLIENT, "Cannot create client from client_config; memory limit is not valid.");
+        return NULL;
     }
 #ifdef BYO_CRYPTO
     if (client_config->tls_mode == AWS_MR_TLS_ENABLED && client_config->tls_connection_options == NULL) {
@@ -563,8 +634,9 @@ struct aws_s3_client *aws_s3_client_new(
         client->part_size_set = true;
     }
 
-    /* default max part size is the smallest of either half of mem limit or default max part size */
-    size_t max_part_size = aws_min_size(mem_limit / 2, (size_t)g_default_max_part_size);
+    /* default max part size is the smallest of either half of mem limit or default max part size.
+     * The result is at most mem_limit / 2, so narrowing back to size_t cannot truncate. */
+    size_t max_part_size = (size_t)aws_s3_default_max_part_size_for_memory_limit(mem_limit);
     if (client_config->max_part_size != 0) {
         if (client_config->max_part_size > SIZE_MAX) {
             max_part_size = SIZE_MAX;
@@ -618,6 +690,10 @@ struct aws_s3_client *aws_s3_client_new(
         if (ec2_instance.len > 0) {
             client->feature_ids |= AWS_S3_FEATURE_ID_ON_EC2;
         }
+    }
+
+    if (client_config->buffer_pool_factory_fn) {
+        client->feature_ids |= AWS_S3_FEATURE_ID_CUSTOM_MEMORY_POOL;
     }
 
     struct aws_s3_buffer_pool_config buffer_pool_config = {
@@ -849,6 +925,8 @@ struct aws_s3_client *aws_s3_client_new(
         uint32_t max_retries = client_config->retry_config.max_retries > 0
                                    ? (uint32_t)client_config->retry_config.max_retries
                                    : s_default_max_retries;
+        /* Max attempts = max retries + 1 (the initial attempt). */
+        client->max_attempts = max_retries + 1;
 
         struct aws_exponential_backoff_retry_options backoff_retry_options = {
             .el_group = client_config->client_bootstrap->event_loop_group,
@@ -858,12 +936,46 @@ struct aws_s3_client *aws_s3_client_new(
             .jitter_mode = client_config->retry_config.jitter_mode,
         };
 
-        struct aws_standard_retry_options retry_options = {
+        struct aws_standard_retry_options standard_retry_options = {
             .backoff_retry_options = backoff_retry_options,
             .initial_bucket_capacity = client_config->retry_config.initial_bucket_capacity,
         };
 
-        client->retry_strategy = aws_retry_strategy_new_standard(allocator, &retry_options);
+        switch (client_config->retry_config.retry_mode) {
+            case AWS_S3_RETRY_MODE_NONE: {
+                /* Retries disabled: use the no-retry strategy. Record the mode on the
+                 * client so the request path makes a single token-less
+                 * attempt instead of acquiring a token (the no-retry strategy denies token acquisition). */
+                client->disable_retries = true;
+                /* No retries, so only the initial attempt. */
+                client->max_attempts = 1;
+
+                struct aws_no_retry_options no_retry_options;
+                AWS_ZERO_STRUCT(no_retry_options);
+                client->retry_strategy = aws_retry_strategy_new_no_retry(allocator, &no_retry_options);
+                break;
+            }
+            case AWS_S3_RETRY_MODE_ADAPTIVE: {
+                /* Adaptive: standard retry plus client-side rate limiting. */
+                struct aws_adaptive_retry_options adaptive_retry_options = {
+                    .standard_options = standard_retry_options,
+                    .fast_fail_if_no_token = client_config->retry_config.fast_fail_if_no_token,
+                };
+                client->retry_strategy = aws_retry_strategy_new_adaptive(allocator, &adaptive_retry_options);
+                break;
+            }
+            case AWS_S3_RETRY_MODE_EXPONENTIAL_BACKOFF: {
+                /* Exponential backoff: jittered retries up to max_retries, no token bucket. */
+                client->retry_strategy = aws_retry_strategy_new_exponential_backoff(allocator, &backoff_retry_options);
+                break;
+            }
+
+            case AWS_S3_RETRY_MODE_STANDARD:
+            default:
+                /* Standard: exponential backoff plus a per-host token bucket. Also used as default mode. */
+                client->retry_strategy = aws_retry_strategy_new_standard(allocator, &standard_retry_options);
+                break;
+        }
 
         if (client->retry_strategy == NULL) {
             /* if something failed in creation of retry_strategy, we should error instead of having a null
@@ -1686,11 +1798,11 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
         return NULL;
     }
     if (options->request_body.ptr != NULL) {
-        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT) {
+        if (options->type != AWS_S3_META_REQUEST_TYPE_DEFAULT && options->type != AWS_S3_META_REQUEST_TYPE_PUT_OBJECT) {
             AWS_LOGF_ERROR(
                 AWS_LS_S3_META_REQUEST,
                 "Could not create meta request."
-                " request_body is only supported for DEFAULT meta requests.");
+                " request_body is only supported for DEFAULT and PUT_OBJECT meta requests.");
             aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
             return NULL;
         }
@@ -1748,6 +1860,16 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                     struct aws_byte_cursor part_number_query_str = aws_byte_cursor_from_c_str("partNumber");
                     while (aws_query_string_next_param(sub_string, &param)) {
                         if (aws_byte_cursor_eq(&param.key, &part_number_query_str)) {
+                            /* A default meta request never reserves from the pool, so recv_buffer would
+                             * never be written and the body would be discarded. */
+                            if (options->recv_buffer != NULL) {
+                                AWS_LOGF_ERROR(
+                                    AWS_LS_S3_META_REQUEST,
+                                    "Could not create meta request: recv_buffer is not supported for a GET with "
+                                    "partNumber.");
+                                aws_raise_error(AWS_ERROR_UNSUPPORTED_OPERATION);
+                                return NULL;
+                            }
                             return aws_s3_meta_request_default_new(
                                 client->allocator,
                                 client,
@@ -1767,7 +1889,7 @@ static struct aws_s3_meta_request *s_s3_client_meta_request_factory_default(
                 AWS_LOGF_ERROR(
                     AWS_LS_S3_META_REQUEST,
                     "Could not create auto-ranged-put meta request."
-                    " Body must be set via filepath, async stream, or body stream.");
+                    " Body must be set via filepath, async stream, body stream, or request_body.");
                 aws_raise_error(AWS_ERROR_INVALID_ARGUMENT);
                 return NULL;
             }
@@ -2360,6 +2482,52 @@ struct aws_s3_reserve_memory_payload {
     void *user_data;
 };
 
+/**
+ * Validates the buffer pool ticket received for a request:
+ *
+ * 1. For a meta request backed by a pre-allocated buffer (recv_buffer or request_body), the
+ *    ticket's buffer must be exactly the region for this request's part. This catches a
+ *    misbehaving pool (e.g. a custom pool handing one part another part's slot) before the
+ *    buffer is used and the corruption spreads.
+ * 2. When the pool allocates its own memory, this check is a no-op.
+ */
+static int s_validate_ticket(struct aws_s3_request *request) {
+    struct aws_s3_meta_request *meta_request = request->meta_request;
+
+    const uint8_t *base = NULL;
+    size_t capacity = 0;
+    if (meta_request->recv_buffer != NULL) {
+        base = meta_request->recv_buffer->buffer;
+        capacity = meta_request->recv_buffer->capacity;
+    } else if (meta_request->request_body.ptr != NULL) {
+        base = meta_request->request_body.ptr;
+        capacity = meta_request->request_body.len;
+    } else {
+        return AWS_OP_SUCCESS; /* Pool memory: nothing to check against. */
+    }
+
+    /* The region this part was reserved for, derived the same way as the reservation. */
+    uint64_t local_offset = 0;
+    size_t size = aws_min_size(request->buffer_size, (size_t)aws_s3_request_get_payload_size(request));
+    struct aws_byte_buf view = aws_s3_buffer_ticket_claim(request->ticket);
+    if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset) ||
+        local_offset > capacity || size > capacity - local_offset || view.buffer != base + local_offset ||
+        view.capacity != size) {
+        AWS_LOGF_ERROR(
+            AWS_LS_S3_META_REQUEST,
+            "id=%p: The buffer pool returned the wrong buffer for request %p (%zu bytes at local_offset %" PRIu64
+            "): got %p with capacity %zu.",
+            (void *)meta_request,
+            (void *)request,
+            size,
+            local_offset,
+            (void *)view.buffer,
+            view.capacity);
+        return aws_raise_error(AWS_ERROR_INVALID_STATE);
+    }
+    return AWS_OP_SUCCESS;
+}
+
 static void s_s3_prepare_acquire_mem_callback_and_destroy(
     struct aws_s3_reserve_memory_payload *payload,
     int error_code) {
@@ -2484,6 +2652,14 @@ static void s_on_pool_buffer_reserved(void *user_data) {
 
     request->ticket = aws_future_s3_buffer_ticket_get_result_by_move(future_ticket);
 
+    /* Fail the request through the same path as a failed reservation (which also takes it off the pending list),
+     * before any data is written or read. The request releases the ticket when it's destroyed. */
+    if (s_validate_ticket(request)) {
+        s_s3_prepare_acquire_mem_callback_and_destroy(payload, aws_last_error_or_unknown());
+        s_force_drain_pending_put_prepare_queue(meta_request, AWS_ERROR_S3_CANCELED);
+        return;
+    }
+
     /* BEGIN CRITICAL SECTION */
     {
         aws_s3_meta_request_lock_synced_data(meta_request);
@@ -2503,9 +2679,10 @@ static void s_on_pool_buffer_reserved(void *user_data) {
      * We can revisit whether it makes sense for get and add it later.
      */
 
+    /* request_body is read at any offset, like a parallel stream, so its parts don't need ordering. */
     bool needs_ordered_prepare = request->part_number > 0 &&
                                  meta_request->type == AWS_S3_META_REQUEST_TYPE_PUT_OBJECT &&
-                                 !meta_request->request_body_parallel_stream;
+                                 !meta_request->request_body_parallel_stream && meta_request->request_body.ptr == NULL;
 
     if (needs_ordered_prepare) {
         /* Insert into priority queue and drain in order to ensure sequential
@@ -2550,12 +2727,6 @@ void s_acquire_mem_and_prepare_request(
         struct aws_allocator *allocator = request->allocator;
         struct aws_s3_meta_request *meta_request = request->meta_request;
 
-        struct aws_s3_buffer_pool_reserve_meta meta = {
-            .client = client,
-            .meta_request = meta_request,
-            .size = aws_min_size(request->buffer_size, request_size),
-        };
-
         struct aws_s3_reserve_memory_payload *payload =
             aws_mem_calloc(allocator, 1, sizeof(struct aws_s3_reserve_memory_payload));
 
@@ -2563,7 +2734,40 @@ void s_acquire_mem_and_prepare_request(
         payload->request = request;
         payload->callback = callback;
         payload->user_data = user_data;
-        payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+
+        /* Where this part goes within the requested range (its local_offset), for a pool that places data
+         * itself, e.g. in a pre-allocated buffer. Every part lies inside the requested range, so a part
+         * starting before it is a bug: fail the request here, through the same path as a failed
+         * reservation, rather than hand the pool an offset it can't use. Likewise if the range start isn't
+         * resolved yet: its placeholder 0 would make local_offset the part's absolute object offset. */
+        uint64_t local_offset = 0;
+        if (!meta_request->requested_range_start_resolved) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Cannot reserve a buffer for the part at %" PRIu64
+                " before the requested range start is resolved.",
+                (void *)meta_request,
+                request->part_range_start);
+            payload->buffer_future = aws_future_s3_buffer_ticket_new(allocator);
+            aws_future_s3_buffer_ticket_set_error(payload->buffer_future, AWS_ERROR_INVALID_STATE);
+        } else if (aws_sub_u64_checked(request->part_range_start, meta_request->requested_range_start, &local_offset)) {
+            AWS_LOGF_ERROR(
+                AWS_LS_S3_META_REQUEST,
+                "id=%p: Part starts at %" PRIu64 ", before the requested range start %" PRIu64 ".",
+                (void *)meta_request,
+                request->part_range_start,
+                meta_request->requested_range_start);
+            payload->buffer_future = aws_future_s3_buffer_ticket_new(allocator);
+            aws_future_s3_buffer_ticket_set_error(payload->buffer_future, AWS_ERROR_INVALID_STATE);
+        } else {
+            struct aws_s3_buffer_pool_reserve_meta meta = {
+                .client = client,
+                .meta_request = meta_request,
+                .size = aws_min_size(request->buffer_size, request_size),
+                .local_offset = local_offset,
+            };
+            payload->buffer_future = aws_s3_buffer_pool_reserve(request->meta_request->client->buffer_pool, meta);
+        }
 
         /* BEGIN CRITICAL SECTION */
         {
@@ -2833,6 +3037,15 @@ static void s_s3_client_create_connection_for_request_default(
     AWS_ASSERT(result == AWS_OP_SUCCESS);
     (void)result;
 
+    if (client->disable_retries) {
+        /* Retries disabled (max attempts = 1): skip retry-token acquisition. The no-retry strategy
+         * would deny it (AWS_IO_RETRY_PERMISSION_DENIED) and fail the request before it is ever sent.
+         * Send directly through the acquired-token callback with a NULL token (same pattern
+         * the retry path uses). The connection-finish path will not schedule a retry for a NULL token. */
+        s_s3_client_acquired_retry_token(client->retry_strategy, AWS_ERROR_SUCCESS, NULL /*token*/, connection);
+        return;
+    }
+
     if (aws_retry_strategy_acquire_retry_token(
             client->retry_strategy, &host_header_value, s_s3_client_acquired_retry_token, connection, 0)) {
 
@@ -2892,7 +3105,10 @@ static void s_s3_client_acquired_retry_token(
         goto error_clean_up;
     }
 
-    AWS_ASSERT(token);
+    /* token is NULL when retries are disabled (max attempts = 1): the request is attempted exactly
+     * once and the connection-finish path will not schedule a retry (see its NULL retry_token guard
+     * in aws_s3_client_notify_connection_finished). Otherwise a successful acquire always has a token. */
+    AWS_ASSERT(token != NULL || client->disable_retries);
 
     connection->retry_token = token;
 
@@ -3013,12 +3229,23 @@ void aws_s3_client_notify_connection_finished(
     if (finish_code == AWS_S3_CONNECTION_FINISH_CODE_RETRY) {
 
         if (connection->retry_token == NULL) {
-            AWS_LOGF_ERROR(
-                AWS_LS_S3_CLIENT,
-                "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
-                (void *)client,
-                (void *)request,
-                (void *)meta_request);
+            if (client->disable_retries) {
+                /* Expected when retries are disabled (max attempts = 1): the request was attempted
+                 * once with no retry token, so there is nothing to retry. Not an error. */
+                AWS_LOGF_DEBUG(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Not scheduling retry of request %p for meta request %p: retries are disabled.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            } else {
+                AWS_LOGF_ERROR(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Client could not schedule retry of request %p for meta request %p, as retry token is NULL.",
+                    (void *)client,
+                    (void *)request,
+                    (void *)meta_request);
+            }
 
             goto reset_connection;
         }
