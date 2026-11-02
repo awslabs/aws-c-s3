@@ -883,6 +883,39 @@ static int s_test_s3_buffer_pool_preallocated_view(struct aws_allocator *allocat
     return 0;
 }
 
+/* The pool keeps its own copy of the buffer description: the caller's struct aws_byte_buf only has to live for the
+ * add call. After it's wiped, reservations still get views of the right memory. And a pool destroyed with a buffer
+ * still added frees its copy (no leak). */
+AWS_TEST_CASE(
+    test_s3_buffer_pool_preallocated_copies_description,
+    s_test_s3_buffer_pool_preallocated_copies_description)
+static int s_test_s3_buffer_pool_preallocated_copies_description(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+    struct aws_s3_buffer_pool *pool = aws_s3_default_buffer_pool_new(
+        allocator, (struct aws_s3_buffer_pool_config){.part_size = MB_TO_BYTES(8), .memory_limit = GB_TO_BYTES(1)});
+
+    uint8_t mem[1024];
+    {
+        struct aws_byte_buf temporary = aws_byte_buf_from_empty_array(mem, sizeof(mem));
+        ASSERT_SUCCESS(aws_s3_buffer_pool_add_preallocated_buffer(pool, KEY_1, &temporary));
+        AWS_ZERO_STRUCT(temporary); /* the caller's description is gone; the pool must not depend on it */
+    }
+
+    struct aws_future_s3_buffer_ticket *future = s_reserve_at(pool, KEY_1, 512, 256);
+    ASSERT_TRUE(aws_future_s3_buffer_ticket_is_done(future));
+    ASSERT_INT_EQUALS(AWS_ERROR_SUCCESS, aws_future_s3_buffer_ticket_get_error(future));
+    struct aws_s3_buffer_ticket *ticket = aws_future_s3_buffer_ticket_get_result_by_move(future);
+    struct aws_byte_buf view = aws_s3_buffer_ticket_claim(ticket);
+    ASSERT_PTR_EQUALS(mem + 512, view.buffer);
+    ASSERT_UINT_EQUALS(256, view.capacity);
+    aws_s3_buffer_ticket_release(ticket);
+    aws_future_s3_buffer_ticket_release(future);
+
+    /* Destroyed with the buffer still added: the pool frees its own copy (the test allocator checks for leaks). */
+    aws_s3_default_buffer_pool_destroy(pool);
+    return 0;
+}
+
 /* A reservation that doesn't fit fails with AWS_ERROR_SHORT_BUFFER instead of handing out a view past
  * the end of the buffer. */
 AWS_TEST_CASE(test_s3_buffer_pool_preallocated_out_of_bounds, s_test_s3_buffer_pool_preallocated_out_of_bounds)
