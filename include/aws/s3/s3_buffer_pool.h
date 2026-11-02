@@ -140,9 +140,12 @@ struct aws_s3_buffer_pool_vtable {
     /**
      * Optional. Serve reservations for `meta_request` from caller-owned memory instead of pool memory:
      * a reservation of `size` at `local_offset` (see aws_s3_buffer_pool_reserve_meta) gets a ticket whose
-     * buffer is `buffer->buffer + local_offset`. The pool doesn't own the memory and must not free it.
+     * buffer is `buffer->buffer + local_offset`. The pool keeps its own copy of what it needs from `*buffer`
+     * (the address and capacity): the struct only has to live for this call, but the memory it describes must
+     * stay valid until remove_preallocated_buffer. The pool doesn't own that memory and must not free it.
      * `meta_request` is only a key; the pool doesn't need to look inside it.
-     * A pool that doesn't implement this can't be used with aws_s3_meta_request_options.recv_buffer.
+     * A pool that doesn't implement this can't be used with aws_s3_meta_request_options.recv_buffer, or with
+     * request_body on a multipart PUT_OBJECT.
      */
     int (*add_preallocated_buffer)(
         struct aws_s3_buffer_pool *pool,
