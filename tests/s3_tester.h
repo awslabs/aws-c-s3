@@ -150,6 +150,7 @@ struct aws_s3_tester_client_options {
     /* Passed straight through to aws_s3_client_config. AWS_TRIBOOL_UNSET (0) is the default, so a test
      * that does not set this gets whatever the client decides. */
     enum aws_tribool out_of_order_delivery;
+    enum aws_s3_retry_mode retry_mode;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */
