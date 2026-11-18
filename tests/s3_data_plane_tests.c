@@ -9402,6 +9402,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
     struct aws_s3_tester_client_options client_options = {
         .part_size = 16 * 1024,
+        .retry_mode = AWS_S3_RETRY_MODE_ADAPTIVE,
     };
 
     struct aws_s3_client *client = NULL;
