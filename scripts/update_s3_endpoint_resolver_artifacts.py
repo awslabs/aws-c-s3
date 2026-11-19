@@ -129,10 +129,8 @@ def extract_rule_set(s3_model):
             f"Failed to extract endpoint ruleset from s3_model: {e}")
 
 
-def download_from_git(url, token=None):
+def download_from_git(url):
     headers = {'Accept': 'application/vnd.github+json'}
-    if token is not None:
-        headers['Authorization'] = f"Bearer {token}"
     http_response = requests.get(url, headers=headers)
     if http_response.status_code != 200:
         raise Exception(f"HTTP Status code is {http_response.status_code}")
