@@ -4,9 +4,12 @@ name: Update S3 Endpoint Resolver Artifacts
 # changed, pushes a new branch using the deploy key and opens a PR against main.
 
 on:
-  schedule:
-    - cron: '0 8 * * *' # daily, 08:00 UTC
-  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 8 * * *' # daily, 08:00 UTC
+  # workflow_dispatch:
+  push:
+    branches-ignore:
+      - 'main'
 
 concurrency:
   group: ${{ github.workflow }}
