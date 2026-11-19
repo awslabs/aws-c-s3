@@ -469,6 +469,7 @@ add_net_test_case(test_s3_list_bucket_valid)
 
 # Tests against local mock server
 if(ENABLE_MOCK_SERVER_TESTS)
+    set(TEST_CASES_BEFORE_MOCK_SERVER ${TEST_CASES})
     add_net_test_case(multipart_upload_mock_server)
     add_net_test_case(multipart_upload_meta_request_part_size_over_memory_limit_mock_server)
     add_net_test_case(multipart_upload_meta_request_part_size_over_memory_limit_no_stream_mock_server)
@@ -570,6 +571,10 @@ if(ENABLE_MOCK_SERVER_TESTS)
     add_net_test_case(s3express_client_sanity_override_test_mock_server)
     add_net_test_case(request_time_too_skewed_mock_server)
     add_net_test_case(request_timeout_error_mock_server)
+    set(MOCK_SERVER_TEST_CASES ${TEST_CASES})
+    if(TEST_CASES_BEFORE_MOCK_SERVER)
+        list(REMOVE_ITEM MOCK_SERVER_TEST_CASES ${TEST_CASES_BEFORE_MOCK_SERVER})
+    endif()
 endif()
 
 add_net_test_case(s3express_provider_long_running_session_refresh)
@@ -659,6 +664,12 @@ add_net_test_case(test_s3_get_object_size_hint_too_small_falls_back_to_ranged_ge
 
 set(TEST_BINARY_NAME ${PROJECT_NAME}-tests)
 generate_test_driver(${TEST_BINARY_NAME})
+
+# All mock server tests share one mock server process, which stalls responses under concurrent load.
+# Run them one at a time; other tests still run in parallel with them.
+if(MOCK_SERVER_TEST_CASES)
+    set_tests_properties(${MOCK_SERVER_TEST_CASES} PROPERTIES RESOURCE_LOCK mock_s3_server)
+endif()
 
 if(AWS_ENABLE_S3_ENDPOINT_RESOLVER)
     target_compile_definitions(${PROJECT_NAME}-tests PRIVATE "-DAWS_ENABLE_S3_ENDPOINT_RESOLVER")
