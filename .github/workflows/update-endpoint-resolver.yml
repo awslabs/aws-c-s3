@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          aws secretsmanager get-secret-value --secret-id "$DEPLOY_KEY_SECRET_ID" --query SecretString --output text | jq -r '.private_key' > ~/.ssh/deploy_key
+          aws secretsmanager get-secret-value --secret-id github-deploy-key/awslabs/aws-c-s3 --query SecretString --output text | jq -r '.private_key' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
           ssh-keyscan -H github.com >> ~/.ssh/known_hosts
@@ -83,11 +83,25 @@ jobs:
 
       - name: Push branch and open PR
         run: |
-          git add .
-          if [ -z "$(git status --porcelain)" ]; then
+          # Only the files the script generates go into the PR.
+          GENERATED="source/s3_endpoint_resolver/aws_s3_endpoint_rule_set.c source/s3_endpoint_resolver/aws_s3_endpoint_resolver_partition.c"
+          git add -- $GENERATED
+          if git diff --cached --quiet -- $GENERATED; then
             echo "No changes to commit"
             exit 0
           fi
+
+          # Skip if an open auto-update PR already carries exactly these generated files.
+          for pr_branch in $(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+              --json headRefName --jq '.[].headRefName | select(startswith("update-ruleset-"))'); do
+            git fetch --quiet origin "refs/heads/$pr_branch"
+            if git diff --quiet FETCH_HEAD -- $GENERATED; then
+              echo "Open PR from $pr_branch already has these changes; skipping."
+              exit 0
+            fi
+            echo "Open PR from $pr_branch has different generated files; it is out of date."
+          done
+
           BRANCH="update-ruleset-$(uuidgen)"
           git checkout -b "$BRANCH"
           git commit -m "Update ruleset and partition with latest files"
