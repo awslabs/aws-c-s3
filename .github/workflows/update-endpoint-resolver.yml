@@ -53,6 +53,14 @@ jobs:
           EOF
           chmod 600 ~/.ssh/config
 
+          # Debug: print the public half of the fetched key (safe to log) so it can be
+          # compared with the deploy key under repo Settings -> Deploy keys.
+          echo "Public key derived from secret $DEPLOY_KEY_SECRET_ID:"
+          ssh-keygen -y -f ~/.ssh/deploy_key
+          ssh-keygen -lf ~/.ssh/deploy_key
+          # Prints "Hi <owner>/<repo>! ..." when GitHub accepts the key; exits 1 even on success.
+          ssh -T git@github.com || true
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
