@@ -1,0 +1,90 @@
+name: Update S3 Endpoint Resolver Artifacts
+
+# Regenerates the compiled-in S3 endpoint rule set and partitions. If anything
+# changed, pushes a new branch using the deploy key and opens a PR against main.
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # daily, 08:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write      # OIDC authentication with AWS
+  contents: read       # checkout; pushes go through the deploy key
+  pull-requests: write # gh pr create with github.token
+
+env:
+  AWS_REGION: us-east-1
+  GH_TOKEN: ${{ github.token }}
+  DEPLOY_KEY_SECRET_ID: github-deploy-key/${{ github.repository }}
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CRT_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Retrieve deploy key and setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          aws secretsmanager get-secret-value --secret-id "$DEPLOY_KEY_SECRET_ID" --query SecretString --output text | jq -r '.private_key' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
+          cat > ~/.ssh/config << EOF
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Configure git to use SSH with deploy key
+        run: |
+          git remote set-url origin "git@github.com:${GITHUB_REPOSITORY}.git"
+          git config --local user.email "aws-sdk-common-runtime@amazon.com"
+          git config --local user.name "aws-crt-bot"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Regenerate endpoint resolver artifacts
+        run: |
+          pip install requests
+          python scripts/update_s3_endpoint_resolver_artifacts.py
+
+      - name: Push branch and open PR
+        run: |
+          git add .
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          BRANCH="update-ruleset-$(uuidgen)"
+          git checkout -b "$BRANCH"
+          git commit -m "Update ruleset and partition with latest files"
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Auto - Update S3 Ruleset & Partition" \
+            --body "By submitting this pull request, I confirm that my contribution is made under the terms of the Apache 2.0 license." \
+            --base main \
+            --head "$BRANCH"
