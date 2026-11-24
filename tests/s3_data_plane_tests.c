@@ -32,7 +32,6 @@
 #include <aws/testing/stream_tester.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 /* Forward declaration for checksum validation callback used in O_DIRECT tests */
 void s_s3_test_validate_checksum(
@@ -9329,20 +9328,11 @@ static int s_range_requests_receive_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-/* Diagnostics for macOS CI, where send() fails with ENOBUFS (errno 55) partway through this test. Prints mbuf usage
- * and denials, and the TCP sockets to port 443 grouped by state, so growth across iterations shows up in the log. */
+/* Labels the net stats with the iteration, so growth across iterations shows up in the log. */
 static void s_range_requests_print_net_stats(const char *label, size_t object_name_index, size_t range_index) {
-#ifdef __APPLE__
-    printf("=== net stats %s: object %zu range %zu ===\n", label, object_name_index, range_index);
-    fflush(stdout);
-    (void)system("netstat -m | grep -iE 'mbufs in use|mbuf clusters in use|denied|delayed|limit'");
-    (void)system("netstat -an -p tcp | awk '$5 ~ /\\.443$/ {print $6}' | sort | uniq -c");
-    fflush(stdout);
-#else
-    (void)label;
-    (void)object_name_index;
-    (void)range_index;
-#endif
+    char full_label[128];
+    snprintf(full_label, sizeof(full_label), "%s: object %zu range %zu", label, object_name_index, range_index);
+    aws_s3_tester_print_net_stats(full_label);
 }
 
 AWS_TEST_CASE(test_s3_range_requests, s_test_s3_range_requests)
@@ -9429,8 +9419,6 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
-
-    s_range_requests_print_net_stats("start", 0, 0);
 
     const size_t num_object_names = AWS_ARRAY_SIZE(object_names);
     const size_t num_ranges = AWS_ARRAY_SIZE(ranges);

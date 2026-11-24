@@ -459,6 +459,10 @@ void aws_s3_tester_set_counter2_desired(struct aws_s3_tester *tester, size_t val
  * finish shutting down before releasing any resources. */
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester);
 
+/* macOS only, a no-op elsewhere: prints mbuf usage, TCP retransmit/drop counters, lo0 errors and drops, and the
+ * TCP sockets on ports 443 and 8080 grouped by state. Used to diagnose ENOBUFS and loopback timeouts in CI. */
+void aws_s3_tester_print_net_stats(const char *label);
+
 struct aws_http_message *aws_s3_tester_dummy_http_request_new(struct aws_s3_tester *tester);
 
 struct aws_s3_client *aws_s3_tester_mock_client_new(struct aws_s3_tester *tester);
