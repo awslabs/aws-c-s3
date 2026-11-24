@@ -9564,6 +9564,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
             aws_http_headers_release(verify_range_get_headers);
             aws_byte_buf_clean_up(&verify_range_get_buffer);
+
+            /* Sleep for 1 second to avoid throttling from server */
+            aws_thread_current_sleep(aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
         }
     }
 
