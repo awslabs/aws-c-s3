@@ -805,14 +805,18 @@ struct aws_http_stream *s_get_requests_header_make_request(
     struct aws_http_connection *client_connection,
     const struct aws_http_make_request_options *options) {
     /**
-     * Record the headers in the array.
+     * Record the headers of the first attempt of each request. Retries resend the same request, and a transport error
+     * on a CI runner can add one at any point.
      */
-    aws_mutex_lock(&s_get_requests_header_tester.lock);
-    struct aws_http_headers *headers = aws_http_message_get_headers(options->request);
-    /* Keep the headers alive until we clean up the tester. */
-    aws_http_headers_acquire(headers);
-    aws_array_list_push_back(&s_get_requests_header_tester.headers_array, &headers);
-    aws_mutex_unlock(&s_get_requests_header_tester.lock);
+    struct aws_s3_connection *connection = options->user_data;
+    if (connection->request->num_times_prepared == 1) {
+        aws_mutex_lock(&s_get_requests_header_tester.lock);
+        struct aws_http_headers *headers = aws_http_message_get_headers(options->request);
+        /* Keep the headers alive until we clean up the tester. */
+        aws_http_headers_acquire(headers);
+        aws_array_list_push_back(&s_get_requests_header_tester.headers_array, &headers);
+        aws_mutex_unlock(&s_get_requests_header_tester.lock);
+    }
 
     struct aws_http_stream *stream = aws_http_connection_make_request(client_connection, options);
     return stream;
@@ -1172,7 +1176,9 @@ static int s_request_body_test_helper(
     if (body.len > 0) {
         ASSERT_FALSE(body_tester.saw_different_buffer);
     }
-    ASSERT_UINT_EQUALS(throttle_until_attempt + 1, body_tester.send_count);
+    /* At least one send per injected throttle plus the final success. A transport error on a CI runner can add a
+     * retry, so this is not an exact count. */
+    ASSERT_TRUE(body_tester.send_count >= throttle_until_attempt + 1);
     ASSERT_UINT_EQUALS(body.len, body_tester.observed_content_length);
 
     aws_http_message_release(message);

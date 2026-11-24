@@ -14,7 +14,6 @@
 #include <aws/checksums/crc.h>
 #include <aws/common/encoding.h>
 #include <aws/common/environment.h>
-#include <aws/common/platform.h>
 #include <aws/common/system_info.h>
 #include <aws/common/uri.h>
 #include <aws/common/uuid.h>
@@ -28,7 +27,6 @@
 #include <aws/testing/stream_tester.h>
 #include <ctype.h>
 #include <inttypes.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -281,9 +279,6 @@ static void s_s3_test_meta_request_finish(
 
     meta_request_test_results->finished_response_status = result->response_status;
     meta_request_test_results->finished_error_code = result->error_code;
-    if (result->error_code != AWS_ERROR_SUCCESS) {
-        aws_s3_tester_print_net_stats(aws_error_name(result->error_code));
-    }
     meta_request_test_results->did_validate = result->did_validate;
     meta_request_test_results->validation_algorithm = result->validation_algorithm;
     meta_request_test_results->recv_file_direct_io_fallback_count =
@@ -489,8 +484,6 @@ int aws_s3_tester_init(struct aws_allocator *allocator, struct aws_s3_tester *te
     (void)allocator;
 
     AWS_ZERO_STRUCT(*tester);
-
-    aws_s3_tester_print_net_stats("tester init");
 
     tester->allocator = allocator;
     if (aws_get_environment_value(allocator, s_bucket_name_env_var, &tester->bucket_name) == AWS_OP_SUCCESS &&
@@ -876,25 +869,8 @@ void aws_s3_tester_set_counter2_desired(struct aws_s3_tester *tester, size_t val
     aws_s3_tester_unlock_synced_data(tester);
 }
 
-void aws_s3_tester_print_net_stats(const char *label) {
-#if defined(AWS_OS_APPLE)
-    printf("=== net stats: %s ===\n", label);
-    fflush(stdout);
-    (void)system("netstat -m | grep -iE 'mbufs in use|mbuf clusters in use|denied|delayed|limit'");
-    (void)system("netstat -s -p tcp | grep -iE 'retransmit timeout|dropped by rexmit|data packets .* retransmitted'");
-    (void)system("netstat -I lo0 -d");
-    (void)system(
-        "netstat -an -p tcp | awk '$4 ~ /\\.(443|8080)$/ || $5 ~ /\\.(443|8080)$/ {print $6}' | sort | uniq -c");
-    fflush(stdout);
-#else
-    (void)label;
-#endif
-}
-
 void aws_s3_tester_clean_up(struct aws_s3_tester *tester) {
     AWS_PRECONDITION(tester);
-
-    aws_s3_tester_print_net_stats("tester clean up");
 
     if (tester->bound_to_client) {
         aws_s3_tester_wait_for_client_shutdown(tester);

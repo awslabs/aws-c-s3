@@ -31,7 +31,6 @@
 #include <aws/testing/aws_test_harness.h>
 #include <aws/testing/stream_tester.h>
 #include <inttypes.h>
-#include <stdio.h>
 
 /* Forward declaration for checksum validation callback used in O_DIRECT tests */
 void s_s3_test_validate_checksum(
@@ -9328,13 +9327,6 @@ static int s_range_requests_receive_body_callback(
     return AWS_OP_SUCCESS;
 }
 
-/* Labels the net stats with the iteration, so growth across iterations shows up in the log. */
-static void s_range_requests_print_net_stats(const char *label, size_t object_name_index, size_t range_index) {
-    char full_label[128];
-    snprintf(full_label, sizeof(full_label), "%s: object %zu range %zu", label, object_name_index, range_index);
-    aws_s3_tester_print_net_stats(full_label);
-}
-
 AWS_TEST_CASE(test_s3_range_requests, s_test_s3_range_requests)
 static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -9460,12 +9452,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                 tester.user_data = &test_user_data;
 
-                int send_result = aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL);
-                s_range_requests_print_net_stats(
-                    send_result == AWS_OP_SUCCESS ? "after auto-ranged GET" : "after FAILED auto-ranged GET",
-                    object_name_index,
-                    range_index);
-                ASSERT_SUCCESS(send_result);
+                ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
             }
 
             /* Send a default meta request (which just pushes the request directly to S3) with the same options to
@@ -9498,11 +9485,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                 tester.user_data = &test_user_data;
 
-                int send_result = aws_s3_tester_send_meta_request_with_options(&tester, &verify_options, NULL);
-                if (send_result != AWS_OP_SUCCESS) {
-                    s_range_requests_print_net_stats("after FAILED default GET", object_name_index, range_index);
-                }
-                ASSERT_SUCCESS(send_result);
+                ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &verify_options, NULL));
             }
 
             /* Compare headers. */
