@@ -201,7 +201,7 @@ jobs:
       matrix:
         runner: [macos-15, macos-latest]
     env:
-      CTEST_PARALLEL_LEVEL: 1 # parallel tests flake on macOS runners, see builder.json
+      CTEST_PARALLEL_LEVEL: 2 # parallel tests flake on macOS runners, see builder.json
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -224,7 +224,7 @@ jobs:
       matrix:
         runner: [macos-15-large, macos-latest-large]
     env:
-      CTEST_PARALLEL_LEVEL: 1 # parallel tests flake on macOS runners, see builder.json
+      CTEST_PARALLEL_LEVEL: 2 # parallel tests flake on macOS runners, see builder.json
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -248,7 +248,7 @@ jobs:
         runner: [macos-15, macos-latest]
     env:
       AWS_CRT_USE_NON_FIPS_TLS_13: 1
-      CTEST_PARALLEL_LEVEL: 1 # parallel tests flake on macOS runners, see builder.json
+      CTEST_PARALLEL_LEVEL: 2 # parallel tests flake on macOS runners, see builder.json
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
@@ -272,7 +272,7 @@ jobs:
         runner: [macos-15-large, macos-latest-large]
     env:
       AWS_CRT_USE_NON_FIPS_TLS_13: 1
-      CTEST_PARALLEL_LEVEL: 1 # parallel tests flake on macOS runners, see builder.json
+      CTEST_PARALLEL_LEVEL: 2 # parallel tests flake on macOS runners, see builder.json
     steps:
     - uses: aws-actions/configure-aws-credentials@v6
       with:
