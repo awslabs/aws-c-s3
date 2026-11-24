@@ -613,6 +613,11 @@ int aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, st
         .max = meta_request->client->max_attempts,
     };
 
+    /* A GET hedge is one more attempt, and it does not count against the max retries. */
+    if (info.max > 0 && aws_s3_client_get_object_hedging_applies(meta_request, request)) {
+        ++info.max;
+    }
+
     uint8_t header_value_storage[64] = {0};
     struct aws_byte_buf header_value =
         aws_byte_buf_from_empty_array(header_value_storage, sizeof(header_value_storage));

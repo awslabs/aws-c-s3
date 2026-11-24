@@ -178,6 +178,8 @@ struct aws_s3_request_metrics {
         int error_code;
         /* Retry attempt. */
         uint32_t retry_attempt;
+        /* The first-byte timeout of this attempt, in ms. Zero if the attempt had no first-byte timeout. */
+        uint64_t first_byte_timeout_ms;
         /* Is the memory for the request allocated from the buffer pool or not. */
         bool memory_allocated_from_pool;
     } crt_info_metrics;
@@ -266,6 +268,12 @@ struct aws_s3_request {
 
     /* The upload_timeout used. Zero, if the request is not a upload part */
     size_t upload_timeout_ms;
+
+    /* The first-byte deadline that GET hedging armed for the current attempt. Zero if the attempt has no deadline. */
+    size_t hedge_timeout_ms;
+
+    /* True after a hedge of this request. The later attempts of this request have no first-byte deadline. */
+    bool hedge_fired;
 
     /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual
      * prepare function, this will be 0.*/

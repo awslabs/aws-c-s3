@@ -116,6 +116,9 @@ static const char *s_ordered_delivery_env_var = "AWS_CRT_S3_ORDERED_DELIVERY";
 static const char *s_force_sequential_requests_env_var = "AWS_CRT_S3_FORCE_SEQUENTIAL_REQUESTS";
 static const char *s_num_file_io_threads_env_var = "AWS_CRT_S3_NUM_FILE_IO_THREADS";
 
+/* Set to "true" or "1" to turn on GET hedging when `aws_s3_client_config.get_object_hedging` is AWS_TRIBOOL_UNSET. */
+static const char *s_get_object_hedging_env_var = "AWS_CRT_S3_GET_OBJECT_HEDGING";
+
 /* Called when ref count is 0. */
 static void s_s3_client_start_destroy(void *user_data);
 
@@ -477,6 +480,40 @@ struct aws_s3express_credentials_provider *s_s3express_provider_default_factory(
     struct aws_s3express_credentials_provider *s3express_provider =
         aws_s3express_credentials_provider_new_default(allocator, &options);
     return s3express_provider;
+}
+
+/* The config field wins. The environment variable applies only if the field is AWS_TRIBOOL_UNSET. */
+static bool s_resolve_get_object_hedging(
+    struct aws_allocator *allocator,
+    const struct aws_s3_client *client,
+    const struct aws_s3_client_config *client_config) {
+
+    bool enabled = client_config->get_object_hedging == AWS_TRIBOOL_TRUE;
+    if (client_config->get_object_hedging == AWS_TRIBOOL_UNSET) {
+        struct aws_string *from_env = aws_get_env_nonempty(allocator, s_get_object_hedging_env_var);
+        if (from_env != NULL) {
+            enabled = aws_string_eq_c_str_ignore_case(from_env, "true") || aws_string_eq_c_str(from_env, "1");
+            bool disabled = aws_string_eq_c_str_ignore_case(from_env, "false") || aws_string_eq_c_str(from_env, "0");
+            if (!enabled && !disabled) {
+                AWS_LOGF_WARN(
+                    AWS_LS_S3_CLIENT,
+                    "id=%p Ignoring unknown value '%s' of %s. Use 'true' or 'false'.",
+                    (void *)client,
+                    aws_string_c_str(from_env),
+                    s_get_object_hedging_env_var);
+            }
+            aws_string_destroy(from_env);
+        }
+    }
+
+    if (enabled && client->disable_retries) {
+        AWS_LOGF_WARN(AWS_LS_S3_CLIENT, "id=%p GET hedging is off, because retries are off.", (void *)client);
+        return false;
+    }
+    if (enabled) {
+        AWS_LOGF_INFO(AWS_LS_S3_CLIENT, "id=%p GET hedging is on.", (void *)client);
+    }
+    return enabled;
 }
 
 struct aws_client_bootstrap *aws_s3_client_bootstrap_default(
@@ -1118,6 +1155,11 @@ struct aws_s3_client *aws_s3_client_new(
                 s_force_sequential_requests_env_var);
         }
     }
+
+    /* Retries are already resolved here, and hedging depends on them. */
+    *((bool *)&client->get_object_hedging_enabled) = s_resolve_get_object_hedging(allocator, client, client_config);
+    aws_s3_get_hedging_controller_init(&client->synced_data.get_object_hedging);
+    aws_atomic_init_int(&client->get_object_hedging_timeout_ms, 0);
 
     /* Diagnose the read-backpressure / initial-read-window pairing.
      *
@@ -2994,6 +3036,8 @@ static void s_s3_client_acquired_retry_token(
 
 static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_code, void *user_data);
 
+static void s_s3_client_schedule_hedge(struct aws_s3_client *client, struct aws_s3_connection *connection);
+
 static void s_s3_client_create_connection_for_request_default(
     struct aws_s3_client *client,
     struct aws_s3_request *request);
@@ -3294,8 +3338,22 @@ void aws_s3_client_notify_connection_finished(
             connection->http_connection = NULL;
         }
 
-        /* Ask the retry strategy to schedule a retry of the request. */
         aws_high_res_clock_get_ticks((uint64_t *)&request->retry_start_timestamp_ns);
+
+        if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && request->hedge_timeout_ms > 0) {
+            /* A GET hedge does not go through the retry strategy, so it waits for no backoff and uses no quota. */
+            AWS_LOGF_DEBUG(
+                AWS_LS_S3_CLIENT,
+                "id=%p Client hedging request %p for meta request %p after no response for %zu ms.",
+                (void *)client,
+                (void *)request,
+                (void *)meta_request,
+                request->hedge_timeout_ms);
+            s_s3_client_schedule_hedge(client, connection);
+            return;
+        }
+
+        /* Ask the retry strategy to schedule a retry of the request. */
         if (aws_retry_strategy_schedule_retry(
                 connection->retry_token, error_type, s_s3_client_retry_ready, connection)) {
 
@@ -3427,6 +3485,40 @@ static void s_s3_client_retry_ready(struct aws_retry_token *token, int error_cod
 error_clean_up:
 
     aws_s3_client_notify_connection_finished(client, connection, error_code, AWS_S3_CONNECTION_FINISH_CODE_FAILED);
+}
+
+struct aws_s3_client_hedge_task {
+    struct aws_allocator *allocator;
+    struct aws_task task;
+    struct aws_s3_connection *connection;
+};
+
+static void s_s3_client_hedge_task(struct aws_task *task, void *arg, enum aws_task_status task_status) {
+    (void)task;
+    struct aws_s3_client_hedge_task *hedge_task = arg;
+    struct aws_s3_connection *connection = hedge_task->connection;
+    aws_mem_release(hedge_task->allocator, hedge_task);
+
+    int error_code = task_status == AWS_TASK_STATUS_RUN_READY ? AWS_ERROR_SUCCESS : AWS_IO_EVENT_LOOP_SHUTDOWN;
+    s_s3_client_retry_ready(connection->retry_token, error_code, connection);
+}
+
+/* Sends the request of the connection again, like a retry with no backoff. The retry token stays unchanged. */
+static void s_s3_client_schedule_hedge(struct aws_s3_client *client, struct aws_s3_connection *connection) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(connection);
+    AWS_PRECONDITION(connection->retry_token);
+
+    struct aws_s3_client_hedge_task *hedge_task =
+        aws_mem_calloc(client->allocator, 1, sizeof(struct aws_s3_client_hedge_task));
+    hedge_task->allocator = client->allocator;
+    hedge_task->connection = connection;
+    aws_task_init(&hedge_task->task, s_s3_client_hedge_task, hedge_task, "s3_client_hedge_task");
+
+    /* Use a task, the same as the retry strategy does, so that the new attempt does not start inside the callbacks of
+     * the failed HTTP stream. */
+    struct aws_event_loop *event_loop = aws_event_loop_group_get_next_loop(client->client_bootstrap->event_loop_group);
+    aws_event_loop_schedule_task_now(event_loop, &hedge_task->task);
 }
 
 static void s_s3_client_prepare_request_callback_retry_request(
@@ -3820,4 +3912,100 @@ void aws_s3_client_update_upload_part_timeout(
 
 unlock:
     aws_s3_client_unlock_synced_data(client);
+}
+
+bool aws_s3_client_get_object_hedging_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+    return meta_request->client->get_object_hedging_enabled &&
+           meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
+           request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT;
+}
+
+/* Gets the time from the end of the request send to the first byte of the response. */
+static bool s_get_response_to_first_byte_time_ns(const struct aws_s3_request *request, uint64_t *out_ttfb_ns) {
+    const struct aws_s3_request_metrics *metrics = request->send_data.metrics;
+    if (metrics == NULL) {
+        return false;
+    }
+    int64_t send_end_ns = metrics->time_metrics.send_end_timestamp_ns;
+    int64_t receive_start_ns = metrics->time_metrics.receive_start_timestamp_ns;
+    if (send_end_ns < 0 || receive_start_ns < send_end_ns) {
+        return false;
+    }
+    *out_ttfb_ns = (uint64_t)(receive_start_ns - send_end_ns);
+    return true;
+}
+
+void aws_s3_client_update_get_object_hedging(
+    struct aws_s3_client *client,
+    struct aws_s3_request *finished_request,
+    int finished_error_code) {
+    AWS_PRECONDITION(client);
+    AWS_PRECONDITION(finished_request);
+
+    if (!client->get_object_hedging_enabled) {
+        return;
+    }
+
+    bool hedged =
+        finished_error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && finished_request->hedge_timeout_ms > 0;
+    int response_status = finished_request->send_data.response_status;
+    uint64_t ttfb_ns = 0;
+    bool succeeded = finished_error_code == AWS_ERROR_SUCCESS && response_status >= 200 && response_status < 300 &&
+                     s_get_response_to_first_byte_time_ns(finished_request, &ttfb_ns);
+    if (!hedged && !succeeded) {
+        return;
+    }
+
+    /* BEGIN CRITICAL SECTION */
+    aws_s3_client_lock_synced_data(client);
+    struct aws_s3_get_hedging_controller *controller = &client->synced_data.get_object_hedging;
+    bool was_warm = controller->warm;
+    bool was_stopped = controller->stopped;
+    size_t previous_timeout_ms = aws_atomic_load_int(&client->get_object_hedging_timeout_ms);
+
+    if (hedged) {
+        aws_s3_get_hedging_controller_record_hedge(controller);
+    } else {
+        aws_s3_get_hedging_controller_record_success(controller, ttfb_ns);
+    }
+
+    size_t timeout_ms = (size_t)aws_s3_get_hedging_controller_deadline_ms(controller);
+    aws_atomic_store_int(&client->get_object_hedging_timeout_ms, timeout_ms);
+
+    if (!was_warm && controller->warm) {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p GET hedging warmup is complete. The first-byte deadline starts at %zu ms.",
+            (void *)client,
+            timeout_ms);
+    } else if (!was_stopped && controller->stopped) {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p GET hedging stopped, because the mean time to first byte of the warmup is %" PRIu64
+            " ms. A hedge does not help on such a slow link.",
+            (void *)client,
+            aws_timestamp_convert(controller->mean_ttfb_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
+    } else if (previous_timeout_ms > 0 && timeout_ms == 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p GET hedging paused, because the hedge budget is empty. Successes refill the budget.",
+            (void *)client);
+    } else if (previous_timeout_ms == 0 && timeout_ms > 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p GET hedging resumed with a deadline of %zu ms.", (void *)client, timeout_ms);
+    }
+    aws_s3_client_unlock_synced_data(client);
+    /* END CRITICAL SECTION */
+}
+
+size_t aws_s3_client_get_object_hedging_timeout_ms(struct aws_s3_client *client) {
+    AWS_PRECONDITION(client);
+    if (!client->get_object_hedging_enabled) {
+        return 0;
+    }
+    return aws_atomic_load_int(&client->get_object_hedging_timeout_ms);
 }

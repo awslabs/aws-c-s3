@@ -14,6 +14,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 ### Documentation
 
 * [GetObject](docs/GetObject.md): A visual representation of the GetObject request flow.
+* [GET Hedging](docs/GetObjectHedging.md): How the client cuts the tail latency of GetObject part requests.
 * [Memory Aware Requests Execution](docs/memory_aware_request_execution.md): An in-depth guide on optimizing memory usage during request executions.
 
 ### Configuration
@@ -130,6 +131,25 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
    * The value must be a positive integer (1–65535). Invalid or zero values are ignored with a warning, and the default is used.
    * The thread count is also the number of file descriptors a single parallel download can keep open at once (one per write worker), and the number of parts that can be in flight to disk simultaneously.
    * Raising it past the point where the disk saturates buys nothing and costs threads. Lowering it below the disk's concurrency leaves throughput on the table.
+   * Read once per client, when the client is created.
+
+6. **GET Hedging - `AWS_CRT_S3_GET_OBJECT_HEDGING`**
+
+   Turns on GET hedging. If a part request of a GetObject meta request gets no response before an adaptive first-byte deadline, the client cancels it and sends it again at once on a new connection. See [GET Hedging](docs/GetObjectHedging.md).
+
+   Example Usage:
+
+   ```bash
+   export AWS_CRT_S3_GET_OBJECT_HEDGING=true
+   ```
+
+   **Default Behavior**:
+   Off.
+
+   **Notes**:
+   * The `get_object_hedging` config field takes priority. The environment variable is only consulted when the config field is `AWS_TRIBOOL_UNSET` (the default).
+   * `true` or `1` turns hedging on. `false` or `0` leaves it off. Other values are ignored with a warning.
+   * Hedging is always off when retries are off (`AWS_S3_RETRY_MODE_NONE`).
    * Read once per client, when the client is created.
 
 > [!TIP]

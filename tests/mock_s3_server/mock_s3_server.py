@@ -32,6 +32,10 @@ MOCK_REQUEST_ID_HEADER = "x-mock-request-id"
 # per run of that test, so growth over the server's lifetime is negligible.
 CHECKSUM_RETRY_ATTEMPTS = {}
 
+# Attempts seen per part on the /get_object_hedging_slow_part* routes, keyed by MOCK_REQUEST_ID_HEADER and
+# the part offset. Never pruned, for the same reason as CHECKSUM_RETRY_ATTEMPTS.
+HEDGING_ATTEMPTS = {}
+
 
 base_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -626,6 +630,26 @@ def handle_get_object(wrapper, request, parsed_path, head_request=False):
         # issued right after the request starts always lands before size discovery.
         if start_range == 0:
             response_config = ResponseConfig("/get_object_pause_delayed_part", request=request)
+        else:
+            response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
+        response_config.generate_body_size = data_length
+        return response_config
+
+    if parsed_path.path in ("/get_object_hedging_slow_part", "/get_object_hedging_slow_part_twice"):
+        # Same 256 KiB object in 64 KiB parts. Part 2 (offset 65536) answers its first attempt late, so that GET
+        # hedging cancels it and sends it again. The "_twice" route also answers the second attempt late, to show
+        # that the client hedges a part only one time.
+        request_id = get_request_header_value(request, MOCK_REQUEST_ID_HEADER)
+        if request_id is None:
+            raise ValueError(
+                f"{parsed_path.path} needs the {MOCK_REQUEST_ID_HEADER} header to count attempts")
+        attempts_key = (request_id, start_range)
+        attempts = HEDGING_ATTEMPTS.get(attempts_key, 0) + 1
+        HEDGING_ATTEMPTS[attempts_key] = attempts
+        slow_attempts = 2 if parsed_path.path.endswith("_twice") else 1
+
+        if start_range == 65536 and attempts <= slow_attempts:
+            response_config = ResponseConfig("/get_object_hedging_slow_part", request=request)
         else:
             response_config = ResponseConfig("/get_object_pause_normal_part", request=request)
         response_config.generate_body_size = data_length

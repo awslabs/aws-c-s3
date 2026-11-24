@@ -1555,6 +1555,9 @@ int aws_s3_tester_client_new(
         .buffer_pool_factory_fn = options->buffer_pool_factory_fn,
         .out_of_order_delivery = options->out_of_order_delivery,
         .retry_config.retry_mode = options->retry_mode,
+        .retry_config.backoff_scale_factor_ms = options->backoff_scale_factor_ms,
+        .retry_config.jitter_mode = options->jitter_mode,
+        .get_object_hedging = options->get_object_hedging,
     };
     struct aws_http_proxy_options proxy_options = {
         .connection_type = AWS_HPCT_HTTP_FORWARD,
