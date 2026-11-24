@@ -4221,8 +4221,9 @@ TEST_CASE(resume_multi_page_list_parts_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
-static int s_resume_crc64nvme_list_parts_helper(
+static int s_resume_with_list_parts_checksums_helper(
     struct aws_allocator *allocator,
+    enum aws_s3_checksum_algorithm checksum_algorithm,
     const char *object_path_str,
     bool expect_failure,
     struct aws_s3_meta_request_test_results *out_results) {
@@ -4238,7 +4239,7 @@ static int s_resume_crc64nvme_list_parts_helper(
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
 
-    /* ListParts from mock server will return Etags and CRC64NVME checksums for the 2nd and 3rd parts */
+    /* ListParts from mock server will return Etags and checksums for the 2nd and 3rd parts */
     struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str(object_path_str);
     struct aws_s3_upload_resume_token_options token_options = {
         .upload_id = aws_byte_cursor_from_c_str("upload_id"),
@@ -4252,7 +4253,7 @@ static int s_resume_crc64nvme_list_parts_helper(
         .allocator = allocator,
         .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
         .client = client,
-        .checksum_algorithm = AWS_SCA_CRC64NVME,
+        .checksum_algorithm = checksum_algorithm,
         .validate_get_response_checksum = false,
         .put_options =
             {
@@ -4282,8 +4283,8 @@ TEST_CASE(resume_crc64nvme_part_checksums_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
 
-    ASSERT_SUCCESS(s_resume_crc64nvme_list_parts_helper(
-        allocator, "/resume_crc64nvme_part_checksums", false /*expect_failure*/, &out_results));
+    ASSERT_SUCCESS(s_resume_with_list_parts_checksums_helper(
+        allocator, AWS_SCA_CRC64NVME, "/resume_crc64nvme_part_checksums", false /*expect_failure*/, &out_results));
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
@@ -4297,9 +4298,73 @@ TEST_CASE(resume_crc64nvme_part_checksum_mismatch_mock_server) {
     struct aws_s3_meta_request_test_results out_results;
     aws_s3_meta_request_test_results_init(&out_results, allocator);
 
-    ASSERT_SUCCESS(s_resume_crc64nvme_list_parts_helper(
-        allocator, "/resume_crc64nvme_part_checksum_mismatch", true /*expect_failure*/, &out_results));
+    ASSERT_SUCCESS(s_resume_with_list_parts_checksums_helper(
+        allocator,
+        AWS_SCA_CRC64NVME,
+        "/resume_crc64nvme_part_checksum_mismatch",
+        true /*expect_failure*/,
+        &out_results));
     ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    return AWS_OP_SUCCESS;
+}
+
+/* Same as resume_crc64nvme_part_checksums_mock_server, with SHA512 checksums from ListParts. */
+TEST_CASE(resume_sha512_part_checksums_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(s_resume_with_list_parts_checksums_helper(
+        allocator, AWS_SCA_SHA512, "/resume_sha512_part_checksums", false /*expect_failure*/, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    return AWS_OP_SUCCESS;
+}
+
+/* Same as resume_crc64nvme_part_checksums_mock_server, with XXHASH64 checksums from ListParts. */
+TEST_CASE(resume_xxhash64_part_checksums_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(s_resume_with_list_parts_checksums_helper(
+        allocator, AWS_SCA_XXHASH64, "/resume_xxhash64_part_checksums", false /*expect_failure*/, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    return AWS_OP_SUCCESS;
+}
+
+/* Same as resume_crc64nvme_part_checksums_mock_server, with XXHASH3 (64-bit) checksums from ListParts. */
+TEST_CASE(resume_xxhash3_64_part_checksums_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(s_resume_with_list_parts_checksums_helper(
+        allocator, AWS_SCA_XXHASH3_64, "/resume_xxhash3_64_part_checksums", false /*expect_failure*/, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    return AWS_OP_SUCCESS;
+}
+
+/* Same as resume_crc64nvme_part_checksums_mock_server, with XXHASH3 (128-bit) checksums from ListParts. */
+TEST_CASE(resume_xxhash3_128_part_checksums_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(s_resume_with_list_parts_checksums_helper(
+        allocator, AWS_SCA_XXHASH3_128, "/resume_xxhash3_128_part_checksums", false /*expect_failure*/, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     return AWS_OP_SUCCESS;

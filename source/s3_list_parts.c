@@ -128,6 +128,22 @@ static int s_xml_on_Part_child(struct aws_xml_node *node, void *user_data) {
         return aws_xml_node_as_body(node, &part_info->checksumCRC64NVME);
     }
 
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumSHA512")) {
+        return aws_xml_node_as_body(node, &part_info->checksumSHA512);
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumXXHASH64")) {
+        return aws_xml_node_as_body(node, &part_info->checksumXXHASH64);
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumXXHASH3")) {
+        return aws_xml_node_as_body(node, &part_info->checksumXXHASH3);
+    }
+
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumXXHASH128")) {
+        return aws_xml_node_as_body(node, &part_info->checksumXXHASH128);
+    }
+
     return AWS_OP_SUCCESS;
 }
 

@@ -196,6 +196,18 @@ static int s_process_part_info_synced(const struct aws_s3_part_info *info, void 
         case AWS_SCA_CRC64NVME:
             checksum_cur = &info->checksumCRC64NVME;
             break;
+        case AWS_SCA_SHA512:
+            checksum_cur = &info->checksumSHA512;
+            break;
+        case AWS_SCA_XXHASH64:
+            checksum_cur = &info->checksumXXHASH64;
+            break;
+        case AWS_SCA_XXHASH3_64:
+            checksum_cur = &info->checksumXXHASH3;
+            break;
+        case AWS_SCA_XXHASH3_128:
+            checksum_cur = &info->checksumXXHASH128;
+            break;
         case AWS_SCA_NONE:
             break;
         default:
