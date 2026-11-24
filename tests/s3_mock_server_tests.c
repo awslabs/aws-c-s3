@@ -4221,6 +4221,90 @@ TEST_CASE(resume_multi_page_list_parts_mock_server) {
     return AWS_OP_SUCCESS;
 }
 
+static int s_resume_crc64nvme_list_parts_helper(
+    struct aws_allocator *allocator,
+    const char *object_path_str,
+    bool expect_failure,
+    struct aws_s3_meta_request_test_results *out_results) {
+
+    struct aws_s3_tester tester;
+    size_t num_parts = 4;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    /* ListParts from mock server will return Etags and CRC64NVME checksums for the 2nd and 3rd parts */
+    struct aws_byte_cursor object_path = aws_byte_cursor_from_c_str(object_path_str);
+    struct aws_s3_upload_resume_token_options token_options = {
+        .upload_id = aws_byte_cursor_from_c_str("upload_id"),
+        .part_size = client_options.part_size,
+        .total_num_parts = num_parts,
+    };
+    struct aws_s3_meta_request_resume_token *token =
+        aws_s3_meta_request_resume_token_new_upload(allocator, &token_options);
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .checksum_algorithm = AWS_SCA_CRC64NVME,
+        .validate_get_response_checksum = false,
+        .put_options =
+            {
+                .object_size_mb = (uint32_t)num_parts * 8, /* Make sure we have exactly 4 parts */
+                .object_path_override = object_path,
+                .resume_token = token,
+            },
+        .mock_server = true,
+        .validate_type =
+            expect_failure ? AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_FAILURE : AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, out_results));
+
+    aws_s3_meta_request_resume_token_release(token);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+
+    return AWS_OP_SUCCESS;
+}
+
+/* Fake a MPU with 4 parts where the 2nd and 3rd were already uploaded with CRC64NVME checksums.
+ * The checksums from ListParts must be picked up and must match the data of the skipped parts. */
+TEST_CASE(resume_crc64nvme_part_checksums_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(s_resume_crc64nvme_list_parts_helper(
+        allocator, "/resume_crc64nvme_part_checksums", false /*expect_failure*/, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    return AWS_OP_SUCCESS;
+}
+
+/* Same as above, but ListParts reports a CRC64NVME checksum for the 3rd part that does not match its data. */
+TEST_CASE(resume_crc64nvme_part_checksum_mismatch_mock_server) {
+    (void)ctx;
+
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    ASSERT_SUCCESS(s_resume_crc64nvme_list_parts_helper(
+        allocator, "/resume_crc64nvme_part_checksum_mismatch", true /*expect_failure*/, &out_results));
+    ASSERT_UINT_EQUALS(AWS_ERROR_S3_RESUMED_PART_CHECKSUM_MISMATCH, out_results.finished_error_code);
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    return AWS_OP_SUCCESS;
+}
+
 TEST_CASE(resume_list_parts_failed_mock_server) {
     (void)ctx;
 

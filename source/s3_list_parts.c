@@ -124,6 +124,10 @@ static int s_xml_on_Part_child(struct aws_xml_node *node, void *user_data) {
         return aws_xml_node_as_body(node, &part_info->checksumSHA256);
     }
 
+    if (aws_byte_cursor_eq_c_str_ignore_case(&node_name, "ChecksumCRC64NVME")) {
+        return aws_xml_node_as_body(node, &part_info->checksumCRC64NVME);
+    }
+
     return AWS_OP_SUCCESS;
 }
 

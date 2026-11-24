@@ -51,6 +51,11 @@ struct aws_s3_part_info {
      * SHA256 checksum for the part. Optional.
      */
     struct aws_byte_cursor checksumSHA256;
+
+    /**
+     * CRC64NVME checksum for the part. Optional.
+     */
+    struct aws_byte_cursor checksumCRC64NVME;
 };
 
 /**
