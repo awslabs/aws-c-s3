@@ -31,6 +31,8 @@
 #include <aws/testing/aws_test_harness.h>
 #include <aws/testing/stream_tester.h>
 #include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* Forward declaration for checksum validation callback used in O_DIRECT tests */
 void s_s3_test_validate_checksum(
@@ -9327,6 +9329,22 @@ static int s_range_requests_receive_body_callback(
     return AWS_OP_SUCCESS;
 }
 
+/* Diagnostics for macOS CI, where send() fails with ENOBUFS (errno 55) partway through this test. Prints mbuf usage
+ * and denials, and the TCP sockets to port 443 grouped by state, so growth across iterations shows up in the log. */
+static void s_range_requests_print_net_stats(const char *label, size_t object_name_index, size_t range_index) {
+#ifdef __APPLE__
+    printf("=== net stats %s: object %zu range %zu ===\n", label, object_name_index, range_index);
+    fflush(stdout);
+    (void)system("netstat -m | grep -iE 'mbufs in use|mbuf clusters in use|denied|delayed|limit'");
+    (void)system("netstat -an -p tcp | awk '$5 ~ /\\.443$/ {print $6}' | sort | uniq -c");
+    fflush(stdout);
+#else
+    (void)label;
+    (void)object_name_index;
+    (void)range_index;
+#endif
+}
+
 AWS_TEST_CASE(test_s3_range_requests, s_test_s3_range_requests)
 static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
@@ -9356,7 +9374,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         // Single byte range (first byte).
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
 
-        // First 8K.  8K < client's 16K part size.
+        // First 8K.  8K < client's 128K part size.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
 
         // First 0.5 MB.  0.5 MB < 1 MB test file.
@@ -9400,13 +9418,19 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Connection"),
     };
 
+    /* 128K parts still split every multi-part range below (0.5 MB is 4 parts), and the connection cap keeps the
+     * number of concurrent sockets small. With 16K parts and the default 25 connections, macOS CI runners hit
+     * ENOBUFS on send(). */
     struct aws_s3_tester_client_options client_options = {
-        .part_size = 16 * 1024,
+        .part_size = 128 * 1024,
+        .max_active_connections_override = 8,
         .retry_mode = AWS_S3_RETRY_MODE_ADAPTIVE,
     };
 
     struct aws_s3_client *client = NULL;
     ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    s_range_requests_print_net_stats("start", 0, 0);
 
     const size_t num_object_names = AWS_ARRAY_SIZE(object_names);
     const size_t num_ranges = AWS_ARRAY_SIZE(ranges);
@@ -9448,7 +9472,12 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                 tester.user_data = &test_user_data;
 
-                ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL));
+                int send_result = aws_s3_tester_send_meta_request_with_options(&tester, &options, NULL);
+                s_range_requests_print_net_stats(
+                    send_result == AWS_OP_SUCCESS ? "after auto-ranged GET" : "after FAILED auto-ranged GET",
+                    object_name_index,
+                    range_index);
+                ASSERT_SUCCESS(send_result);
             }
 
             /* Send a default meta request (which just pushes the request directly to S3) with the same options to
@@ -9481,7 +9510,11 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
                 tester.user_data = &test_user_data;
 
-                ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &verify_options, NULL));
+                int send_result = aws_s3_tester_send_meta_request_with_options(&tester, &verify_options, NULL);
+                if (send_result != AWS_OP_SUCCESS) {
+                    s_range_requests_print_net_stats("after FAILED default GET", object_name_index, range_index);
+                }
+                ASSERT_SUCCESS(send_result);
             }
 
             /* Compare headers. */
