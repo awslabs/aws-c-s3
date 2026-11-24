@@ -6,8 +6,11 @@ on:
     # edited catches a retitle or a retarget.
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
+# Runs for one pull request queue in order and each runs to completion: `queue: max`
+# keeps every pending run instead of replacing it, and nothing cancels a running one.
 concurrency:
   group: pre-merge-${{ github.event.pull_request.number }}
+  queue: max
 
 jobs:
   pre-merge:
