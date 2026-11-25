@@ -7,7 +7,7 @@
         },
         "macos": {
             "test_parallel": false,
-            "_comment": "Parallel tests on macOS CI runners flake with ENOBUFS, DNS and loopback timeouts. CTEST_PARALLEL_LEVEL in ci.yml must also be 1, because ctest reads it when no -j is passed."
+            "_comment": "Default parallel tests on macOS CI runners flake with ENOBUFS, DNS and loopback timeouts. set CTEST_PARALLEL_LEVEL in ci.yml instead to limit the concurrency given the resources limitation."
         }
     },
     "upstream": [
