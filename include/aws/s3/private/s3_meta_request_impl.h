@@ -271,6 +271,11 @@ struct aws_s3_meta_request {
     /* Track the number of requests being prepared for this meta request. */
     struct aws_atomic_var num_request_being_prepared;
 
+    /* Lock-free copy of synced_data.finish_result_set and finish_result.error_code: SIZE_MAX until the finish result
+     * is set, then its error code (AWS_ERROR_SUCCESS on success). Written once, under the lock, when the finish
+     * result is set. For code that must not take the lock, such as the body read loop. */
+    struct aws_atomic_var finish_error_code;
+
     struct {
         struct aws_mutex lock;
 

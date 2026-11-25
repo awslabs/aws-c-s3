@@ -4,6 +4,10 @@
         "android": {
             "enabled": false,
             "_comment": "disabled until we need to support it. LibCrypto needs to be configured on build machine."
+        },
+        "macos": {
+            "test_parallel": false,
+            "_comment": "Default parallel tests on macOS CI runners flake with ENOBUFS, DNS and loopback timeouts. set CTEST_PARALLEL_LEVEL in ci.yml instead to limit the concurrency given the resources limitation."
         }
     },
     "upstream": [
