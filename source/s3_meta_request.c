@@ -574,6 +574,7 @@ int aws_s3_meta_request_init_base(
     aws_ref_count_init(&meta_request->ref_count, meta_request, s_s3_meta_request_destroy);
     aws_atomic_init_int(&meta_request->num_requests_network, 0);
     aws_atomic_init_int(&meta_request->num_request_being_prepared, 0);
+    aws_atomic_init_int(&meta_request->finish_error_code, SIZE_MAX);
     aws_linked_list_init(&meta_request->synced_data.cancellable_http_streams_list);
     aws_linked_list_init(&meta_request->synced_data.pending_buffer_futures);
     aws_atomic_init_int(&meta_request->recv_file_direct_io_fallback_count, 0);
@@ -994,6 +995,8 @@ void aws_s3_meta_request_set_fail_synced(
 
         aws_s3_meta_request_result_setup(meta_request, &meta_request->synced_data.finish_result, NULL, 0, error_code);
     }
+
+    aws_atomic_store_int(&meta_request->finish_error_code, (size_t)meta_request->synced_data.finish_result.error_code);
 }
 
 void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_request, int response_status) {
@@ -1008,6 +1011,8 @@ void aws_s3_meta_request_set_success_synced(struct aws_s3_meta_request *meta_req
 
     aws_s3_meta_request_result_setup(
         meta_request, &meta_request->synced_data.finish_result, NULL, response_status, AWS_ERROR_SUCCESS);
+
+    aws_atomic_store_int(&meta_request->finish_error_code, AWS_ERROR_SUCCESS);
 }
 
 bool aws_s3_meta_request_has_finish_result(struct aws_s3_meta_request *meta_request) {
@@ -4218,6 +4223,8 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
     /* Keep calling read() until we fill the buffer, or hit EOF */
     struct aws_stream_status status = {.is_end_of_stream = false, .is_valid = true};
     while ((buffer->len < buffer->capacity) && !status.is_end_of_stream) {
+        size_t len_before_read = buffer->len;
+
         /* Read from stream */
         if (aws_input_stream_read(synchronous_stream, buffer) != AWS_OP_SUCCESS) {
             aws_future_bool_set_error(synchronous_read_future, aws_last_error());
@@ -4228,6 +4235,20 @@ struct aws_future_bool *aws_s3_meta_request_read_body(
         if (aws_input_stream_get_status(synchronous_stream, &status) != AWS_OP_SUCCESS) {
             aws_future_bool_set_error(synchronous_read_future, aws_last_error());
             goto synchronous_read_done;
+        }
+
+        /* A read that returns no data keeps this loop going until the stream has more. Stop if the meta request
+         * has a finish result (cancel, pause or another failure), so it doesn't wait on a body that may never
+         * produce data. */
+        if (buffer->len == len_before_read && !status.is_end_of_stream) {
+            size_t finish_error_code = aws_atomic_load_int(&meta_request->finish_error_code);
+            if (finish_error_code != SIZE_MAX) {
+                /* No success result can be set while a part's body is still being read. In release builds,
+                 * aws_future_bool_set_error() falls back to AWS_ERROR_UNKNOWN if it ever is. */
+                AWS_ASSERT(finish_error_code != AWS_ERROR_SUCCESS);
+                aws_future_bool_set_error(synchronous_read_future, (int)finish_error_code);
+                goto synchronous_read_done;
+            }
         }
     }
 

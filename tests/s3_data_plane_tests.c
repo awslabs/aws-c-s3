@@ -9356,7 +9356,7 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         // Single byte range (first byte).
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-0"),
 
-        // First 8K.  8K < client's 16K part size.
+        // First 8K.  8K < client's 128K part size.
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("bytes=0-8191"),
 
         // First 0.5 MB.  0.5 MB < 1 MB test file.
@@ -9400,8 +9400,12 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
         AWS_BYTE_CUR_INIT_FROM_STRING_LITERAL("Connection"),
     };
 
+    /* 128K parts still split every multi-part range below (0.5 MB is 4 parts), and the connection cap keeps the
+     * number of concurrent sockets small. With 16K parts and the default 25 connections, macOS CI runners hit
+     * ENOBUFS on send(). */
     struct aws_s3_tester_client_options client_options = {
-        .part_size = 16 * 1024,
+        .part_size = 128 * 1024,
+        .max_active_connections_override = 8,
         .retry_mode = AWS_S3_RETRY_MODE_ADAPTIVE,
     };
 
@@ -9564,6 +9568,9 @@ static int s_test_s3_range_requests(struct aws_allocator *allocator, void *ctx) 
 
             aws_http_headers_release(verify_range_get_headers);
             aws_byte_buf_clean_up(&verify_range_get_buffer);
+
+            /* Sleep for 1 second to avoid throttling from server */
+            aws_thread_current_sleep(aws_timestamp_convert(1, AWS_TIMESTAMP_SECS, AWS_TIMESTAMP_NANOS, NULL));
         }
     }
 
