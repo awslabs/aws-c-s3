@@ -1157,14 +1157,15 @@ struct aws_s3_client *aws_s3_client_new(
     }
 
     /* Default to ideal connection count, but at least collect 10 samples. */
+    uint32_t num_first_byte_timeout_warmup_samples =
+        aws_max_u32(client->ideal_connection_count, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES);
     aws_s3_first_byte_timeout_controller_init(
-        &client->synced_data.upload_part_timeout,
-        allocator,
-        aws_max_u32(client->ideal_connection_count, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES));
+        &client->synced_data.upload_part_timeout, allocator, num_first_byte_timeout_warmup_samples);
 
     /* Retries are already resolved here, and hedging depends on them. */
     *((bool *)&client->get_object_hedging_enabled) = s_resolve_get_object_hedging(allocator, client, client_config);
-    aws_s3_get_hedging_controller_init(&client->synced_data.get_object_hedging);
+    aws_s3_first_byte_timeout_controller_init(
+        &client->synced_data.get_object_timeout, allocator, num_first_byte_timeout_warmup_samples);
     aws_atomic_init_int(&client->get_object_hedging_timeout_ms, 0);
 
     /* Diagnose the read-backpressure / initial-read-window pairing.
@@ -1362,6 +1363,7 @@ static void s_s3_client_finish_destroy_default(struct aws_s3_client *client) {
     client->buffer_pool = aws_s3_buffer_pool_release(client->buffer_pool);
 
     aws_s3_first_byte_timeout_controller_clean_up(&client->synced_data.upload_part_timeout);
+    aws_s3_first_byte_timeout_controller_clean_up(&client->synced_data.get_object_timeout);
 
     aws_mem_release(client->allocator, client->network_interface_names_cursor_array);
     for (size_t i = 0; i < client->num_network_interface_names; i++) {
@@ -3704,6 +3706,58 @@ uint64_t aws_s3_meta_request_resume_token_file_last_modified_epoch_ns(
     return resume_token->file_last_modified_epoch_ns;
 }
 
+static bool s_first_byte_timeout_is_warm(const struct aws_s3_first_byte_timeout_controller *controller) {
+    return controller->num_successful_requests >= controller->num_warmup_samples;
+}
+
+/**
+ * Copies the next first-byte timeout of `controller` to `timeout_ms_atomic`, and logs the changes of the controller
+ * state. `was_warm` gives the state before the update. The controller was not stopped before the update. `name`
+ * identifies the controller in the log. The caller must hold the client lock.
+ */
+static void s_store_first_byte_timeout(
+    struct aws_s3_client *client,
+    const struct aws_s3_first_byte_timeout_controller *controller,
+    struct aws_atomic_var *timeout_ms_atomic,
+    const char *name,
+    bool was_warm) {
+
+    size_t previous_timeout_ms = aws_atomic_load_int(timeout_ms_atomic);
+    /* The timeout is 0 while the hedge budget is empty. */
+    size_t timeout_ms = aws_s3_first_byte_timeout_controller_get_timeout_ms(controller);
+    aws_atomic_store_int(timeout_ms_atomic, timeout_ms);
+
+    if (controller->stop_timeout) {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client stopped the %s first-byte timeout, because a new attempt is not faster than the slow "
+            "response on this link.",
+            (void *)client,
+            name);
+    } else if (!was_warm && s_first_byte_timeout_is_warm(controller)) {
+        AWS_LOGF_INFO(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client completed the %s first-byte timeout warmup. The timeout starts at %zu ms.",
+            (void *)client,
+            name,
+            timeout_ms);
+    } else if (previous_timeout_ms > 0 && timeout_ms == 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client paused the %s first-byte timeout, because the hedge budget is empty. Successes refill the "
+            "budget.",
+            (void *)client,
+            name);
+    } else if (previous_timeout_ms == 0 && timeout_ms > 0) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client resumed the %s first-byte timeout with %zu ms.",
+            (void *)client,
+            name,
+            timeout_ms);
+    }
+}
+
 /**
  * Gives the result of an UploadPart request to the UploadPart first-byte timeout controller. See
  * `struct aws_s3_first_byte_timeout_controller` for the algorithm.
@@ -3724,6 +3778,7 @@ void aws_s3_client_update_upload_part_timeout(
 
     struct aws_s3_request_metrics *metrics = finished_upload_part_request->send_data.metrics;
     size_t current_timeout_ms = controller->timeout_ms;
+    bool was_warm = s_first_byte_timeout_is_warm(controller);
 
     switch (finished_error_code) {
         case AWS_ERROR_SUCCESS: {
@@ -3754,22 +3809,7 @@ void aws_s3_client_update_upload_part_timeout(
             break;
     }
 
-    /* Apply the updated timeout. It is 0 while the hedge budget is empty. */
-    size_t previous_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-    size_t timeout_ms = aws_s3_first_byte_timeout_controller_get_timeout_ms(controller);
-    aws_atomic_store_int(&client->upload_timeout_ms, timeout_ms);
-    if (previous_timeout_ms > 0 && timeout_ms == 0 && !controller->stop_timeout) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT,
-            "id=%p Client upload part timeout paused, because the hedge budget is empty. Successes refill the budget.",
-            (void *)client);
-    } else if (
-        previous_timeout_ms == 0 && timeout_ms > 0 &&
-        controller->num_successful_requests > controller->num_warmup_samples) {
-        /* The first timeout after the warmup is not a resume. */
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT, "id=%p Client upload part timeout resumed with %zu ms.", (void *)client, timeout_ms);
-    }
+    s_store_first_byte_timeout(client, controller, &client->upload_timeout_ms, "UploadPart", was_warm);
 
 unlock:
     aws_s3_client_unlock_synced_data(client);
@@ -3839,42 +3879,33 @@ void aws_s3_client_update_get_object_hedging(
 
     /* BEGIN CRITICAL SECTION */
     aws_s3_client_lock_synced_data(client);
-    struct aws_s3_get_hedging_controller *controller = &client->synced_data.get_object_hedging;
-    bool was_warm = controller->warm;
-    bool was_stopped = controller->stopped;
-    size_t previous_timeout_ms = aws_atomic_load_int(&client->get_object_hedging_timeout_ms);
+    struct aws_s3_first_byte_timeout_controller *controller = &client->synced_data.get_object_timeout;
+    if (controller->stop_timeout) {
+        goto unlock;
+    }
+
+    size_t current_timeout_ms = controller->timeout_ms;
+    bool was_warm = s_first_byte_timeout_is_warm(controller);
 
     if (hedged) {
-        aws_s3_get_hedging_controller_record_hedge(controller);
+        if (aws_s3_first_byte_timeout_controller_record_timeout(controller, finished_request->first_byte_timeout_ms)) {
+            AWS_LOGF_INFO(
+                AWS_LS_S3_CLIENT,
+                "id=%p Client GET hedging rate is more than 1%%. The first-byte timeout of %zu ms increases. The "
+                "timeout of the request was %zu ms.",
+                (void *)client,
+                current_timeout_ms,
+                finished_request->first_byte_timeout_ms);
+        }
     } else {
-        aws_s3_get_hedging_controller_record_success(controller, ttfb_ns);
+        /* A hedge cancels a GetObject request before the body starts. Thus, the cost of a new attempt is the time to
+         * first byte, and the warmup uses this time also. */
+        aws_s3_first_byte_timeout_controller_record_success(controller, ttfb_ns, ttfb_ns);
     }
 
-    size_t timeout_ms = (size_t)aws_s3_get_hedging_controller_deadline_ms(controller);
-    aws_atomic_store_int(&client->get_object_hedging_timeout_ms, timeout_ms);
+    s_store_first_byte_timeout(client, controller, &client->get_object_hedging_timeout_ms, "GetObject", was_warm);
 
-    if (!was_warm && controller->warm) {
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p GET hedging warmup is complete. The first-byte deadline starts at %zu ms.",
-            (void *)client,
-            timeout_ms);
-    } else if (!was_stopped && controller->stopped) {
-        AWS_LOGF_INFO(
-            AWS_LS_S3_CLIENT,
-            "id=%p GET hedging stopped, because the mean time to first byte of the warmup is %" PRIu64
-            " ms. A hedge does not help on such a slow link.",
-            (void *)client,
-            aws_timestamp_convert(controller->mean_ttfb_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL));
-    } else if (previous_timeout_ms > 0 && timeout_ms == 0) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT,
-            "id=%p GET hedging paused, because the hedge budget is empty. Successes refill the budget.",
-            (void *)client);
-    } else if (previous_timeout_ms == 0 && timeout_ms > 0) {
-        AWS_LOGF_DEBUG(
-            AWS_LS_S3_CLIENT, "id=%p GET hedging resumed with a deadline of %zu ms.", (void *)client, timeout_ms);
-    }
+unlock:
     aws_s3_client_unlock_synced_data(client);
     /* END CRITICAL SECTION */
 }

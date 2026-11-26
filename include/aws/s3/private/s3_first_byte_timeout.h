@@ -37,6 +37,12 @@ AWS_PUSH_SANE_WARNING_LEVEL
  * machine definitely wants it! But a slow computer does not. A slow computer
  * would be better off waiting 5sec for the response, vs re-uploading the whole request.
  *
+ * The client has one controller for UploadPart requests and one controller for GetObject requests (GET hedging). The
+ * two controllers do not share samples, because the response times of the two request types are very different. The
+ * warmup samples show the cost of a new attempt. For UploadPart, a new attempt sends the full part again, so the
+ * warmup uses the full request time. For GetObject, the client cancels the request before the body starts, so the
+ * warmup uses the response to first byte time.
+ *
  * The current algorithm:
  * 1. Start without a timeout value. After max(10, # of ideal connections) requests completed, we know the average of
  *      how long the request takes. We decide if it's worth to set a timeout value or not. (If the average of request
@@ -83,6 +89,9 @@ struct aws_s3_first_byte_timeout_controller {
 
     /* Total number of successful requests */
     uint64_t num_successful_requests;
+
+    /* Total number of requests that reached the first-byte timeout. Each one is a hedge. */
+    uint64_t num_timeouts;
 
     /* Stats for the request time of the warmup requests */
     struct {

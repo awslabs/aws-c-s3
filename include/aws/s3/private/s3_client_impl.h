@@ -7,7 +7,6 @@
  */
 
 #include "aws/s3/private/s3_first_byte_timeout.h"
-#include "aws/s3/private/s3_get_hedging.h"
 #include "aws/s3/s3_client.h"
 
 #include <aws/common/atomics.h>
@@ -382,7 +381,7 @@ struct aws_s3_client {
 
     /**
      * The first-byte deadline in ms for the next GET part request, or 0 for no deadline. The client writes it while
-     * it holds the lock, after each change of `synced_data.get_object_hedging`. The send path reads it without the
+     * it holds the lock, after each change of `synced_data.get_object_timeout`. The send path reads it without the
      * lock.
      */
     struct aws_atomic_var get_object_hedging_timeout_ms;
@@ -479,7 +478,11 @@ struct aws_s3_client {
         /* The first-byte timeout of the UploadPart requests. The client copies its timeout to `upload_timeout_ms`. */
         struct aws_s3_first_byte_timeout_controller upload_part_timeout;
 
-        struct aws_s3_get_hedging_controller get_object_hedging;
+        /**
+         * The first-byte timeout of the GET part requests (GET hedging). The client copies its timeout to
+         * `get_object_hedging_timeout_ms`.
+         */
+        struct aws_s3_first_byte_timeout_controller get_object_timeout;
     } synced_data;
 
     struct {
@@ -636,7 +639,7 @@ bool aws_s3_client_get_object_hedging_applies(
 
 /**
  * Gives the result of a GET part request attempt to the GET hedging controller. A success with a 2xx response adds a
- * time to first byte sample. A first-byte timeout of an attempt that had a hedging deadline counts as a hedge. The
+ * time to first byte sample. A first-byte timeout of an attempt that had a first-byte timeout counts as a hedge. The
  * function does nothing if GET hedging is off.
  *
  * Invoked from `s_s3_meta_request_send_request_finish`.

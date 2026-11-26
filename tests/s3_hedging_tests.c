@@ -4,7 +4,6 @@
  */
 
 #include "aws/s3/private/s3_client_impl.h"
-#include "aws/s3/private/s3_get_hedging.h"
 #include "aws/s3/private/s3_request.h"
 #include "aws/s3/private/s3_util.h"
 #include "s3_tester.h"
@@ -22,186 +21,6 @@ static const char *s_get_object_hedging_env_var = "AWS_CRT_S3_GET_OBJECT_HEDGING
 
 static uint64_t s_ms_to_ns(uint64_t ms) {
     return aws_timestamp_convert(ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
-}
-
-static void s_record_successes(struct aws_s3_get_hedging_controller *controller, size_t count, uint64_t ttfb_ms) {
-    for (size_t i = 0; i < count; ++i) {
-        aws_s3_get_hedging_controller_record_success(controller, s_ms_to_ns(ttfb_ms));
-    }
-}
-
-TEST_CASE(get_hedging_controller_arms_no_deadline_during_warmup) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES - 1, 100);
-    ASSERT_FALSE(controller.warm);
-    ASSERT_UINT_EQUALS(0, aws_s3_get_hedging_controller_deadline_ms(&controller));
-
-    s_record_successes(&controller, 1, 100);
-    ASSERT_TRUE(controller.warm);
-    ASSERT_TRUE(aws_s3_get_hedging_controller_deadline_ms(&controller) > 0);
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_seeds_at_p90) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-
-    /* The mean plus 700 ms would put the deadline at 1.38 s, inside the slow tenth. The p90 is 3 s. */
-    s_record_successes(&controller, 8, 100);
-    s_record_successes(&controller, 2, 3000);
-
-    ASSERT_UINT_EQUALS(3000, aws_s3_get_hedging_controller_deadline_ms(&controller));
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_seed_is_at_least_one_second) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES, 20);
-
-    ASSERT_UINT_EQUALS(1000, aws_s3_get_hedging_controller_deadline_ms(&controller));
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_stops_on_uniformly_slow_link) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES, 5000);
-    ASSERT_TRUE(controller.stopped);
-    ASSERT_UINT_EQUALS(0, aws_s3_get_hedging_controller_deadline_ms(&controller));
-
-    /* The stop is permanent, also if the link becomes fast later. */
-    s_record_successes(&controller, 1000, 10);
-    ASSERT_TRUE(controller.stopped);
-    ASSERT_UINT_EQUALS(0, aws_s3_get_hedging_controller_deadline_ms(&controller));
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_one_slow_cold_start_does_not_stop) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-
-    /* The arithmetic mean is 845 ms. An EWMA would give approximately 7 s, which is above the 5 s stop limit. */
-    s_record_successes(&controller, 1, 8000);
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES - 1, 50);
-
-    ASSERT_FALSE(controller.stopped);
-    ASSERT_TRUE(controller.mean_ttfb_ns > s_ms_to_ns(5000));
-    ASSERT_UINT_EQUALS(1000, aws_s3_get_hedging_controller_deadline_ms(&controller));
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_hedge_does_not_move_deadline) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES, 100);
-
-    uint64_t deadline_ns = controller.deadline_ns;
-    uint64_t mean_ttfb_ns = controller.mean_ttfb_ns;
-    for (size_t i = 0; i < 5; ++i) {
-        aws_s3_get_hedging_controller_record_hedge(&controller);
-    }
-
-    ASSERT_UINT_EQUALS(deadline_ns, controller.deadline_ns);
-    ASSERT_UINT_EQUALS(mean_ttfb_ns, controller.mean_ttfb_ns);
-    ASSERT_UINT_EQUALS(5, controller.num_hedges);
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_deadline_moves_toward_mean_plus_offset) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-    s_record_successes(&controller, 8, 100);
-    s_record_successes(&controller, 2, 3000);
-    ASSERT_UINT_EQUALS(3000, aws_s3_get_hedging_controller_deadline_ms(&controller));
-
-    uint64_t previous_deadline_ms = aws_s3_get_hedging_controller_deadline_ms(&controller);
-    for (size_t i = 0; i < 2000; ++i) {
-        aws_s3_get_hedging_controller_record_success(&controller, s_ms_to_ns(100));
-        uint64_t deadline_ms = aws_s3_get_hedging_controller_deadline_ms(&controller);
-        ASSERT_TRUE(deadline_ms <= previous_deadline_ms);
-        previous_deadline_ms = deadline_ms;
-    }
-
-    /* The mean goes to 100 ms, so the deadline goes to 100 ms + 700 ms. */
-    ASSERT_TRUE(previous_deadline_ms >= 800);
-    ASSERT_TRUE(previous_deadline_ms <= 810);
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_budget_drains_and_successes_refill_it) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES, 100);
-
-    /* The budget starts full with 10 tokens. */
-    for (size_t i = 0; i < 10; ++i) {
-        ASSERT_TRUE(aws_s3_get_hedging_controller_deadline_ms(&controller) > 0);
-        aws_s3_get_hedging_controller_record_hedge(&controller);
-    }
-    ASSERT_UINT_EQUALS(0, aws_s3_get_hedging_controller_deadline_ms(&controller));
-
-    /* 1 token needs 20 successes of 0.05 tokens. */
-    s_record_successes(&controller, 19, 100);
-    ASSERT_UINT_EQUALS(0, aws_s3_get_hedging_controller_deadline_ms(&controller));
-    s_record_successes(&controller, 1, 100);
-    ASSERT_TRUE(aws_s3_get_hedging_controller_deadline_ms(&controller) > 0);
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_high_hedge_rate_stops_hedging) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES, 100);
-
-    /* One hedge for each 6 requests is 16.7%, which is above the 4.8% that the budget can pay for. */
-    size_t num_rounds = 0;
-    while (aws_s3_get_hedging_controller_deadline_ms(&controller) > 0) {
-        ASSERT_TRUE(num_rounds < 100);
-        s_record_successes(&controller, 5, 100);
-        aws_s3_get_hedging_controller_record_hedge(&controller);
-        ++num_rounds;
-    }
-    ASSERT_TRUE(num_rounds > 1);
-    return AWS_OP_SUCCESS;
-}
-
-TEST_CASE(get_hedging_controller_low_hedge_rate_keeps_hedging) {
-    (void)allocator;
-    (void)ctx;
-    struct aws_s3_get_hedging_controller controller;
-    aws_s3_get_hedging_controller_init(&controller);
-    s_record_successes(&controller, AWS_S3_GET_HEDGING_WARMUP_SAMPLES, 100);
-
-    /* One hedge for each 100 requests is 1%, which the budget can pay for. */
-    for (size_t round = 0; round < 1000; ++round) {
-        s_record_successes(&controller, 99, 100);
-        ASSERT_TRUE(aws_s3_get_hedging_controller_deadline_ms(&controller) > 0);
-        aws_s3_get_hedging_controller_record_hedge(&controller);
-    }
-    return AWS_OP_SUCCESS;
 }
 
 static int s_set_env(struct aws_allocator *allocator, const char *value) {
@@ -300,9 +119,10 @@ static void s_init_mock_get_request(
     metrics->time_metrics.receive_start_timestamp_ns = (int64_t)s_ms_to_ns(1000 + ttfb_ms);
 }
 
-static struct aws_s3_get_hedging_controller s_controller_of(struct aws_s3_client *client) {
+/* Copies the GET hedging controller. The copy is only for reading fields. */
+static struct aws_s3_first_byte_timeout_controller s_controller_of(struct aws_s3_client *client) {
     aws_s3_client_lock_synced_data(client);
-    struct aws_s3_get_hedging_controller controller = client->synced_data.get_object_hedging;
+    struct aws_s3_first_byte_timeout_controller controller = client->synced_data.get_object_timeout;
     aws_s3_client_unlock_synced_data(client);
     return controller;
 }
@@ -326,33 +146,36 @@ TEST_CASE(client_update_get_object_hedging) {
     mock_request.send_data.metrics = &metrics;
 
     /* Successes with a 2xx response warm the controller up. */
+    uint32_t num_warmup_samples = s_controller_of(client).num_warmup_samples;
     s_init_mock_get_request(&mock_request, AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, 50, 0);
-    for (size_t i = 0; i < AWS_S3_GET_HEDGING_WARMUP_SAMPLES - 1; ++i) {
+    for (size_t i = 0; i < num_warmup_samples - 1; ++i) {
         aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
     }
     ASSERT_UINT_EQUALS(0, aws_s3_client_get_object_hedging_timeout_ms(client));
     aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
     ASSERT_UINT_EQUALS(1000, aws_s3_client_get_object_hedging_timeout_ms(client));
-    ASSERT_UINT_EQUALS(AWS_S3_GET_HEDGING_WARMUP_SAMPLES, s_controller_of(client).num_successes);
+    ASSERT_UINT_EQUALS(num_warmup_samples, s_controller_of(client).num_successful_requests);
 
     /* An error response is not a sample. */
     s_init_mock_get_request(&mock_request, AWS_HTTP_STATUS_CODE_503_SERVICE_UNAVAILABLE, 50, 0);
     aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
-    ASSERT_UINT_EQUALS(AWS_S3_GET_HEDGING_WARMUP_SAMPLES, s_controller_of(client).num_successes);
+    ASSERT_UINT_EQUALS(num_warmup_samples, s_controller_of(client).num_successful_requests);
 
-    /* A first-byte timeout without a hedging deadline is not a hedge. */
+    /* A first-byte timeout of an attempt without a first-byte timeout is not a hedge. */
     s_init_mock_get_request(&mock_request, 0, 0, 0);
     aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-    ASSERT_UINT_EQUALS(0, s_controller_of(client).num_hedges);
+    ASSERT_UINT_EQUALS(0, s_controller_of(client).num_timeouts);
 
-    /* After 10 hedges, the budget is empty and the client arms no deadline. */
+    /* After 10 hedges, the budget is empty and the client sets no timeout. */
     s_init_mock_get_request(&mock_request, 0, 0, 1000);
     for (size_t i = 0; i < 10; ++i) {
-        ASSERT_UINT_EQUALS(1000, aws_s3_client_get_object_hedging_timeout_ms(client));
+        ASSERT_TRUE(aws_s3_client_get_object_hedging_timeout_ms(client) > 0);
         aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
     }
-    ASSERT_UINT_EQUALS(10, s_controller_of(client).num_hedges);
+    ASSERT_UINT_EQUALS(10, s_controller_of(client).num_timeouts);
     ASSERT_UINT_EQUALS(0, aws_s3_client_get_object_hedging_timeout_ms(client));
+    /* The timeout rate increased the timeout value one time for the burst. */
+    ASSERT_UINT_EQUALS(2000, s_controller_of(client).timeout_ms);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
@@ -378,10 +201,10 @@ TEST_CASE(client_update_get_object_hedging_does_nothing_when_off) {
     mock_request.send_data.metrics = &metrics;
 
     s_init_mock_get_request(&mock_request, AWS_HTTP_STATUS_CODE_200_OK, 50, 0);
-    for (size_t i = 0; i < AWS_S3_GET_HEDGING_WARMUP_SAMPLES; ++i) {
+    for (size_t i = 0; i < s_controller_of(client).num_warmup_samples; ++i) {
         aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
     }
-    ASSERT_UINT_EQUALS(0, s_controller_of(client).num_successes);
+    ASSERT_UINT_EQUALS(0, s_controller_of(client).num_successful_requests);
     ASSERT_UINT_EQUALS(0, aws_s3_client_get_object_hedging_timeout_ms(client));
 
     aws_s3_client_release(client);
@@ -404,7 +227,7 @@ static void s_warm_up_get_object_hedging(struct aws_s3_client *client) {
     AWS_ZERO_STRUCT(metrics);
     mock_request.send_data.metrics = &metrics;
     s_init_mock_get_request(&mock_request, AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, 5, 0);
-    for (size_t i = 0; i < AWS_S3_GET_HEDGING_WARMUP_SAMPLES; ++i) {
+    for (size_t i = 0; i < s_controller_of(client).num_warmup_samples; ++i) {
         aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
     }
 }
@@ -528,7 +351,7 @@ static int s_get_object_with_hedging(
     ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
     ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
     *out_duration_ms = aws_timestamp_convert(end_ns - start_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL);
-    *out_num_hedges = (size_t)s_controller_of(client).num_hedges;
+    *out_num_hedges = (size_t)s_controller_of(client).num_timeouts;
     ASSERT_SUCCESS(
         s_check_attempts(&tester, &out_results, AWS_S3_REQUEST_TYPE_GET_OBJECT, out_num_first_byte_timeouts));
 

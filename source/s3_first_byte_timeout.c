@@ -181,6 +181,7 @@ bool aws_s3_first_byte_timeout_controller_record_timeout(
     size_t request_timeout_ms) {
     AWS_PRECONDITION(controller);
 
+    controller->num_timeouts = aws_add_u64_saturating(controller->num_timeouts, 1);
     controller->budget_centitokens = controller->budget_centitokens >= s_budget_cost_centitokens
                                          ? controller->budget_centitokens - s_budget_cost_centitokens
                                          : 0;
