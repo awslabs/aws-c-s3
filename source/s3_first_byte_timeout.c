@@ -80,32 +80,32 @@ static void s_record_warmup_sample(struct aws_s3_first_byte_timeout_controller *
         aws_add_u64_saturating(controller->initial_request_time.sum_ns, request_time_ns);
     ++controller->initial_request_time.num_samples;
     if (!controller->initial_request_time.collecting_p90) {
-        /* Initialize the priority queue to collect the p90 of the initial requests. */
+        /* Initialize the priority queue to collect the p90 of the initial requests. The nearest-rank p90 of N samples
+         * is the smallest of the largest floor(N / 10) + 1 samples. */
         controller->initial_request_time.collecting_p90 = true;
-        size_t queue_size = controller->num_warmup_samples / 10;
-        AWS_ASSERT(queue_size > 0);
+        size_t queue_size = controller->num_warmup_samples / 10 + 1;
         aws_priority_queue_init_dynamic(
             &controller->initial_request_time.p90_samples,
             controller->allocator,
             queue_size,
             sizeof(uint64_t),
             s_compare_uint64_min_heap);
-    } else {
-        /* check if the queue is full, if full pop and top and push the next. */
-        size_t current_size = aws_priority_queue_size(&controller->initial_request_time.p90_samples);
-        size_t current_capacity = aws_priority_queue_capacity(&controller->initial_request_time.p90_samples);
-        if (current_size == current_capacity) {
-            uint64_t *min = NULL;
-            aws_priority_queue_top(&controller->initial_request_time.p90_samples, (void **)&min);
-            if (request_time_ns > *min) {
-                /* Push the data into the queue if it's larger than the min of the queue. */
-                uint64_t pop_val = 0;
-                aws_priority_queue_pop(&controller->initial_request_time.p90_samples, &pop_val);
-                aws_priority_queue_push(&controller->initial_request_time.p90_samples, &request_time_ns);
-            }
-        } else {
+    }
+
+    /* check if the queue is full, if full pop and top and push the next. */
+    size_t current_size = aws_priority_queue_size(&controller->initial_request_time.p90_samples);
+    size_t current_capacity = aws_priority_queue_capacity(&controller->initial_request_time.p90_samples);
+    if (current_size == current_capacity) {
+        uint64_t *min = NULL;
+        aws_priority_queue_top(&controller->initial_request_time.p90_samples, (void **)&min);
+        if (request_time_ns > *min) {
+            /* Push the data into the queue if it's larger than the min of the queue. */
+            uint64_t pop_val = 0;
+            aws_priority_queue_pop(&controller->initial_request_time.p90_samples, &pop_val);
             aws_priority_queue_push(&controller->initial_request_time.p90_samples, &request_time_ns);
         }
+    } else {
+        aws_priority_queue_push(&controller->initial_request_time.p90_samples, &request_time_ns);
     }
 }
 

@@ -59,6 +59,39 @@ TEST_CASE(first_byte_timeout_controller_no_timeout_during_warmup_and_after_stop)
     return AWS_OP_SUCCESS;
 }
 
+/* The seed is the nearest-rank p90 of all warmup samples, and the first sample is one of them. */
+TEST_CASE(first_byte_timeout_controller_seeds_at_nearest_rank_p90) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+
+    /* 1 slow sample in 10 is above the p90, which is the 9th value. */
+    aws_s3_first_byte_timeout_controller_init(&controller, allocator, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES);
+    s_record_successes(&controller, 1, 100);
+    s_record_successes(&controller, 1, 3000);
+    s_record_successes(&controller, 8, 100);
+    ASSERT_UINT_EQUALS(1000, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+
+    /* 2 slow samples in 10 put the p90 at the slow value. The mean plus 700 ms would be 1.38 s, which is in the slow
+     * tenth. */
+    aws_s3_first_byte_timeout_controller_init(&controller, allocator, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES);
+    s_record_successes(&controller, 8, 100);
+    s_record_successes(&controller, 2, 3000);
+    ASSERT_UINT_EQUALS(3000, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+
+    /* The first sample is a warmup sample also. The p90 of 20 samples is the 3rd largest value. Without the first
+     * sample, it would be 100 ms. */
+    aws_s3_first_byte_timeout_controller_init(&controller, allocator, 20);
+    s_record_successes(&controller, 1, 4000);
+    s_record_successes(&controller, 1, 3000);
+    s_record_successes(&controller, 1, 2000);
+    s_record_successes(&controller, 17, 100);
+    ASSERT_UINT_EQUALS(2000, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}
+
 /**
  * Many requests that use the same timeout can time out at the same time. The timeout rate increases the timeout value
  * one time for the burst. The budget stops the burst after 10 timeouts, and successes refill it.

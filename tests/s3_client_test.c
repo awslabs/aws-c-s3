@@ -130,7 +130,7 @@ TEST_CASE(client_update_upload_part_timeout) {
         }
 
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        /* the P90 of the results is 900, but it has to be at least 1000 */
+        /* The nearest-rank P90 of the results is 899, but it has to be at least 1000 */
         ASSERT_UINT_EQUALS(1000, current_timeout_ms);
     }
     {
@@ -145,8 +145,8 @@ TEST_CASE(client_update_upload_part_timeout) {
         }
 
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        /* P90 is 9000 */
-        ASSERT_UINT_EQUALS(9000, current_timeout_ms);
+        /* The nearest-rank P90 of the 10000 values from 0 ms to 9999 ms is the 9000th value: 8999 ms. */
+        ASSERT_UINT_EQUALS(8999, current_timeout_ms);
     }
 
     {

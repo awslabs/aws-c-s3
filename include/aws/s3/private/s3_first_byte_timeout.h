@@ -41,7 +41,8 @@ AWS_PUSH_SANE_WARNING_LEVEL
  * 1. Start without a timeout value. After max(10, # of ideal connections) requests completed, we know the average of
  *      how long the request takes. We decide if it's worth to set a timeout value or not. (If the average of request
  *      takes more than 5 secs or not).
- * 2. If it is worth to retry, start with a timeout value from max(1 sec, P90 of the initial samples).
+ * 2. If it is worth to retry, start with a timeout value from max(1 sec, P90 of the initial samples). The P90 is the
+ *      nearest-rank P90 of all initial samples: the smallest value that is larger than or equal to 90% of the samples.
  * 3. If a request finishes successfully, use the mean response_to_first_byte_time + g_expect_timeout_offset_ms as
  *      our expected timeout value. (TODO: The real expected timeout value should be a P99 of all the requests.)
  *      The mean is the arithmetic mean of the first 64 samples. After that, each sample moves the mean by 1/64 of the
