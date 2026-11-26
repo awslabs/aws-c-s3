@@ -14,7 +14,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 ### Documentation
 
 * [GetObject](docs/GetObject.md): A visual representation of the GetObject request flow.
-* [GET Hedging](docs/GetObjectHedging.md): How the client cuts the tail latency of GetObject part requests.
+* [First-Byte Timeout and Hedging](docs/Hedging.md): How the client cuts the tail latency of UploadPart and GetObject part requests.
 * [Memory Aware Requests Execution](docs/memory_aware_request_execution.md): An in-depth guide on optimizing memory usage during request executions.
 
 ### Configuration
@@ -135,7 +135,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 6. **GET Hedging - `AWS_CRT_S3_GET_OBJECT_HEDGING`**
 
-   Turns on GET hedging. If a part request of a GetObject meta request gets no response before an adaptive first-byte deadline, the client cancels it and sends it again at once on a new connection. See [GET Hedging](docs/GetObjectHedging.md).
+   Turns on GET hedging. If a part request of a GetObject meta request gets no response before an adaptive first-byte timeout, the client cancels it and sends it again at once on a new connection. UploadPart requests always use the same kind of timeout. See [First-Byte Timeout and Hedging](docs/Hedging.md).
 
    Example Usage:
 

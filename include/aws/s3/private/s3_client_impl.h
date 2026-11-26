@@ -380,7 +380,7 @@ struct aws_s3_client {
     const bool get_object_hedging_enabled;
 
     /**
-     * The first-byte deadline in ms for the next GET part request, or 0 for no deadline. The client writes it while
+     * The first-byte timeout in ms for the next GET part request, or 0 for no timeout. The client writes it while
      * it holds the lock, after each change of `synced_data.get_object_timeout`. The send path reads it without the
      * lock.
      */
@@ -650,7 +650,7 @@ void aws_s3_client_update_get_object_hedging(
     struct aws_s3_request *finished_request,
     int finished_error_code);
 
-/* Returns the first-byte deadline in ms for the next GET part request, or 0 for no deadline. */
+/* Returns the first-byte timeout in ms for the next GET part request, or 0 for no timeout. */
 AWS_S3_API
 size_t aws_s3_client_get_object_hedging_timeout_ms(struct aws_s3_client *client);
 
