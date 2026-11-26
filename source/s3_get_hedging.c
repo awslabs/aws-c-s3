@@ -10,8 +10,8 @@
 
 #include <stdlib.h>
 
-/* The constants are the same as for the UploadPart timeout in s3_client.c and the hedging design of the AWS S3
- * Transfer Manager for Rust. */
+/* The constants are the same as for the UploadPart timeout in s3_first_byte_timeout.c and the hedging design of the
+ * AWS S3 Transfer Manager for Rust. */
 static const uint64_t s_seed_floor_ns = 1000000000;     /* 1 s */
 static const uint64_t s_escape_ns = 5000000000;         /* 5 s */
 static const uint64_t s_expected_offset_ns = 700000000; /* 700 ms */

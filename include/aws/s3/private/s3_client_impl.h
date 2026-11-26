@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_first_byte_timeout.h"
 #include "aws/s3/private/s3_get_hedging.h"
 #include "aws/s3/s3_client.h"
 
@@ -180,33 +181,6 @@ struct aws_s3_client_vtable {
     /********************* TEST ONLY STUB **************************/
     void (*after_prepare_upload_part_finish_stub)(struct aws_s3_request *request, struct aws_http_message *message);
 #endif
-};
-
-struct aws_s3_upload_part_timeout_stats {
-    bool stop_timeout;
-
-    /* Total number of successful upload requests */
-    uint64_t num_successful_upload_requests;
-
-    /* Stats for the request time of first 10 succeed requests */
-    struct {
-        uint64_t sum_ns;
-        uint64_t num_samples;
-        bool collecting_p90;
-        struct aws_priority_queue p90_samples;
-    } initial_request_time;
-
-    /* Track the timeout rate. */
-    struct {
-        uint64_t num_completed;
-        uint64_t num_failed;
-    } timeout_rate_tracking;
-
-    /* Stats for the response to first byte time of tracked succeed requests */
-    struct {
-        uint64_t sum_ns;
-        uint64_t num_samples;
-    } response_to_first_byte_time;
 };
 
 /* Represents the state of the S3 client. */
@@ -502,7 +476,8 @@ struct aws_s3_client {
         /* Whether or not endpoints cleanup task is currently scheduled. */
         uint32_t endpoints_cleanup_task_scheduled : 1;
 
-        struct aws_s3_upload_part_timeout_stats upload_part_stats;
+        /* The first-byte timeout of the UploadPart requests. The client copies its timeout to `upload_timeout_ms`. */
+        struct aws_s3_first_byte_timeout_controller upload_part_timeout;
 
         struct aws_s3_get_hedging_controller get_object_hedging;
     } synced_data;
@@ -625,9 +600,6 @@ void aws_s3_endpoint_destroy(struct aws_s3_endpoint *endpoint);
 
 AWS_S3_API
 extern const uint32_t g_min_num_connections;
-
-AWS_S3_API
-extern const size_t g_expect_timeout_offset_ms;
 
 AWS_S3_API
 void aws_s3_client_update_upload_part_timeout(
