@@ -49,7 +49,8 @@ The client checks the budget when it sends a request, and removes a token only w
 
 ## Hedges and retries
 
-- A hedge does not go through the retry strategy. It does not wait for a backoff, does not use the retry quota, and does not count against the max retries.
+- A hedge does not go through the retry strategy. It does not wait for a backoff, does not use the retry quota, and does not count against the max retries. This is also true for a retry strategy that the caller gives in `aws_s3_client_config.retry_strategy`. Such a strategy cannot refuse a hedge.
+- In `AWS_S3_RETRY_MODE_ADAPTIVE`, a hedge also does not wait for the client-side rate limiter. While S3 throttles, the limiter delays the first attempts and the retries, or makes them fail at once if `fast_fail_if_no_token` is set. A hedge goes out at once. The hedge budget limits these hedges, as for all hedges.
 - The client hedges each part request one time at most. The later attempts of a part request have no first-byte timeout. Errors of those attempts go through the retry strategy as usual. Thus, a part that is slow on each attempt does not use all of its retries for timeouts.
 - The `max` value of the `amz-sdk-request` header includes the hedge.
 - The first-byte timeout is off if retries are off (`AWS_S3_RETRY_MODE_NONE`).
@@ -59,7 +60,7 @@ The client checks the budget when it sends a request, and removes a token only w
 The request metrics of the `telemetry_callback` show each attempt:
 
 - `aws_s3_request_metrics_get_first_byte_timeout_ms()` gives the timeout of the attempt. The value is 0 during the warmup, after a stop, while the budget is empty, and for an attempt after a hedge.
-- `aws_s3_request_metrics_get_error_code()` gives `AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT` for an attempt that reached the timeout. For UploadPart and GetObject attempts, this error code always identifies a hedge. The next attempt of the same part has an `aws_s3_request_metrics_get_retry_attempt()` value that is 1 more.
+- `aws_s3_request_metrics_get_error_code()` gives `AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT` for an attempt that reached the timeout. For UploadPart and GetObject attempts, this error code identifies a hedge, unless the meta request is already finishing, for example after a cancel or a failed part. In that case, the client does not send the request again, but the controller counts the timeout. The next attempt of the same part has an `aws_s3_request_metrics_get_retry_attempt()` value that is 1 more.
 
 Useful values:
 

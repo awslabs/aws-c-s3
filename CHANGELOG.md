@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+- Add opt-in GET hedging. If a part request of a GetObject meta request gets no response before an adaptive first-byte timeout, the client cancels it and sends it again at once on a new connection. A budget keeps the hedges below approximately 5% of the requests. Turn it on with `get_object_hedging` in the client config or the `AWS_CRT_S3_GET_OBJECT_HEDGING` environment variable. Adds `aws_s3_request_metrics_get_first_byte_timeout_ms`. See [First-Byte Timeout and Hedging](docs/Hedging.md). ([#736](https://github.com/awslabs/aws-c-s3/pull/736))
+
+  Behavior change for existing callers: the UploadPart first-byte timeout, which is on by default, now uses the same controller and the same hedge path. This applies to all uploads, also if GET hedging is off:
+  - An UploadPart request that reaches its first-byte timeout does not go through the retry strategy, also if the caller gives a `retry_strategy`. The client sends the part again at once, one time. The new attempt has no backoff, does not use the retry quota, and does not count against the max retries. In `AWS_S3_RETRY_MODE_ADAPTIVE`, it does not wait for the client-side rate limiter.
+  - Only the first attempt of a part has a first-byte timeout. Before, each retry had one, and a part that was slow on each attempt could use all of its retries and fail the upload.
+  - After approximately 10 timeouts in sequence, the hedge budget pauses the timeout until 20 successes refill it.
+  - The mean time to first byte ages (EWMA, alpha 1/64), and the first timeout is the nearest-rank p90 of all warmup samples.
+
 ## [1.2.0]
 
 ### Features

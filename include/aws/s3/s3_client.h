@@ -637,7 +637,12 @@ struct aws_s3_client_config {
     /* How much memory can we use. This will be capped to SIZE_MAX */
     uint64_t memory_limit_in_bytes;
 
-    /* Retry strategy to use. If NULL, a default retry strategy will be used. */
+    /**
+     * Retry strategy to use. If NULL, a default retry strategy will be used.
+     *
+     * A part request that reaches its first-byte timeout (UploadPart, or GetObject with `get_object_hedging`) does not
+     * go through this strategy. The client sends it again at once, one time. See docs/Hedging.md.
+     */
     struct aws_retry_strategy *retry_strategy;
 
     /**
@@ -879,8 +884,10 @@ struct aws_s3_client_config {
      * timeout increases. If the timeout becomes more than 5 s, the client stops the hedges.
      *
      * A hedge does not wait for a backoff, does not use the retry quota, and does not count against the max retries.
-     * The client hedges each part request one time at most. A budget that successes refill keeps the hedges below
-     * approximately 5% of the requests. Thus, a broad slowdown stops the hedges, and does not double the load.
+     * This is also true for a retry_strategy that the caller gives. In AWS_S3_RETRY_MODE_ADAPTIVE, a hedge also does
+     * not wait for the client-side rate limiter. The client hedges each part request one time at most. A budget that
+     * successes refill keeps the hedges below approximately 5% of the requests. Thus, a broad slowdown stops the
+     * hedges, and does not double the load.
      *
      * Leave AWS_TRIBOOL_UNSET to use the AWS_CRT_S3_GET_OBJECT_HEDGING environment variable. The value "true" or "1"
      * turns hedging on. The default is off. Hedging is always off if retries are off (AWS_S3_RETRY_MODE_NONE).
