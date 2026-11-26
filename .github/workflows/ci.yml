@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILDER_VERSION: latest
-  BUILDER_SOURCE: releases
+  BUILDER_VERSION: fix-cmake-path
+  BUILDER_SOURCE: channels
   BUILDER_HOST: https://d19elf31gohf1l.cloudfront.net
   PACKAGE_NAME: aws-c-s3
   LINUX_BASE_IMAGE: ubuntu-18-x64
@@ -194,9 +194,6 @@ jobs:
         python builder.pyz build -p ${{ env.PACKAGE_NAME }} run_tests=false --cmake-extra=-DBUILD_TESTING=ON
     - name: Run and check AppVerifier
       run: |
-        # Work around CMake 4.5.0 ctest cold-start regression on the windows-2025-vs2026
-        # image (>=20261116.315); builder.pyz already downloaded 4.5.1 during Build.
-        $env:PATH = "C:\Users\runneradmin\.builder\cmake-4.5.1\cmake-4.5.1-windows-x86_64\bin;$env:PATH"
         python .\aws-c-s3\build\deps\aws-c-common\scripts\appverifier_ctest.py --build_directory .\aws-c-s3\build\aws-c-s3
 
   macos:
