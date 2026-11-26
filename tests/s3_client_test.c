@@ -42,6 +42,14 @@ static void s_reset_upload_part_timeout(struct aws_s3_client *client, uint32_t n
         &client->synced_data.upload_part_timeout, client->allocator, num_warmup_samples);
 }
 
+/**
+ * Gets the timeout value of the UploadPart controller. While the hedge budget is empty, the requests have no timeout,
+ * but the timeout value does not change. Use this function when a test has more than 10 timeouts in sequence.
+ */
+static size_t s_upload_part_timeout_value_ms(struct aws_s3_client *client) {
+    return client->synced_data.upload_part_timeout.timeout_ms;
+}
+
 static int s_starts_upload_retry(struct aws_s3_client *client, struct aws_s3_request *mock_request) {
     uint64_t average_time_ns = aws_timestamp_convert(
         300, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 0.3 Secs, average for upload a part */
@@ -225,18 +233,18 @@ TEST_CASE(client_update_upload_part_timeout) {
 
         /* First failure will not change the timeout, as we use the ceiling of 1% rate */
         aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        size_t current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(1000, current_timeout_ms);
 
         /* Updated at the second timeout */
         aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(2000, current_timeout_ms);
         /* The rest of the batch failure will not affect the timeout */
         for (size_t i = 0; i < 10; i++) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
         }
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         /* still 2 secs */
         ASSERT_UINT_EQUALS(2000, current_timeout_ms);
 
@@ -249,7 +257,7 @@ TEST_CASE(client_update_upload_part_timeout) {
         for (size_t i = 0; i < 10; i++) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
         }
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         /* 3 secs now */
         ASSERT_UINT_EQUALS(3000, current_timeout_ms);
 
@@ -265,9 +273,12 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
         /* still 3 secs */
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(3000, current_timeout_ms);
         ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
+        /* The 23 timeouts emptied the hedge budget, and 10 successes do not refill 1 token. Thus, the next requests
+         * have no timeout, but the timeout value stays at 3 secs. */
+        ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->upload_timeout_ms));
     }
 
     {
@@ -279,7 +290,7 @@ TEST_CASE(client_update_upload_part_timeout) {
             /* Make two continuous timeout request with updated timeout */
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-            size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+            size_t current_timeout_ms = s_upload_part_timeout_value_ms(client);
             s_init_mock_s3_request_upload_part_timeout(
                 &mock_request, current_timeout_ms /*original_upload_timeout_ms*/, 0, 0);
         }

@@ -1,0 +1,150 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0.
+ */
+
+#include "aws/s3/private/s3_first_byte_timeout.h"
+
+#include <aws/common/clock.h>
+#include <aws/testing/aws_test_harness.h>
+
+#define TEST_CASE(NAME)                                                                                                \
+    AWS_TEST_CASE(NAME, s_test_##NAME);                                                                                \
+    static int s_test_##NAME(struct aws_allocator *allocator, void *ctx)
+
+static uint64_t s_ms_to_ns(uint64_t ms) {
+    return aws_timestamp_convert(ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+}
+
+/* Records `count` successes. Each success has a request time and a response to first byte time of `time_ms`. */
+static void s_record_successes(
+    struct aws_s3_first_byte_timeout_controller *controller,
+    size_t count,
+    uint64_t time_ms) {
+    for (size_t i = 0; i < count; ++i) {
+        aws_s3_first_byte_timeout_controller_record_success(controller, s_ms_to_ns(time_ms), s_ms_to_ns(time_ms));
+    }
+}
+
+/* Completes the warmup with fast requests, so that the timeout starts at the 1 s minimum. */
+static int s_init_warm_controller(
+    struct aws_s3_first_byte_timeout_controller *controller,
+    struct aws_allocator *allocator) {
+    aws_s3_first_byte_timeout_controller_init(controller, allocator, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES);
+    s_record_successes(controller, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES, 100);
+    ASSERT_UINT_EQUALS(1000, aws_s3_first_byte_timeout_controller_get_timeout_ms(controller));
+    ASSERT_UINT_EQUALS(AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS, controller->budget_centitokens);
+    return AWS_OP_SUCCESS;
+}
+
+/* During the warmup and after a stop, the controller gives no timeout, also with a full budget. */
+TEST_CASE(first_byte_timeout_controller_no_timeout_during_warmup_and_after_stop) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+    aws_s3_first_byte_timeout_controller_init(&controller, allocator, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES);
+
+    s_record_successes(&controller, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES - 1, 100);
+    ASSERT_UINT_EQUALS(0, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    s_record_successes(&controller, 1, 100);
+    ASSERT_UINT_EQUALS(1000, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+
+    /* A warmup mean of 5 s or more stops the timeout. */
+    aws_s3_first_byte_timeout_controller_init(&controller, allocator, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES);
+    s_record_successes(&controller, AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES, 5000);
+    ASSERT_TRUE(controller.stop_timeout);
+    ASSERT_UINT_EQUALS(AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS, controller.budget_centitokens);
+    ASSERT_UINT_EQUALS(0, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}
+
+/**
+ * Many requests that use the same timeout can time out at the same time. The timeout rate increases the timeout value
+ * one time for the burst. The budget stops the burst after 10 timeouts, and successes refill it.
+ */
+TEST_CASE(first_byte_timeout_controller_budget_limits_a_burst_of_timeouts) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+    ASSERT_SUCCESS(s_init_warm_controller(&controller, allocator));
+
+    for (size_t i = 0; i < 10; ++i) {
+        /* All requests of the burst used the 1 s timeout. */
+        ASSERT_TRUE(aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller) > 0);
+        aws_s3_first_byte_timeout_controller_record_timeout(&controller, 1000);
+    }
+
+    ASSERT_UINT_EQUALS(0, controller.budget_centitokens);
+    ASSERT_UINT_EQUALS(0, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    /* The empty budget does not change the timeout value. */
+    ASSERT_FALSE(controller.stop_timeout);
+    ASSERT_UINT_EQUALS(2000, controller.timeout_ms);
+
+    /* 1 token needs 20 successes of 0.05 tokens. */
+    s_record_successes(&controller, 19, 100);
+    ASSERT_UINT_EQUALS(0, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    s_record_successes(&controller, 1, 100);
+    size_t timeout_ms = aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller);
+    ASSERT_UINT_EQUALS(controller.timeout_ms, timeout_ms);
+    ASSERT_TRUE(timeout_ms > 1000);
+    ASSERT_TRUE(timeout_ms < 2000);
+
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}
+
+/* The budget is full at the start, and successes do not fill it more than its capacity. */
+TEST_CASE(first_byte_timeout_controller_budget_has_a_capacity) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+    ASSERT_SUCCESS(s_init_warm_controller(&controller, allocator));
+
+    s_record_successes(&controller, 1000, 100);
+    ASSERT_UINT_EQUALS(AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS, controller.budget_centitokens);
+
+    aws_s3_first_byte_timeout_controller_record_timeout(&controller, 0);
+    ASSERT_UINT_EQUALS(AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS - 100, controller.budget_centitokens);
+
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}
+
+/* The mean of the first 64 samples is the arithmetic mean. Thus, one slow first sample does not have a large weight. */
+TEST_CASE(first_byte_timeout_controller_mean_starts_as_arithmetic_mean) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+    ASSERT_SUCCESS(s_init_warm_controller(&controller, allocator));
+
+    s_record_successes(&controller, 1, 8000);
+    s_record_successes(&controller, 63, 50);
+
+    /* (8000 + 63 * 50) / 64 = 174.2 ms. An EWMA with alpha 1/64 from the first sample would give approximately 3 s. */
+    ASSERT_TRUE(controller.response_to_first_byte_time.mean_ns > s_ms_to_ns(174));
+    ASSERT_TRUE(controller.response_to_first_byte_time.mean_ns < s_ms_to_ns(175));
+
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}
+
+/* After 64 samples, the mean ages. Thus, the timeout follows a lasting change of the network. */
+TEST_CASE(first_byte_timeout_controller_mean_ages) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+    ASSERT_SUCCESS(s_init_warm_controller(&controller, allocator));
+
+    s_record_successes(&controller, 1000, 100);
+    s_record_successes(&controller, 1000, 1000);
+
+    /* A mean of all samples would be 550 ms. */
+    ASSERT_TRUE(controller.response_to_first_byte_time.mean_ns > s_ms_to_ns(999));
+    ASSERT_TRUE(controller.response_to_first_byte_time.mean_ns <= s_ms_to_ns(1000));
+
+    /* The timeout value moves toward the new mean plus 700 ms. With the mean of all samples (775 ms), the timeout value
+     * would stay below 1475 ms. */
+    s_record_successes(&controller, 2000, 1000);
+    ASSERT_TRUE(controller.timeout_ms > 1500);
+    ASSERT_TRUE(controller.timeout_ms <= 1700);
+
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}

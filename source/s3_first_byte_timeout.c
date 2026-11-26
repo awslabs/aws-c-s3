@@ -14,11 +14,27 @@ static uint64_t s_timeout_threshold_ns = 5000000000; /* 5 Secs */
 const size_t g_expect_timeout_offset_ms =
     700; /* 0.7 Secs. From experiments on c5n.18xlarge machine for 30 GiB upload, it gave us best performance. */
 
+/* The mean of the response to first byte time is an EWMA with alpha 1/64. */
+static const uint64_t s_mean_ewma_divisor = 64;
+
+/* The hedge budget, in 1/100 tokens. The constants are the same as in the hedging design of the AWS S3 Transfer
+ * Manager for Rust. */
+static const uint32_t s_budget_reward_centitokens = 5; /* 0.05 tokens */
+static const uint32_t s_budget_cost_centitokens = 100; /* 1 token */
+
 static int s_compare_uint64_min_heap(const void *a, const void *b) {
     uint64_t arg1 = *(const uint64_t *)a;
     uint64_t arg2 = *(const uint64_t *)b;
     /* Use a min-heap to get the P90, which will be the min of the largest 10% of data. */
     return arg1 > arg2;
+}
+
+/* Moves `value` toward `target` by 1/`divisor` of the difference. */
+static uint64_t s_move_toward(uint64_t value, uint64_t target, uint64_t divisor) {
+    if (target >= value) {
+        return value + (target - value) / divisor;
+    }
+    return value - (value - target) / divisor;
 }
 
 void aws_s3_first_byte_timeout_controller_init(
@@ -32,6 +48,7 @@ void aws_s3_first_byte_timeout_controller_init(
     AWS_ZERO_STRUCT(*controller);
     controller->allocator = allocator;
     controller->num_warmup_samples = num_warmup_samples;
+    controller->budget_centitokens = AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS;
 }
 
 void aws_s3_first_byte_timeout_controller_clean_up(struct aws_s3_first_byte_timeout_controller *controller) {
@@ -118,6 +135,10 @@ void aws_s3_first_byte_timeout_controller_record_success(
     uint64_t response_to_first_byte_time_ns) {
     AWS_PRECONDITION(controller);
 
+    controller->budget_centitokens = aws_min_u32(
+        controller->budget_centitokens + s_budget_reward_centitokens,
+        AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS);
+
     if (controller->stop_timeout) {
         /* Timeout was disabled */
         return;
@@ -137,18 +158,20 @@ void aws_s3_first_byte_timeout_controller_record_success(
     /* Starts to update timeout on case of succeed */
     controller->timeout_rate_tracking.num_completed =
         aws_add_u64_saturating(controller->timeout_rate_tracking.num_completed, 1);
-    controller->response_to_first_byte_time.sum_ns =
-        aws_add_u64_saturating(controller->response_to_first_byte_time.sum_ns, response_to_first_byte_time_ns);
     controller->response_to_first_byte_time.num_samples =
         aws_add_u64_saturating(controller->response_to_first_byte_time.num_samples, 1);
+    /* Until there are s_mean_ewma_divisor samples, the divisor is the number of samples. This gives the arithmetic mean
+     * of the first samples, so that the first sample does not have a too large weight. */
+    controller->response_to_first_byte_time.mean_ns = s_move_toward(
+        controller->response_to_first_byte_time.mean_ns,
+        response_to_first_byte_time_ns,
+        aws_min_u64(controller->response_to_first_byte_time.num_samples, s_mean_ewma_divisor));
 
     uint64_t current_timeout_ns =
         aws_timestamp_convert(controller->timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
     uint64_t expect_timeout_offset_ns =
         aws_timestamp_convert(g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
-    uint64_t average_response_to_first_byte_time_ns =
-        controller->response_to_first_byte_time.sum_ns / controller->response_to_first_byte_time.num_samples;
-    uint64_t expected_timeout_ns = average_response_to_first_byte_time_ns + expect_timeout_offset_ns;
+    uint64_t expected_timeout_ns = controller->response_to_first_byte_time.mean_ns + expect_timeout_offset_ns;
     double timeout_ns_double = (double)current_timeout_ns * 0.99 + (double)expected_timeout_ns * 0.01;
     s_apply_timeout(controller, (uint64_t)timeout_ns_double);
 }
@@ -157,6 +180,10 @@ bool aws_s3_first_byte_timeout_controller_record_timeout(
     struct aws_s3_first_byte_timeout_controller *controller,
     size_t request_timeout_ms) {
     AWS_PRECONDITION(controller);
+
+    controller->budget_centitokens = controller->budget_centitokens >= s_budget_cost_centitokens
+                                         ? controller->budget_centitokens - s_budget_cost_centitokens
+                                         : 0;
 
     if (controller->stop_timeout) {
         /* Timeout was disabled */
@@ -202,4 +229,14 @@ bool aws_s3_first_byte_timeout_controller_record_timeout(
 
     s_apply_timeout(controller, updated_timeout_ns);
     return rate_too_high;
+}
+
+size_t aws_s3_first_byte_timeout_controller_get_timeout_ms(
+    const struct aws_s3_first_byte_timeout_controller *controller) {
+    AWS_PRECONDITION(controller);
+
+    if (controller->stop_timeout || controller->budget_centitokens < s_budget_cost_centitokens) {
+        return 0;
+    }
+    return controller->timeout_ms;
 }

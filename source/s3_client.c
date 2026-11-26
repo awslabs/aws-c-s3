@@ -3754,8 +3754,22 @@ void aws_s3_client_update_upload_part_timeout(
             break;
     }
 
-    /* Apply the updated timeout */
-    aws_atomic_store_int(&client->upload_timeout_ms, controller->timeout_ms);
+    /* Apply the updated timeout. It is 0 while the hedge budget is empty. */
+    size_t previous_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+    size_t timeout_ms = aws_s3_first_byte_timeout_controller_get_timeout_ms(controller);
+    aws_atomic_store_int(&client->upload_timeout_ms, timeout_ms);
+    if (previous_timeout_ms > 0 && timeout_ms == 0 && !controller->stop_timeout) {
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT,
+            "id=%p Client upload part timeout paused, because the hedge budget is empty. Successes refill the budget.",
+            (void *)client);
+    } else if (
+        previous_timeout_ms == 0 && timeout_ms > 0 &&
+        controller->num_successful_requests > controller->num_warmup_samples) {
+        /* The first timeout after the warmup is not a resume. */
+        AWS_LOGF_DEBUG(
+            AWS_LS_S3_CLIENT, "id=%p Client upload part timeout resumed with %zu ms.", (void *)client, timeout_ms);
+    }
 
 unlock:
     aws_s3_client_unlock_synced_data(client);

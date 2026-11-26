@@ -15,6 +15,9 @@ AWS_PUSH_SANE_WARNING_LEVEL
 /* The minimum number of successful requests that the controller collects before it sets a timeout. */
 #define AWS_S3_FIRST_BYTE_TIMEOUT_MIN_WARMUP_SAMPLES 10
 
+/* The capacity of the hedge budget, in 1/100 tokens: 10 tokens. */
+#define AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS 1000
+
 /**
  * The adaptive first-byte timeout for one type of request.
  *
@@ -39,8 +42,10 @@ AWS_PUSH_SANE_WARNING_LEVEL
  *      how long the request takes. We decide if it's worth to set a timeout value or not. (If the average of request
  *      takes more than 5 secs or not).
  * 2. If it is worth to retry, start with a timeout value from max(1 sec, P90 of the initial samples).
- * 3. If a request finishes successfully, use the average response_to_first_byte_time + g_expect_timeout_offset_ms as
+ * 3. If a request finishes successfully, use the mean response_to_first_byte_time + g_expect_timeout_offset_ms as
  *      our expected timeout value. (TODO: The real expected timeout value should be a P99 of all the requests.)
+ *      The mean is the arithmetic mean of the first 64 samples. After that, each sample moves the mean by 1/64 of the
+ *      difference (EWMA). Thus, the mean follows a change of the network on a client that runs for a long time.
  *  3.1 Adjust the current timeout value against the expected timeout value, via 0.99 * <current timeout> + 0.01 *
  *      <expected timeout> to get closer to the expected timeout value.
  * 4. If request had timed out. We check the timeout rate.
@@ -49,9 +54,14 @@ AWS_PUSH_SANE_WARNING_LEVEL
  *  4.2 If timeout rate is larger than 1%, we increase the timeout value by 1 secs (If needed). And clear the rate
  *      to get the exact rate with new timeout value.
  *  4.3 Once the timeout value is larger than 5 secs, we stop the process.
+ * 5. The hedge budget limits the number of timeouts. The budget starts with 10 tokens. A success adds 0.05 tokens,
+ *      and a timeout removes 1 token. The controller gives a timeout only while 1 token or more is available. Thus,
+ *      timeouts stay below approximately 4.8% (0.05 / 1.05) of the requests, also during a broad slowdown. Successes,
+ *      not time, refill the budget. The budget does not change the timeout value of steps 3 and 4.
  *
  * The controller does not use the client. The caller gives it the results of the requests, and sends the next
- * requests with `timeout_ms`. The controller is not thread safe. The caller must hold a lock.
+ * requests with the value of `aws_s3_first_byte_timeout_controller_get_timeout_ms()`. The controller is not thread
+ * safe. The caller must hold a lock.
  */
 struct aws_s3_first_byte_timeout_controller {
     struct aws_allocator *allocator;
@@ -61,8 +71,14 @@ struct aws_s3_first_byte_timeout_controller {
 
     bool stop_timeout;
 
-    /* The first-byte timeout in ms for the next request. Zero if the next request has no timeout. */
+    /**
+     * The first-byte timeout value in ms. Zero during the warmup and after a stop. An empty hedge budget pauses the
+     * timeout, but does not change this value.
+     */
     size_t timeout_ms;
+
+    /* The hedge budget, in 1/100 tokens. Integer units make the budget arithmetic exact. */
+    uint32_t budget_centitokens;
 
     /* Total number of successful requests */
     uint64_t num_successful_requests;
@@ -83,7 +99,7 @@ struct aws_s3_first_byte_timeout_controller {
 
     /* Stats for the response to first byte time of tracked succeed requests */
     struct {
-        uint64_t sum_ns;
+        uint64_t mean_ns;
         uint64_t num_samples;
     } response_to_first_byte_time;
 };
@@ -107,9 +123,9 @@ AWS_S3_API
 void aws_s3_first_byte_timeout_controller_clean_up(struct aws_s3_first_byte_timeout_controller *controller);
 
 /**
- * Records a successful request. The warmup uses `request_time_ns` to decide if a timeout is necessary, and to set the
- * first timeout. After the warmup, the controller moves the timeout toward the mean of `response_to_first_byte_time_ns`
- * plus g_expect_timeout_offset_ms.
+ * Records a successful request, and adds 0.05 tokens to the hedge budget. The warmup uses `request_time_ns` to decide
+ * if a timeout is necessary, and to set the first timeout. After the warmup, the controller moves the timeout toward
+ * the mean of `response_to_first_byte_time_ns` plus g_expect_timeout_offset_ms.
  */
 AWS_S3_API
 void aws_s3_first_byte_timeout_controller_record_success(
@@ -118,13 +134,21 @@ void aws_s3_first_byte_timeout_controller_record_success(
     uint64_t response_to_first_byte_time_ns);
 
 /**
- * Records a request that reached its first-byte timeout. `request_timeout_ms` is the timeout that the request used.
- * Returns true if the timeout rate is more than 1%.
+ * Records a request that reached its first-byte timeout, and removes 1 token from the hedge budget.
+ * `request_timeout_ms` is the timeout that the request used. Returns true if the timeout rate is more than 1%.
  */
 AWS_S3_API
 bool aws_s3_first_byte_timeout_controller_record_timeout(
     struct aws_s3_first_byte_timeout_controller *controller,
     size_t request_timeout_ms);
+
+/**
+ * Returns the first-byte timeout in ms for the next request. Returns 0 if the next request must have no timeout:
+ * during the warmup, after a stop, or while the hedge budget has less than 1 token.
+ */
+AWS_S3_API
+size_t aws_s3_first_byte_timeout_controller_get_timeout_ms(
+    const struct aws_s3_first_byte_timeout_controller *controller);
 
 AWS_EXTERN_C_END
 AWS_POP_SANE_WARNING_LEVEL
