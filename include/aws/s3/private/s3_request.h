@@ -266,13 +266,13 @@ struct aws_s3_request {
      */
     uint32_t part_number;
 
-    /* The upload_timeout used. Zero, if the request is not a upload part */
-    size_t upload_timeout_ms;
+    /**
+     * The first-byte timeout of the current attempt, in ms. Zero if the attempt has no first-byte timeout. If the
+     * attempt reaches the timeout, the client hedges the request.
+     */
+    size_t first_byte_timeout_ms;
 
-    /* The first-byte deadline that GET hedging armed for the current attempt. Zero if the attempt has no deadline. */
-    size_t hedge_timeout_ms;
-
-    /* True after a hedge of this request. The later attempts of this request have no first-byte deadline. */
+    /* True after a hedge of this request. The later attempts of this request have no first-byte timeout. */
     bool hedge_fired;
 
     /* Number of times aws_s3_meta_request_prepare has been called for a request. During the first call to the virtual

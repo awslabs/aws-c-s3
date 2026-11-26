@@ -608,6 +608,24 @@ void aws_s3_client_update_upload_part_timeout(
     int finished_error_code);
 
 /**
+ * True if the UploadPart first-byte timeout applies to the request: the request is an UploadPart request, the meta
+ * request is not for S3 Express, and retries are on.
+ */
+AWS_S3_API
+bool aws_s3_client_upload_part_timeout_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request);
+
+/**
+ * True if the client can give the request a first-byte timeout, and hedge the request if it reaches the timeout. This
+ * is true for the UploadPart timeout and for GET hedging.
+ */
+AWS_S3_API
+bool aws_s3_client_first_byte_timeout_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request);
+
+/**
  * True if GET hedging applies to the request: GET hedging is on, and the request is a GetObject request of an
  * AWS_S3_META_REQUEST_TYPE_GET_OBJECT meta request.
  */

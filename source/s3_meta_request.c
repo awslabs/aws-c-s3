@@ -1916,19 +1916,20 @@ void aws_s3_meta_request_send_request(struct aws_s3_meta_request *meta_request, 
         options.on_metrics = s_s3_meta_request_stream_metrics;
     }
     options.on_complete = s_s3_meta_request_stream_complete;
-    request->hedge_timeout_ms = 0;
-    if (request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART && !meta_request->is_express &&
-        !client->disable_retries) {
-        /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause server
-         * receive two same part and result in confusing during complete MPU with etag doesn't match.
-         * Disable the first byte timeout for s3 express.  */
-        options.response_first_byte_timeout_ms = aws_atomic_load_int(&meta_request->client->upload_timeout_ms);
-        request->upload_timeout_ms = (size_t)options.response_first_byte_timeout_ms;
-    } else if (aws_s3_client_get_object_hedging_applies(meta_request, request) && !request->hedge_fired) {
-        /* The value is 0 if the client cannot afford a hedge now. */
-        request->hedge_timeout_ms = aws_s3_client_get_object_hedging_timeout_ms(client);
-        options.response_first_byte_timeout_ms = request->hedge_timeout_ms;
+    request->first_byte_timeout_ms = 0;
+    /* The client hedges a request one time at most. Thus, the attempts after a hedge have no first-byte timeout. */
+    if (!request->hedge_fired) {
+        if (aws_s3_client_upload_part_timeout_applies(meta_request, request)) {
+            /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause
+             * server receive two same part and result in confusing during complete MPU with etag doesn't match.
+             * Disable the first byte timeout for s3 express.  */
+            request->first_byte_timeout_ms = aws_atomic_load_int(&meta_request->client->upload_timeout_ms);
+        } else if (aws_s3_client_get_object_hedging_applies(meta_request, request)) {
+            /* The value is 0 if the client cannot afford a hedge now. */
+            request->first_byte_timeout_ms = aws_s3_client_get_object_hedging_timeout_ms(client);
+        }
     }
+    options.response_first_byte_timeout_ms = request->first_byte_timeout_ms;
     if (request->send_data.metrics) {
         request->send_data.metrics->crt_info_metrics.first_byte_timeout_ms = options.response_first_byte_timeout_ms;
     }
@@ -2498,10 +2499,10 @@ static void s_s3_meta_request_send_request_finish(
     struct aws_s3_meta_request_vtable *vtable = meta_request->vtable;
     AWS_PRECONDITION(vtable);
 
+    if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && request->first_byte_timeout_ms > 0) {
+        request->hedge_fired = true;
+    }
     if (aws_s3_client_get_object_hedging_applies(meta_request, request)) {
-        if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && request->hedge_timeout_ms > 0) {
-            request->hedge_fired = true;
-        }
         aws_s3_client_update_get_object_hedging(meta_request->client, request, error_code);
     }
 

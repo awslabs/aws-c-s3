@@ -32,8 +32,8 @@ MOCK_REQUEST_ID_HEADER = "x-mock-request-id"
 # per run of that test, so growth over the server's lifetime is negligible.
 CHECKSUM_RETRY_ATTEMPTS = {}
 
-# Attempts seen per part on the /get_object_hedging_slow_part* routes, keyed by MOCK_REQUEST_ID_HEADER and
-# the part offset. Never pruned, for the same reason as CHECKSUM_RETRY_ATTEMPTS.
+# Attempts seen per part on the /get_object_hedging_slow_part* and /upload_part_hedging_slow_part* routes, keyed by
+# MOCK_REQUEST_ID_HEADER and the part. Never pruned, for the same reason as CHECKSUM_RETRY_ATTEMPTS.
 HEDGING_ATTEMPTS = {}
 
 
@@ -702,6 +702,22 @@ def handle_upload_part(request, parsed_path):
         part_number = query.get("partNumber", ["0"])[0]
         if part_number == "3":
             return ResponseConfig("/upload_part_error", request=request)
+        return ResponseConfig("/default", request=request)
+    if parsed_path.path in ("/upload_part_hedging_slow_part", "/upload_part_hedging_slow_part_twice"):
+        # Multipart upload where part 2 answers its first attempt late, so that the client hedges it. The "_twice"
+        # route also answers the second attempt late, to show that the client hedges a part only one time.
+        request_id = get_request_header_value(request, MOCK_REQUEST_ID_HEADER)
+        if request_id is None:
+            raise ValueError(
+                f"{parsed_path.path} needs the {MOCK_REQUEST_ID_HEADER} header to count attempts")
+        query = parse_qs(parsed_path.query)
+        part_number = query.get("partNumber", ["0"])[0]
+        attempts_key = (request_id, "partNumber", part_number)
+        attempts = HEDGING_ATTEMPTS.get(attempts_key, 0) + 1
+        HEDGING_ATTEMPTS[attempts_key] = attempts
+        slow_attempts = 2 if parsed_path.path.endswith("_twice") else 1
+        if part_number == "2" and attempts <= slow_attempts:
+            return ResponseConfig("/upload_part_hedging_slow_part", request=request)
         return ResponseConfig("/default", request=request)
     return ResponseConfig(parsed_path.path, request=request)
 

@@ -294,7 +294,7 @@ static void s_init_mock_get_request(
 
     mock_request->request_type = AWS_S3_REQUEST_TYPE_GET_OBJECT;
     mock_request->send_data.response_status = response_status;
-    mock_request->hedge_timeout_ms = hedge_timeout_ms;
+    mock_request->first_byte_timeout_ms = hedge_timeout_ms;
     struct aws_s3_request_metrics *metrics = mock_request->send_data.metrics;
     metrics->time_metrics.send_end_timestamp_ns = (int64_t)s_ms_to_ns(1000);
     metrics->time_metrics.receive_start_timestamp_ns = (int64_t)s_ms_to_ns(1000 + ttfb_ms);
@@ -410,6 +410,7 @@ static void s_warm_up_get_object_hedging(struct aws_s3_client *client) {
 }
 
 struct hedging_attempt_info {
+    enum aws_s3_request_type request_type;
     uint32_t part_number;
     uint32_t retry_attempt;
     int error_code;
@@ -429,6 +430,7 @@ static int s_get_attempts(
     for (size_t i = 0; i < num_attempts && i < max_attempts; ++i) {
         struct aws_s3_request_metrics *metrics = NULL;
         aws_array_list_get_at(&results->synced_data.metrics, (void **)&metrics, i);
+        aws_s3_request_metrics_get_request_type(metrics, &out_attempts[i].request_type);
         aws_s3_request_metrics_get_part_number(metrics, &out_attempts[i].part_number);
         out_attempts[i].retry_attempt = aws_s3_request_metrics_get_retry_attempt(metrics);
         out_attempts[i].error_code = aws_s3_request_metrics_get_error_code(metrics);
@@ -441,11 +443,15 @@ static int s_get_attempts(
     return AWS_OP_SUCCESS;
 }
 
-/* Checks the attempt metrics and counts the attempts that reached the first-byte timeout. Only part 2 can reach it. The
- * first attempt of each part has the hedging deadline. The attempts after a hedge have no deadline. */
+/**
+ * Checks the metrics of the attempts of `hedged_request_type`, and counts the attempts that reached the first-byte
+ * timeout. Only part 2 can reach it. The first attempt of each part has the first-byte timeout. The attempts after a
+ * hedge have no first-byte timeout. The other request types, for example CreateMultipartUpload, have no timeout.
+ */
 static int s_check_attempts(
     struct aws_s3_tester *tester,
     struct aws_s3_meta_request_test_results *results,
+    enum aws_s3_request_type hedged_request_type,
     size_t *out_num_first_byte_timeouts) {
 
     struct hedging_attempt_info attempts[16];
@@ -453,8 +459,14 @@ static int s_check_attempts(
     ASSERT_SUCCESS(s_get_attempts(tester, results, attempts, AWS_ARRAY_SIZE(attempts), &num_attempts));
 
     *out_num_first_byte_timeouts = 0;
+    size_t num_hedged_type_attempts = 0;
     for (size_t i = 0; i < num_attempts; ++i) {
         const struct hedging_attempt_info *attempt = &attempts[i];
+        if (attempt->request_type != hedged_request_type) {
+            ASSERT_UINT_EQUALS(0, attempt->first_byte_timeout_ms);
+            continue;
+        }
+        ++num_hedged_type_attempts;
         if (attempt->error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT) {
             ASSERT_UINT_EQUALS(2, attempt->part_number);
             ++*out_num_first_byte_timeouts;
@@ -467,6 +479,7 @@ static int s_check_attempts(
             ASSERT_UINT_EQUALS(0, attempt->first_byte_timeout_ms);
         }
     }
+    ASSERT_TRUE(num_hedged_type_attempts > 0);
     return AWS_OP_SUCCESS;
 }
 
@@ -516,7 +529,8 @@ static int s_get_object_with_hedging(
     ASSERT_UINT_EQUALS(262144, out_results.received_body_size);
     *out_duration_ms = aws_timestamp_convert(end_ns - start_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL);
     *out_num_hedges = (size_t)s_controller_of(client).num_hedges;
-    ASSERT_SUCCESS(s_check_attempts(&tester, &out_results, out_num_first_byte_timeouts));
+    ASSERT_SUCCESS(
+        s_check_attempts(&tester, &out_results, AWS_S3_REQUEST_TYPE_GET_OBJECT, out_num_first_byte_timeouts));
 
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
@@ -555,6 +569,106 @@ TEST_CASE(get_object_hedging_once_per_part_mock_server) {
     ASSERT_UINT_EQUALS(1, num_hedges);
     ASSERT_UINT_EQUALS(1, num_first_byte_timeouts);
     /* A second hedge would end the download after approximately 2 s. */
+    ASSERT_TRUE(duration_ms >= s_min_hedging_deadline_ms + s_mock_server_delay_ms);
+    return AWS_OP_SUCCESS;
+}
+
+/* Completes the UploadPart warmup with fast requests, so that the timeout starts at the 1 s minimum. */
+static void s_warm_up_upload_part_timeout(struct aws_s3_client *client) {
+    struct aws_s3_request mock_request;
+    struct aws_s3_request_metrics metrics;
+    AWS_ZERO_STRUCT(mock_request);
+    AWS_ZERO_STRUCT(metrics);
+    mock_request.request_type = AWS_S3_REQUEST_TYPE_UPLOAD_PART;
+    mock_request.send_data.metrics = &metrics;
+    metrics.time_metrics.send_start_timestamp_ns = 0;
+    metrics.time_metrics.send_end_timestamp_ns = (int64_t)s_ms_to_ns(5);
+    metrics.time_metrics.receive_start_timestamp_ns = (int64_t)s_ms_to_ns(10);
+    metrics.time_metrics.receive_end_timestamp_ns = (int64_t)s_ms_to_ns(10);
+    for (size_t i = 0; i < client->synced_data.upload_part_timeout.num_warmup_samples; ++i) {
+        aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
+    }
+}
+
+static int s_put_object_with_hedging(
+    struct aws_allocator *allocator,
+    const char *object_path,
+    uint64_t *out_duration_ms,
+    size_t *out_num_first_byte_timeouts) {
+
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(5),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        /* A retry through the retry strategy would wait 10 s. A hedge must not wait. */
+        .backoff_scale_factor_ms = 10000,
+        .jitter_mode = AWS_EXPONENTIAL_BACKOFF_JITTER_NONE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    s_warm_up_upload_part_timeout(client);
+    ASSERT_UINT_EQUALS(s_hedging_deadline_ms, aws_atomic_load_int(&client->upload_timeout_ms));
+
+    struct aws_s3_tester_meta_request_options put_options = {
+        .allocator = allocator,
+        .meta_request_type = AWS_S3_META_REQUEST_TYPE_PUT_OBJECT,
+        .client = client,
+        .put_options =
+            {
+                .object_size_mb = 20, /* 4 parts of 5 MiB. */
+                .object_path_override = aws_byte_cursor_from_c_str(object_path),
+            },
+        .mock_server = true,
+        .validate_type = AWS_S3_TESTER_VALIDATE_TYPE_EXPECT_SUCCESS,
+    };
+    struct aws_s3_meta_request_test_results out_results;
+    aws_s3_meta_request_test_results_init(&out_results, allocator);
+
+    uint64_t start_ns = 0;
+    aws_high_res_clock_get_ticks(&start_ns);
+    ASSERT_SUCCESS(aws_s3_tester_send_meta_request_with_options(&tester, &put_options, &out_results));
+    uint64_t end_ns = 0;
+    aws_high_res_clock_get_ticks(&end_ns);
+
+    ASSERT_UINT_EQUALS(AWS_ERROR_SUCCESS, out_results.finished_error_code);
+    *out_duration_ms = aws_timestamp_convert(end_ns - start_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL);
+    ASSERT_SUCCESS(
+        s_check_attempts(&tester, &out_results, AWS_S3_REQUEST_TYPE_UPLOAD_PART, out_num_first_byte_timeouts));
+
+    aws_s3_meta_request_test_results_clean_up(&out_results);
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/* Part 2 answers its first attempt after 3 s. The client hedges it after 1 s, and the new attempt gets a fast
+ * answer. */
+TEST_CASE(upload_part_hedging_mock_server) {
+    (void)ctx;
+    uint64_t duration_ms = 0;
+    size_t num_first_byte_timeouts = 0;
+    ASSERT_SUCCESS(
+        s_put_object_with_hedging(allocator, "/upload_part_hedging_slow_part", &duration_ms, &num_first_byte_timeouts));
+
+    ASSERT_UINT_EQUALS(1, num_first_byte_timeouts);
+    ASSERT_TRUE(duration_ms >= s_min_hedging_deadline_ms);
+    /* Shorter than the delay of the slow answer and than the 10 s backoff of the retry strategy. */
+    ASSERT_TRUE(duration_ms < s_mock_server_delay_ms);
+    return AWS_OP_SUCCESS;
+}
+
+/* Part 2 answers its first two attempts after 3 s. The client hedges the first attempt only, and waits for the slow
+ * answer to the second attempt. */
+TEST_CASE(upload_part_hedging_once_per_part_mock_server) {
+    (void)ctx;
+    uint64_t duration_ms = 0;
+    size_t num_first_byte_timeouts = 0;
+    ASSERT_SUCCESS(s_put_object_with_hedging(
+        allocator, "/upload_part_hedging_slow_part_twice", &duration_ms, &num_first_byte_timeouts));
+
+    ASSERT_UINT_EQUALS(1, num_first_byte_timeouts);
+    /* A second hedge would end the upload after approximately 2 s. */
     ASSERT_TRUE(duration_ms >= s_min_hedging_deadline_ms + s_mock_server_delay_ms);
     return AWS_OP_SUCCESS;
 }

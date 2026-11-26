@@ -3344,15 +3344,15 @@ void aws_s3_client_notify_connection_finished(
 
         aws_high_res_clock_get_ticks((uint64_t *)&request->retry_start_timestamp_ns);
 
-        if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && request->hedge_timeout_ms > 0) {
-            /* A GET hedge does not go through the retry strategy, so it waits for no backoff and uses no quota. */
+        if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && request->first_byte_timeout_ms > 0) {
+            /* A hedge does not go through the retry strategy, so it waits for no backoff and uses no quota. */
             AWS_LOGF_DEBUG(
                 AWS_LS_S3_CLIENT,
                 "id=%p Client hedging request %p for meta request %p after no response for %zu ms.",
                 (void *)client,
                 (void *)request,
                 (void *)meta_request,
-                request->hedge_timeout_ms);
+                request->first_byte_timeout_ms);
             s_s3_client_schedule_hedge(client, connection);
             return;
         }
@@ -3740,14 +3740,14 @@ void aws_s3_client_update_upload_part_timeout(
         }
         case AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT:
             if (aws_s3_first_byte_timeout_controller_record_timeout(
-                    controller, finished_upload_part_request->upload_timeout_ms)) {
+                    controller, finished_upload_part_request->first_byte_timeout_ms)) {
                 AWS_LOGF_WARN(
                     AWS_LS_S3_CLIENT,
                     "id=%p Client upload part timeout rate is larger than expected, current timeout is %zu, bump it "
                     "up. Request original timeout is: %zu",
                     (void *)client,
                     current_timeout_ms,
-                    finished_upload_part_request->upload_timeout_ms);
+                    finished_upload_part_request->first_byte_timeout_ms);
             }
             break;
         default:
@@ -3775,6 +3775,15 @@ unlock:
     aws_s3_client_unlock_synced_data(client);
 }
 
+bool aws_s3_client_upload_part_timeout_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request) {
+    AWS_PRECONDITION(meta_request);
+    AWS_PRECONDITION(request);
+    return request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART && !meta_request->is_express &&
+           !meta_request->client->disable_retries;
+}
+
 bool aws_s3_client_get_object_hedging_applies(
     const struct aws_s3_meta_request *meta_request,
     const struct aws_s3_request *request) {
@@ -3783,6 +3792,13 @@ bool aws_s3_client_get_object_hedging_applies(
     return meta_request->client->get_object_hedging_enabled &&
            meta_request->type == AWS_S3_META_REQUEST_TYPE_GET_OBJECT &&
            request->request_type == AWS_S3_REQUEST_TYPE_GET_OBJECT;
+}
+
+bool aws_s3_client_first_byte_timeout_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request) {
+    return aws_s3_client_upload_part_timeout_applies(meta_request, request) ||
+           aws_s3_client_get_object_hedging_applies(meta_request, request);
 }
 
 /* Gets the time from the end of the request send to the first byte of the response. */
@@ -3811,8 +3827,8 @@ void aws_s3_client_update_get_object_hedging(
         return;
     }
 
-    bool hedged =
-        finished_error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && finished_request->hedge_timeout_ms > 0;
+    bool hedged = finished_error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT &&
+                  finished_request->first_byte_timeout_ms > 0;
     int response_status = finished_request->send_data.response_status;
     uint64_t ttfb_ns = 0;
     bool succeeded = finished_error_code == AWS_ERROR_SUCCESS && response_status >= 200 && response_status < 300 &&

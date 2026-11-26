@@ -601,8 +601,7 @@ static void s_s3_auto_ranged_put_send_request_finish(
     struct aws_http_stream *stream,
     int error_code) {
     struct aws_s3_request *request = connection->request;
-    if (request->request_tag == AWS_S3_AUTO_RANGED_PUT_REQUEST_TAG_PART && !request->meta_request->is_express &&
-        !request->meta_request->client->disable_retries) {
+    if (aws_s3_client_upload_part_timeout_applies(request->meta_request, request)) {
         /* TODO: the single part upload may also be improved from a timeout as multipart. */
         /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause server
          * receive two same part and result in confusing during complete MPU with etag doesn't match.

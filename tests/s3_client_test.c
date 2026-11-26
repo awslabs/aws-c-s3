@@ -26,7 +26,7 @@ static void s_init_mock_s3_request_upload_part_timeout(
     uint64_t original_upload_timeout_ms,
     uint64_t request_time_ns,
     uint64_t response_to_first_byte_time_ns) {
-    mock_request->upload_timeout_ms = (size_t)original_upload_timeout_ms;
+    mock_request->first_byte_timeout_ms = (size_t)original_upload_timeout_ms;
     struct aws_s3_request_metrics *metrics = mock_request->send_data.metrics;
 
     metrics->time_metrics.send_start_timestamp_ns = 0;

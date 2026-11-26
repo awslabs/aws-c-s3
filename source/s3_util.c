@@ -613,8 +613,8 @@ int aws_s3_apply_retry_info_headers(struct aws_s3_meta_request *meta_request, st
         .max = meta_request->client->max_attempts,
     };
 
-    /* A GET hedge is one more attempt, and it does not count against the max retries. */
-    if (info.max > 0 && aws_s3_client_get_object_hedging_applies(meta_request, request)) {
+    /* A hedge is one more attempt, and it does not count against the max retries. */
+    if (info.max > 0 && aws_s3_client_first_byte_timeout_applies(meta_request, request)) {
         ++info.max;
     }
 
