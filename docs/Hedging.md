@@ -22,6 +22,8 @@ The [S3 performance guidelines](https://docs.aws.amazon.com/AmazonS3/latest/user
 
 The timeout applies to the time to first byte (TTFB): the time from the end of the request send to the first byte of the response. The client uses the `response_first_byte_timeout_ms` option of aws-c-http. Thus, the time that a request waits in the client queue, for memory, or for a connection does not count. The time to send an UploadPart body does not count. The body transfer after the first byte does not count either. The connection monitoring options (`monitoring_options`) find a body that stops.
 
+aws-c-http records the end of the send in a task after the socket write completes. A fast server can answer before this task runs. For such a response, the TTFB sample is 0.
+
 When the timeout expires, aws-c-http closes the connection with `AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT`. The client then sends the request again on a different connection.
 
 ## The adaptive timeout

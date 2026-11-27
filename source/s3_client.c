@@ -3758,6 +3758,23 @@ static void s_store_first_byte_timeout(
     }
 }
 
+/* Gets the time from the end of the request send to the first byte of the response. */
+static bool s_get_response_to_first_byte_time_ns(const struct aws_s3_request *request, uint64_t *out_ttfb_ns) {
+    const struct aws_s3_request_metrics *metrics = request->send_data.metrics;
+    if (metrics == NULL) {
+        return false;
+    }
+    int64_t send_end_ns = metrics->time_metrics.send_end_timestamp_ns;
+    int64_t receive_start_ns = metrics->time_metrics.receive_start_timestamp_ns;
+    if (send_end_ns < 0 || receive_start_ns < 0) {
+        return false;
+    }
+    /* aws-c-http records the end of the send in a task after the socket write completes. A fast server can answer
+     * before this task runs. Then the response starts before the recorded end of the send, and the time is 0. */
+    *out_ttfb_ns = receive_start_ns > send_end_ns ? (uint64_t)(receive_start_ns - send_end_ns) : 0;
+    return true;
+}
+
 /**
  * Gives the result of an UploadPart request to the UploadPart first-byte timeout controller. See
  * `struct aws_s3_first_byte_timeout_controller` for the algorithm.
@@ -3785,10 +3802,9 @@ void aws_s3_client_update_upload_part_timeout(
             /* The request time is the time from the start of the request send to the end of the response. */
             uint64_t request_time_ns =
                 metrics->time_metrics.receive_end_timestamp_ns - metrics->time_metrics.send_start_timestamp_ns;
-            /* Response to first byte is time taken for the first byte data received from the request finished
-             * sending */
-            uint64_t response_to_first_byte_time_ns =
-                metrics->time_metrics.receive_start_timestamp_ns - metrics->time_metrics.send_end_timestamp_ns;
+            /* A successful request has both timestamps. */
+            uint64_t response_to_first_byte_time_ns = 0;
+            s_get_response_to_first_byte_time_ns(finished_upload_part_request, &response_to_first_byte_time_ns);
             aws_s3_first_byte_timeout_controller_record_success(
                 controller, request_time_ns, response_to_first_byte_time_ns);
             break;
@@ -3839,21 +3855,6 @@ bool aws_s3_client_first_byte_timeout_applies(
     const struct aws_s3_request *request) {
     return aws_s3_client_upload_part_timeout_applies(meta_request, request) ||
            aws_s3_client_get_object_hedging_applies(meta_request, request);
-}
-
-/* Gets the time from the end of the request send to the first byte of the response. */
-static bool s_get_response_to_first_byte_time_ns(const struct aws_s3_request *request, uint64_t *out_ttfb_ns) {
-    const struct aws_s3_request_metrics *metrics = request->send_data.metrics;
-    if (metrics == NULL) {
-        return false;
-    }
-    int64_t send_end_ns = metrics->time_metrics.send_end_timestamp_ns;
-    int64_t receive_start_ns = metrics->time_metrics.receive_start_timestamp_ns;
-    if (send_end_ns < 0 || receive_start_ns < send_end_ns) {
-        return false;
-    }
-    *out_ttfb_ns = (uint64_t)(receive_start_ns - send_end_ns);
-    return true;
 }
 
 void aws_s3_client_update_get_object_hedging(

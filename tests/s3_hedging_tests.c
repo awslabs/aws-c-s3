@@ -212,6 +212,51 @@ TEST_CASE(client_update_get_object_hedging_does_nothing_when_off) {
     return AWS_OP_SUCCESS;
 }
 
+/**
+ * aws-c-http records the end of the request send in a task after the socket write completes. A fast server can answer
+ * before this task runs. Then the response starts before the recorded end of the send. Such a response is a success
+ * with a time to first byte of 0.
+ */
+TEST_CASE(client_update_get_object_hedging_counts_a_response_before_the_send_end) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+        .get_object_hedging = AWS_TRIBOOL_TRUE,
+    };
+    struct aws_s3_client *client = NULL;
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+
+    struct aws_s3_request mock_request;
+    struct aws_s3_request_metrics metrics;
+    AWS_ZERO_STRUCT(mock_request);
+    AWS_ZERO_STRUCT(metrics);
+    mock_request.send_data.metrics = &metrics;
+    s_init_mock_get_request(&mock_request, AWS_HTTP_STATUS_CODE_206_PARTIAL_CONTENT, 0, 0);
+    metrics.time_metrics.receive_start_timestamp_ns = metrics.time_metrics.send_end_timestamp_ns - 1;
+
+    /* The responses complete the warmup. */
+    uint32_t num_warmup_samples = s_controller_of(client).num_warmup_samples;
+    for (size_t i = 0; i < num_warmup_samples; ++i) {
+        aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
+    }
+    ASSERT_UINT_EQUALS(num_warmup_samples, s_controller_of(client).num_successful_requests);
+    ASSERT_UINT_EQUALS(1000, aws_s3_client_get_object_hedging_timeout_ms(client));
+
+    /* After the warmup, the timeout moves from 1 s toward the mean of 0 plus 700 ms. */
+    aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_SUCCESS);
+    ASSERT_UINT_EQUALS(0, s_controller_of(client).response_to_first_byte_time.mean_ns);
+    size_t timeout_ms = aws_s3_client_get_object_hedging_timeout_ms(client);
+    ASSERT_TRUE(timeout_ms < 1000);
+    ASSERT_TRUE(timeout_ms > 990);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
 /* The mock server delays part 2 of these routes by 3 s. */
 static const uint64_t s_mock_server_delay_ms = 3000;
 static const uint64_t s_hedging_timeout_ms = 1000;

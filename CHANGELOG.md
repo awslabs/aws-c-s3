@@ -11,6 +11,7 @@
   - Only the first attempt of a part has a first-byte timeout. Before, each retry had one, and a part that was slow on each attempt could use all of its retries and fail the upload.
   - After approximately 10 timeouts in sequence, the hedge budget pauses the timeout until 20 successes refill it.
   - The mean time to first byte ages (EWMA, alpha 1/64), and the first timeout is the nearest-rank p90 of all warmup samples.
+  - A response that starts before aws-c-http records the end of the request send has a time to first byte of 0. Before, the time was a very large unsigned value, and one such response could stop the timeout for the life of the client.
 
 ## [1.2.0]
 

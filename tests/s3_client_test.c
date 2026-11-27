@@ -305,6 +305,52 @@ TEST_CASE(client_update_upload_part_timeout) {
     return AWS_OP_SUCCESS;
 }
 
+/**
+ * aws-c-http records the end of the request send in a task after the socket write completes. A fast server can answer
+ * before this task runs. Then the response starts before the recorded end of the send. The time to first byte of such
+ * a request is 0, and it must not stop the timeout.
+ */
+TEST_CASE(client_update_upload_part_timeout_counts_a_response_before_the_send_end) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_request mock_request;
+    struct aws_s3_request_metrics metrics;
+    AWS_ZERO_STRUCT(mock_request);
+    AWS_ZERO_STRUCT(metrics);
+    mock_request.send_data.metrics = &metrics;
+    ASSERT_SUCCESS(s_starts_upload_retry(client, &mock_request));
+
+    s_init_mock_s3_request_upload_part_timeout(&mock_request, 1000 /*original_upload_timeout_ms*/, 0, 0);
+    int64_t send_end_ns = (int64_t)aws_timestamp_convert(300, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+    int64_t one_ms_ns = (int64_t)aws_timestamp_convert(1, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+    metrics.time_metrics.send_end_timestamp_ns = send_end_ns;
+    metrics.time_metrics.receive_end_timestamp_ns = send_end_ns + one_ms_ns;
+    for (size_t i = 0; i < 100; i++) {
+        /* Each second response starts 1 ms after the end of the send. */
+        metrics.time_metrics.receive_start_timestamp_ns = i % 2 == 0 ? send_end_ns - 1 : send_end_ns + one_ms_ns;
+        aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
+    }
+
+    ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
+    ASSERT_TRUE(client->synced_data.upload_part_timeout.response_to_first_byte_time.mean_ns < (uint64_t)one_ms_ns);
+    /* The timeout moves from 1 sec toward the mean plus g_expect_timeout_offset_ms. */
+    size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+    ASSERT_TRUE(current_timeout_ms < 1000);
+    ASSERT_TRUE(current_timeout_ms > g_expect_timeout_offset_ms);
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
 /* Test meta request can override the part size as expected */
 TEST_CASE(client_meta_request_override_part_size) {
     (void)ctx;

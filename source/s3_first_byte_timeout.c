@@ -171,7 +171,8 @@ void aws_s3_first_byte_timeout_controller_record_success(
         aws_timestamp_convert(controller->timeout_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
     uint64_t expect_timeout_offset_ns =
         aws_timestamp_convert(g_expect_timeout_offset_ms, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
-    uint64_t expected_timeout_ns = controller->response_to_first_byte_time.mean_ns + expect_timeout_offset_ns;
+    uint64_t expected_timeout_ns =
+        aws_add_u64_saturating(controller->response_to_first_byte_time.mean_ns, expect_timeout_offset_ns);
     double timeout_ns_double = (double)current_timeout_ns * 0.99 + (double)expected_timeout_ns * 0.01;
     s_apply_timeout(controller, (uint64_t)timeout_ns_double);
 }
