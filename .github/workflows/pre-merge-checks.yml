@@ -1,4 +1,5 @@
-name: Pre-merge checks
+# Pre-merge checks
+name: Checks
 
 on:
   pull_request:
