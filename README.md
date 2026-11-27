@@ -135,7 +135,7 @@ The AWS-C-S3 library is an asynchronous AWS S3 client focused on maximizing thro
 
 6. **GET Hedging - `AWS_CRT_S3_GET_OBJECT_HEDGING`**
 
-   Turns on GET hedging. If a part request of a GetObject meta request gets no response before an adaptive first-byte timeout, the client cancels it and sends it again at once on a new connection. UploadPart requests always use the same kind of timeout. See [First-Byte Timeout and Hedging](docs/Hedging.md).
+   Turns on GET hedging. If a part request of a GetObject meta request gets no response before an adaptive first-byte timeout, the client cancels it and sends it again at once on another connection. UploadPart requests always use the same kind of timeout. See [First-Byte Timeout and Hedging](docs/Hedging.md).
 
    Example Usage:
 

@@ -875,7 +875,7 @@ struct aws_s3_client_config {
     /**
      * Whether the client hedges GET part requests. A hedge cancels a part request of an
      * AWS_S3_META_REQUEST_TYPE_GET_OBJECT meta request that gets no response before a first-byte timeout, and
-     * sends the request again at once on a new connection.
+     * sends the request again at once on another connection.
      *
      * GET hedging uses the same adaptive first-byte timeout as UploadPart requests, with separate samples. For the
      * first max(10, ideal connection count) successes, the client sets no timeout. If the mean time to first byte of

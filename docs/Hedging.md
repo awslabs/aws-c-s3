@@ -2,7 +2,7 @@
 
 ## Overview
 
-A part request can be slow and not fail. It waits for a slow connection, a congested path, or a slow S3 server. A retry does not help, because a retry waits for an error that does not come. The first-byte timeout cuts this tail latency. If a part request gets no response before the timeout, the client cancels the request and sends it again at once on a new connection. This new attempt is a hedge.
+A part request can be slow and not fail. It waits for a slow connection, a congested path, or a slow S3 server. A retry does not help, because a retry waits for an error that does not come. The first-byte timeout cuts this tail latency. If a part request gets no response before the timeout, the client cancels the request and sends it again at once on another connection. This new attempt is a hedge.
 
 The client uses the first-byte timeout for two request types:
 
@@ -75,4 +75,4 @@ The client also logs these events:
 - INFO: the end of the warmup, with the start value of the timeout, and the stop of a controller.
 - DEBUG: an empty budget that pauses the timeout, and the resume of the timeout.
 - WARN for UploadPart and INFO for GetObject: more than 1% of the requests reached the timeout, so the timeout increases.
-- aws-c-http logs each hedge at the INFO level, with the timeout (`Timed out waiting for first byte of HTTP response`).
+- aws-c-http logs each timeout at the INFO level, with the timeout (`Timed out waiting for first byte of HTTP response`).
