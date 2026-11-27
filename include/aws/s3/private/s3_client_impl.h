@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0.
  */
 
+#include "aws/s3/private/s3_first_byte_timeout.h"
 #include "aws/s3/s3_client.h"
 
 #include <aws/common/atomics.h>
@@ -179,33 +180,6 @@ struct aws_s3_client_vtable {
     /********************* TEST ONLY STUB **************************/
     void (*after_prepare_upload_part_finish_stub)(struct aws_s3_request *request, struct aws_http_message *message);
 #endif
-};
-
-struct aws_s3_upload_part_timeout_stats {
-    bool stop_timeout;
-
-    /* Total number of successful upload requests */
-    uint64_t num_successful_upload_requests;
-
-    /* Stats for the request time of first 10 succeed requests */
-    struct {
-        uint64_t sum_ns;
-        uint64_t num_samples;
-        bool collecting_p90;
-        struct aws_priority_queue p90_samples;
-    } initial_request_time;
-
-    /* Track the timeout rate. */
-    struct {
-        uint64_t num_completed;
-        uint64_t num_failed;
-    } timeout_rate_tracking;
-
-    /* Stats for the response to first byte time of tracked succeed requests */
-    struct {
-        uint64_t sum_ns;
-        uint64_t num_samples;
-    } response_to_first_byte_time;
 };
 
 /* Represents the state of the S3 client. */
@@ -402,6 +376,16 @@ struct aws_s3_client {
      */
     struct aws_atomic_var upload_timeout_ms;
 
+    /* True if GET hedging is on. See `aws_s3_client_config.get_object_hedging`. */
+    const bool get_object_hedging_enabled;
+
+    /**
+     * The first-byte timeout in ms for the next GET part request, or 0 for no timeout. The client writes it while
+     * it holds the lock, after each change of `synced_data.get_object_timeout`. The send path reads it without the
+     * lock.
+     */
+    struct aws_atomic_var get_object_hedging_timeout_ms;
+
     /*
      * An aws_array_list<struct aws_string *> of network interface names.
      */
@@ -491,7 +475,14 @@ struct aws_s3_client {
         /* Whether or not endpoints cleanup task is currently scheduled. */
         uint32_t endpoints_cleanup_task_scheduled : 1;
 
-        struct aws_s3_upload_part_timeout_stats upload_part_stats;
+        /* The first-byte timeout of the UploadPart requests. The client copies its timeout to `upload_timeout_ms`. */
+        struct aws_s3_first_byte_timeout_controller upload_part_timeout;
+
+        /**
+         * The first-byte timeout of the GET part requests (GET hedging). The client copies its timeout to
+         * `get_object_hedging_timeout_ms`.
+         */
+        struct aws_s3_first_byte_timeout_controller get_object_timeout;
     } synced_data;
 
     struct {
@@ -614,13 +605,54 @@ AWS_S3_API
 extern const uint32_t g_min_num_connections;
 
 AWS_S3_API
-extern const size_t g_expect_timeout_offset_ms;
-
-AWS_S3_API
 void aws_s3_client_update_upload_part_timeout(
     struct aws_s3_client *client,
     struct aws_s3_request *finished_upload_part_request,
     int finished_error_code);
+
+/**
+ * True if the UploadPart first-byte timeout applies to the request: the request is an UploadPart request, the meta
+ * request is not for S3 Express, and retries are on.
+ */
+AWS_S3_API
+bool aws_s3_client_upload_part_timeout_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request);
+
+/**
+ * True if the client can give the request a first-byte timeout, and hedge the request if it reaches the timeout. This
+ * is true for the UploadPart timeout and for GET hedging.
+ */
+AWS_S3_API
+bool aws_s3_client_first_byte_timeout_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request);
+
+/**
+ * True if GET hedging applies to the request: GET hedging is on, and the request is a GetObject request of an
+ * AWS_S3_META_REQUEST_TYPE_GET_OBJECT meta request.
+ */
+AWS_S3_API
+bool aws_s3_client_get_object_hedging_applies(
+    const struct aws_s3_meta_request *meta_request,
+    const struct aws_s3_request *request);
+
+/**
+ * Gives the result of a GET part request attempt to the GET hedging controller. A success with a 2xx response adds a
+ * time to first byte sample. A first-byte timeout of an attempt that had a first-byte timeout counts as a hedge. The
+ * function does nothing if GET hedging is off.
+ *
+ * Invoked from `s_s3_meta_request_send_request_finish`.
+ */
+AWS_S3_API
+void aws_s3_client_update_get_object_hedging(
+    struct aws_s3_client *client,
+    struct aws_s3_request *finished_request,
+    int finished_error_code);
+
+/* Returns the first-byte timeout in ms for the next GET part request, or 0 for no timeout. */
+AWS_S3_API
+size_t aws_s3_client_get_object_hedging_timeout_ms(struct aws_s3_client *client);
 
 AWS_EXTERN_C_END
 

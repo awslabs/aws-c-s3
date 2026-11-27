@@ -151,6 +151,11 @@ struct aws_s3_tester_client_options {
      * that does not set this gets whatever the client decides. */
     enum aws_tribool out_of_order_delivery;
     enum aws_s3_retry_mode retry_mode;
+    /* Passed straight through to aws_s3_client_config.retry_config. 0 gives the client default. */
+    uint32_t backoff_scale_factor_ms;
+    enum aws_exponential_backoff_jitter_mode jitter_mode;
+    /* Passed straight through to aws_s3_client_config. */
+    enum aws_tribool get_object_hedging;
 };
 
 /* should really break this up to a client setup, and a meta_request sending */

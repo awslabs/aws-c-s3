@@ -1070,6 +1070,20 @@ static int s_test_s3_apply_retry_info_headers(struct aws_allocator *allocator, v
     ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
     ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=3");
 
+    /* An UploadPart request can have a hedge, which is one more attempt. */
+    client.max_attempts = 6;
+    request.num_times_prepared = 0;
+    request.request_type = AWS_S3_REQUEST_TYPE_UPLOAD_PART;
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
+    ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=1; max=7");
+
+    /* The client does not hedge S3 Express UploadPart requests. */
+    meta_request.is_express = true;
+    ASSERT_SUCCESS(aws_s3_apply_retry_info_headers(&meta_request, &request));
+    ASSERT_SUCCESS(aws_http_headers_get(headers, g_amz_sdk_request_header_name, &value));
+    ASSERT_CURSOR_VALUE_CSTRING_EQUALS(value, "attempt=1; max=6");
+
     aws_http_message_release(request.send_data.message);
     aws_s3_tester_clean_up(&tester);
 

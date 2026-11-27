@@ -668,6 +668,11 @@ uint32_t aws_s3_request_metrics_get_retry_attempt(const struct aws_s3_request_me
     return metrics->crt_info_metrics.retry_attempt;
 }
 
+uint64_t aws_s3_request_metrics_get_first_byte_timeout_ms(const struct aws_s3_request_metrics *metrics) {
+    AWS_PRECONDITION(metrics);
+    return metrics->crt_info_metrics.first_byte_timeout_ms;
+}
+
 void aws_s3_request_metrics_get_part_range_start(
     const struct aws_s3_request_metrics *metrics,
     uint64_t *out_part_range_start) {

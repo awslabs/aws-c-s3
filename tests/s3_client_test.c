@@ -26,7 +26,7 @@ static void s_init_mock_s3_request_upload_part_timeout(
     uint64_t original_upload_timeout_ms,
     uint64_t request_time_ns,
     uint64_t response_to_first_byte_time_ns) {
-    mock_request->upload_timeout_ms = (size_t)original_upload_timeout_ms;
+    mock_request->first_byte_timeout_ms = (size_t)original_upload_timeout_ms;
     struct aws_s3_request_metrics *metrics = mock_request->send_data.metrics;
 
     metrics->time_metrics.send_start_timestamp_ns = 0;
@@ -35,10 +35,26 @@ static void s_init_mock_s3_request_upload_part_timeout(
     metrics->time_metrics.receive_start_timestamp_ns = response_to_first_byte_time_ns;
 }
 
+/* Starts the UploadPart timeout controller again, with a new warmup of `num_warmup_samples` requests. */
+static void s_reset_upload_part_timeout(struct aws_s3_client *client, uint32_t num_warmup_samples) {
+    aws_s3_first_byte_timeout_controller_clean_up(&client->synced_data.upload_part_timeout);
+    aws_s3_first_byte_timeout_controller_init(
+        &client->synced_data.upload_part_timeout, client->allocator, num_warmup_samples);
+}
+
+/**
+ * Gets the timeout value of the UploadPart controller. While the hedge budget has less than 1 token, the requests have
+ * no timeout, but the timeout value does not change. Use this function when a test has more than 10 timeouts in
+ * sequence.
+ */
+static size_t s_upload_part_timeout_value_ms(struct aws_s3_client *client) {
+    return client->synced_data.upload_part_timeout.timeout_ms;
+}
+
 static int s_starts_upload_retry(struct aws_s3_client *client, struct aws_s3_request *mock_request) {
     uint64_t average_time_ns = aws_timestamp_convert(
         300, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL); /* 0.3 Secs, average for upload a part */
-    AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
+    s_reset_upload_part_timeout(client, client->ideal_connection_count);
 
     s_init_mock_s3_request_upload_part_timeout(mock_request, 0, average_time_ns, average_time_ns);
     size_t init_count = client->ideal_connection_count;
@@ -55,7 +71,7 @@ static int s_starts_upload_retry(struct aws_s3_client *client, struct aws_s3_req
         aws_s3_client_update_upload_part_timeout(client, mock_request, AWS_ERROR_SUCCESS);
     }
     /* Check that retry should be turned off */
-    ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
+    ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
     size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
     /* We start the retry with a default 1 sec timeout */
     ASSERT_UINT_EQUALS(1000, current_timeout_ms);
@@ -89,7 +105,7 @@ TEST_CASE(client_update_upload_part_timeout) {
     size_t init_count = client->ideal_connection_count;
     {
         /* 1. If the request time is larger than 5 secs, we don't do retry */
-        AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
+        s_reset_upload_part_timeout(client, (uint32_t)init_count);
         s_init_mock_s3_request_upload_part_timeout(&mock_request, 0, large_time_ns, average_time_ns);
 
         /* If request timeout happened before the retry started, it has no effects. */
@@ -99,21 +115,14 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
 
-        ASSERT_TRUE(client->synced_data.upload_part_stats.stop_timeout);
+        ASSERT_TRUE(client->synced_data.upload_part_timeout.stop_timeout);
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         ASSERT_UINT_EQUALS(0, current_timeout_ms);
-        /* clean up */
-        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
-            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
-            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
-        }
     }
     {
         /* 2.1. Test that the P90 of the init samples are used correctly and at least 1 sec */
-        AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
-        /* Hack around to set the ideal connection time for testing. */
         size_t test_init_connection = 1000;
-        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)test_init_connection;
+        s_reset_upload_part_timeout(client, (uint32_t)test_init_connection);
         for (size_t i = 0; i < test_init_connection; i++) {
             /* Mock a number of requests completed with the large time for the request */
             uint64_t time_ns = aws_timestamp_convert(i, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
@@ -122,22 +131,13 @@ TEST_CASE(client_update_upload_part_timeout) {
         }
 
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        /* the P90 of the results is 900, but it has to be at least 1000 */
+        /* The nearest-rank P90 of the results is 899, but it has to be at least 1000 */
         ASSERT_UINT_EQUALS(1000, current_timeout_ms);
-        /* clean up */
-        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
-            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
-            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
-        }
-        /* Change it back */
-        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)init_count;
     }
     {
         /* 2.2. Test that the P90 of the init samples are used correctly */
-        AWS_ZERO_STRUCT(client->synced_data.upload_part_stats);
-        /* Hack around to set the ideal connection time for testing. */
         size_t test_init_connection = 10000;
-        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)test_init_connection;
+        s_reset_upload_part_timeout(client, (uint32_t)test_init_connection);
         for (size_t i = 0; i < test_init_connection; i++) {
             /* Mock a number of requests completed with the large time for the request */
             uint64_t time_ns = aws_timestamp_convert(i, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
@@ -146,15 +146,8 @@ TEST_CASE(client_update_upload_part_timeout) {
         }
 
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
-        /* P90 is 9000 */
-        ASSERT_UINT_EQUALS(9000, current_timeout_ms);
-        /* clean up */
-        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
-            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
-            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
-        }
-        /* Change it back */
-        *(uint32_t *)(void *)&client->ideal_connection_count = (uint32_t)init_count;
+        /* The nearest-rank P90 of the 10000 values from 0 ms to 9999 ms is the 9000th value: 8999 ms. */
+        ASSERT_UINT_EQUALS(8999, current_timeout_ms);
     }
 
     {
@@ -189,7 +182,7 @@ TEST_CASE(client_update_upload_part_timeout) {
             /* Mock a number of requests completed with the large time for the request */
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
-        ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
+        ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
         current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         /* After 1000 runs, we have the timeout match the "expected" (average time + g_expect_timeout_offset_ms) timeout
          */
@@ -197,11 +190,6 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_timestamp_convert(average_time_ns, AWS_TIMESTAMP_NANOS, AWS_TIMESTAMP_MILLIS, NULL) +
                 g_expect_timeout_offset_ms,
             current_timeout_ms);
-        /* clean up */
-        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
-            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
-            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
-        }
     }
 
     {
@@ -211,8 +199,8 @@ TEST_CASE(client_update_upload_part_timeout) {
          *      request was made, if the updated timeout is larger than the expected, skip update).
          */
         /* Set current timeout rate to be around 0.1% */
-        client->synced_data.upload_part_stats.timeout_rate_tracking.num_completed = 800;
-        client->synced_data.upload_part_stats.timeout_rate_tracking.num_failed = 1;
+        client->synced_data.upload_part_timeout.timeout_rate_tracking.num_completed = 800;
+        client->synced_data.upload_part_timeout.timeout_rate_tracking.num_failed = 1;
 
         /* Update the timeout as the rate is larger than 0.1% */
         s_init_mock_s3_request_upload_part_timeout(&mock_request, 1000 /*original_upload_timeout_ms*/, 0, 0);
@@ -223,15 +211,10 @@ TEST_CASE(client_update_upload_part_timeout) {
         /* The same timeout applied to multiple requests made before, and the timeout happened right after we already
          * updated it. The timeout will not be updated again. */
         aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-        ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
+        ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
         current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         /* 1.1 secs, still */
         ASSERT_UINT_EQUALS(1100, current_timeout_ms);
-        /* clean up */
-        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
-            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
-            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
-        }
     }
 
     {
@@ -251,18 +234,18 @@ TEST_CASE(client_update_upload_part_timeout) {
 
         /* First failure will not change the timeout, as we use the ceiling of 1% rate */
         aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-        size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        size_t current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(1000, current_timeout_ms);
 
         /* Updated at the second timeout */
         aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(2000, current_timeout_ms);
         /* The rest of the batch failure will not affect the timeout */
         for (size_t i = 0; i < 10; i++) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
         }
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         /* still 2 secs */
         ASSERT_UINT_EQUALS(2000, current_timeout_ms);
 
@@ -275,7 +258,7 @@ TEST_CASE(client_update_upload_part_timeout) {
         for (size_t i = 0; i < 10; i++) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
         }
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         /* 3 secs now */
         ASSERT_UINT_EQUALS(3000, current_timeout_ms);
 
@@ -291,14 +274,12 @@ TEST_CASE(client_update_upload_part_timeout) {
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
         }
         /* still 3 secs */
-        current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+        current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(3000, current_timeout_ms);
-        ASSERT_FALSE(client->synced_data.upload_part_stats.stop_timeout);
-        /* clean up */
-        if (client->synced_data.upload_part_stats.initial_request_time.collecting_p90) {
-            aws_priority_queue_clean_up(&client->synced_data.upload_part_stats.initial_request_time.p90_samples);
-            client->synced_data.upload_part_stats.initial_request_time.collecting_p90 = false;
-        }
+        ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
+        /* The 23 timeouts made the hedge budget negative, and 10 successes do not refill 1 token. Thus, the next
+         * requests have no timeout, but the timeout value stays at 3 secs. */
+        ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->upload_timeout_ms));
     }
 
     {
@@ -310,15 +291,61 @@ TEST_CASE(client_update_upload_part_timeout) {
             /* Make two continuous timeout request with updated timeout */
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
             aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
-            size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+            size_t current_timeout_ms = s_upload_part_timeout_value_ms(client);
             s_init_mock_s3_request_upload_part_timeout(
                 &mock_request, current_timeout_ms /*original_upload_timeout_ms*/, 0, 0);
         }
         /* Timeout stopped */
         size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
         ASSERT_UINT_EQUALS(0, current_timeout_ms);
-        ASSERT_TRUE(client->synced_data.upload_part_stats.stop_timeout);
+        ASSERT_TRUE(client->synced_data.upload_part_timeout.stop_timeout);
     }
+
+    aws_s3_client_release(client);
+    aws_s3_tester_clean_up(&tester);
+    return AWS_OP_SUCCESS;
+}
+
+/**
+ * aws-c-http records the end of the request send in a task after the socket write completes. A fast server can answer
+ * before this task runs. Then the response starts before the recorded end of the send. The time to first byte of such
+ * a request is 0, and it must not stop the timeout.
+ */
+TEST_CASE(client_update_upload_part_timeout_counts_a_response_before_the_send_end) {
+    (void)ctx;
+    struct aws_s3_tester tester;
+    AWS_ZERO_STRUCT(tester);
+    ASSERT_SUCCESS(aws_s3_tester_init(allocator, &tester));
+    struct aws_s3_client *client = NULL;
+    struct aws_s3_tester_client_options client_options = {
+        .part_size = MB_TO_BYTES(8),
+        .tls_usage = AWS_S3_TLS_DISABLED,
+    };
+    ASSERT_SUCCESS(aws_s3_tester_client_new(&tester, &client_options, &client));
+    struct aws_s3_request mock_request;
+    struct aws_s3_request_metrics metrics;
+    AWS_ZERO_STRUCT(mock_request);
+    AWS_ZERO_STRUCT(metrics);
+    mock_request.send_data.metrics = &metrics;
+    ASSERT_SUCCESS(s_starts_upload_retry(client, &mock_request));
+
+    s_init_mock_s3_request_upload_part_timeout(&mock_request, 1000 /*original_upload_timeout_ms*/, 0, 0);
+    int64_t send_end_ns = (int64_t)aws_timestamp_convert(300, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+    int64_t one_ms_ns = (int64_t)aws_timestamp_convert(1, AWS_TIMESTAMP_MILLIS, AWS_TIMESTAMP_NANOS, NULL);
+    metrics.time_metrics.send_end_timestamp_ns = send_end_ns;
+    metrics.time_metrics.receive_end_timestamp_ns = send_end_ns + one_ms_ns;
+    for (size_t i = 0; i < 100; i++) {
+        /* Each second response starts 1 ms after the end of the send. */
+        metrics.time_metrics.receive_start_timestamp_ns = i % 2 == 0 ? send_end_ns - 1 : send_end_ns + one_ms_ns;
+        aws_s3_client_update_upload_part_timeout(client, &mock_request, AWS_ERROR_SUCCESS);
+    }
+
+    ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
+    ASSERT_TRUE(client->synced_data.upload_part_timeout.response_to_first_byte_time.mean_ns < (uint64_t)one_ms_ns);
+    /* The timeout moves from 1 sec toward the mean plus g_expect_timeout_offset_ms. */
+    size_t current_timeout_ms = aws_atomic_load_int(&client->upload_timeout_ms);
+    ASSERT_TRUE(current_timeout_ms < 1000);
+    ASSERT_TRUE(current_timeout_ms > g_expect_timeout_offset_ms);
 
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
