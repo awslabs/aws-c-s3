@@ -3723,7 +3723,7 @@ static void s_store_first_byte_timeout(
     bool was_warm) {
 
     size_t previous_timeout_ms = aws_atomic_load_int(timeout_ms_atomic);
-    /* The timeout is 0 while the hedge budget is empty. */
+    /* The timeout is 0 while the hedge budget has less than 1 token. */
     size_t timeout_ms = aws_s3_first_byte_timeout_controller_get_timeout_ms(controller);
     aws_atomic_store_int(timeout_ms_atomic, timeout_ms);
 
@@ -3744,8 +3744,8 @@ static void s_store_first_byte_timeout(
     } else if (previous_timeout_ms > 0 && timeout_ms == 0) {
         AWS_LOGF_DEBUG(
             AWS_LS_S3_CLIENT,
-            "id=%p Client paused the %s first-byte timeout, because the hedge budget is empty. Successes refill the "
-            "budget.",
+            "id=%p Client paused the %s first-byte timeout, because the hedge budget has less than 1 token. Successes "
+            "refill the budget.",
             (void *)client,
             name);
     } else if (previous_timeout_ms == 0 && timeout_ms > 0) {

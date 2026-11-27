@@ -18,9 +18,10 @@ const size_t g_expect_timeout_offset_ms =
 static const uint64_t s_mean_ewma_divisor = 64;
 
 /* The hedge budget, in 1/100 tokens. The constants are the same as in the hedging design of the AWS S3 Transfer
- * Manager for Rust. */
-static const uint32_t s_budget_reward_centitokens = 5; /* 0.05 tokens */
-static const uint32_t s_budget_cost_centitokens = 100; /* 1 token */
+ * Manager for Rust. Unlike that design, the budget has no floor at 0. Thus, successes pay back each timeout of a wave
+ * of requests that reached their timeout together. */
+static const int64_t s_budget_reward_centitokens = 5; /* 0.05 tokens */
+static const int64_t s_budget_cost_centitokens = 100; /* 1 token */
 
 static int s_compare_uint64_min_heap(const void *a, const void *b) {
     uint64_t arg1 = *(const uint64_t *)a;
@@ -135,7 +136,7 @@ void aws_s3_first_byte_timeout_controller_record_success(
     uint64_t response_to_first_byte_time_ns) {
     AWS_PRECONDITION(controller);
 
-    controller->budget_centitokens = aws_min_u32(
+    controller->budget_centitokens = aws_min_i64(
         controller->budget_centitokens + s_budget_reward_centitokens,
         AWS_S3_FIRST_BYTE_TIMEOUT_BUDGET_CAPACITY_CENTITOKENS);
 
@@ -183,9 +184,7 @@ bool aws_s3_first_byte_timeout_controller_record_timeout(
     AWS_PRECONDITION(controller);
 
     controller->num_timeouts = aws_add_u64_saturating(controller->num_timeouts, 1);
-    controller->budget_centitokens = controller->budget_centitokens >= s_budget_cost_centitokens
-                                         ? controller->budget_centitokens - s_budget_cost_centitokens
-                                         : 0;
+    controller->budget_centitokens -= s_budget_cost_centitokens;
 
     if (controller->stop_timeout) {
         /* Timeout was disabled */

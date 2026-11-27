@@ -131,6 +131,36 @@ TEST_CASE(first_byte_timeout_controller_budget_limits_a_burst_of_timeouts) {
     return AWS_OP_SUCCESS;
 }
 
+/**
+ * The controller gives a timeout to each request that it sends while 1 token or more is available. Thus, more requests
+ * than tokens can be in flight with a timeout, and reach it together, for example during a broad slowdown. Each of
+ * these timeouts removes 1 token, and the budget becomes negative. Successes pay back all of the timeouts before the
+ * next request gets a timeout. Thus, waves of timeouts stay at approximately 4.8% of the requests also with many
+ * connections. With a floor at 0, the 25 hedges of the wave would refill 1 token, and the next wave would start.
+ */
+TEST_CASE(first_byte_timeout_controller_budget_pays_back_a_wave_of_timeouts) {
+    (void)ctx;
+    struct aws_s3_first_byte_timeout_controller controller;
+    ASSERT_SUCCESS(s_init_warm_controller(&controller, allocator));
+
+    /* 25 requests in flight got the 1 s timeout, and all of them reach it. */
+    for (size_t i = 0; i < 25; ++i) {
+        aws_s3_first_byte_timeout_controller_record_timeout(&controller, 1000);
+    }
+    ASSERT_INT_EQUALS(-1500, controller.budget_centitokens);
+    ASSERT_FALSE(controller.stop_timeout);
+    ASSERT_UINT_EQUALS(0, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+
+    /* 1 token needs (1500 + 100) / 5 = 320 successes. */
+    s_record_successes(&controller, 319, 100);
+    ASSERT_UINT_EQUALS(0, aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller));
+    s_record_successes(&controller, 1, 100);
+    ASSERT_TRUE(aws_s3_first_byte_timeout_controller_get_timeout_ms(&controller) > 0);
+
+    aws_s3_first_byte_timeout_controller_clean_up(&controller);
+    return AWS_OP_SUCCESS;
+}
+
 /* The budget is full at the start, and successes do not fill it more than its capacity. */
 TEST_CASE(first_byte_timeout_controller_budget_has_a_capacity) {
     (void)ctx;

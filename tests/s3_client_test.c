@@ -43,8 +43,9 @@ static void s_reset_upload_part_timeout(struct aws_s3_client *client, uint32_t n
 }
 
 /**
- * Gets the timeout value of the UploadPart controller. While the hedge budget is empty, the requests have no timeout,
- * but the timeout value does not change. Use this function when a test has more than 10 timeouts in sequence.
+ * Gets the timeout value of the UploadPart controller. While the hedge budget has less than 1 token, the requests have
+ * no timeout, but the timeout value does not change. Use this function when a test has more than 10 timeouts in
+ * sequence.
  */
 static size_t s_upload_part_timeout_value_ms(struct aws_s3_client *client) {
     return client->synced_data.upload_part_timeout.timeout_ms;
@@ -276,8 +277,8 @@ TEST_CASE(client_update_upload_part_timeout) {
         current_timeout_ms = s_upload_part_timeout_value_ms(client);
         ASSERT_UINT_EQUALS(3000, current_timeout_ms);
         ASSERT_FALSE(client->synced_data.upload_part_timeout.stop_timeout);
-        /* The 23 timeouts emptied the hedge budget, and 10 successes do not refill 1 token. Thus, the next requests
-         * have no timeout, but the timeout value stays at 3 secs. */
+        /* The 23 timeouts made the hedge budget negative, and 10 successes do not refill 1 token. Thus, the next
+         * requests have no timeout, but the timeout value stays at 3 secs. */
         ASSERT_UINT_EQUALS(0, aws_atomic_load_int(&client->upload_timeout_ms));
     }
 

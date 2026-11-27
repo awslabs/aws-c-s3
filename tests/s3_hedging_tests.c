@@ -166,7 +166,7 @@ TEST_CASE(client_update_get_object_hedging) {
     aws_s3_client_update_get_object_hedging(client, &mock_request, AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT);
     ASSERT_UINT_EQUALS(0, s_controller_of(client).num_timeouts);
 
-    /* After 10 hedges, the budget is empty and the client sets no timeout. */
+    /* After 10 hedges, the budget has no token and the client sets no timeout. */
     s_init_mock_get_request(&mock_request, 0, 0, 1000);
     for (size_t i = 0; i < 10; ++i) {
         ASSERT_TRUE(aws_s3_client_get_object_hedging_timeout_ms(client) > 0);

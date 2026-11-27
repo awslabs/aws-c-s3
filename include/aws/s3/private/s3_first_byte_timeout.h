@@ -65,6 +65,9 @@ AWS_PUSH_SANE_WARNING_LEVEL
  *      and a timeout removes 1 token. The controller gives a timeout only while 1 token or more is available. Thus,
  *      timeouts stay below approximately 4.8% (0.05 / 1.05) of the requests, also during a broad slowdown. Successes,
  *      not time, refill the budget. The budget does not change the timeout value of steps 3 and 4.
+ *  5.1 A timeout removes 1 token also if the budget becomes negative. Many requests that are in flight at the same
+ *      time can reach their timeout together. Successes pay back all of these timeouts before the controller gives a
+ *      timeout again. Thus, such a wave does not escape the limit of step 5.
  *
  * The controller does not use the client. The caller gives it the results of the requests, and sends the next
  * requests with the value of `aws_s3_first_byte_timeout_controller_get_timeout_ms()`. The controller is not thread
@@ -79,13 +82,16 @@ struct aws_s3_first_byte_timeout_controller {
     bool stop_timeout;
 
     /**
-     * The first-byte timeout value in ms. Zero during the warmup and after a stop. An empty hedge budget pauses the
-     * timeout, but does not change this value.
+     * The first-byte timeout value in ms. Zero during the warmup and after a stop. A hedge budget with less than 1
+     * token pauses the timeout, but does not change this value.
      */
     size_t timeout_ms;
 
-    /* The hedge budget, in 1/100 tokens. Integer units make the budget arithmetic exact. */
-    uint32_t budget_centitokens;
+    /**
+     * The hedge budget, in 1/100 tokens. Integer units make the budget arithmetic exact. The budget is negative after
+     * more timeouts than tokens.
+     */
+    int64_t budget_centitokens;
 
     /* Total number of successful requests */
     uint64_t num_successful_requests;
@@ -144,8 +150,9 @@ void aws_s3_first_byte_timeout_controller_record_success(
     uint64_t response_to_first_byte_time_ns);
 
 /**
- * Records a request that reached its first-byte timeout, and removes 1 token from the hedge budget.
- * `request_timeout_ms` is the timeout that the request used. Returns true if the timeout rate is more than 1%.
+ * Records a request that reached its first-byte timeout, and removes 1 token from the hedge budget, also if the budget
+ * becomes negative. `request_timeout_ms` is the timeout that the request used. Returns true if the timeout rate is more
+ * than 1%.
  */
 AWS_S3_API
 bool aws_s3_first_byte_timeout_controller_record_timeout(

@@ -16,7 +16,7 @@ To turn on GET hedging, set `aws_s3_client_config.get_object_hedging` to `AWS_TR
 
 The client does not give S3 Express UploadPart requests a first-byte timeout. S3 Express sends a random ETag, and two uploads of the same part can make CompleteMultipartUpload fail ([#602](https://github.com/awslabs/aws-c-s3/pull/602)). GET hedging includes S3 Express, because a GET is idempotent.
 
-The [S3 performance guidelines](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance-design-patterns.html#optimizing-performance-timeouts-retries) recommend to track slow requests and to send them again. The budget follows [the hedging design of the AWS S3 Transfer Manager for Rust](https://github.com/awslabs/aws-s3-transfer-manager-rs/blob/main/docs/design/hedging.md), and the 5% limit of speculative load from Dean and Barroso, [*The Tail at Scale*](https://research.google/pubs/the-tail-at-scale/).
+The [S3 performance guidelines](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance-design-patterns.html#optimizing-performance-timeouts-retries) recommend to track slow requests and to send them again. The budget follows [the hedging design of the AWS S3 Transfer Manager for Rust](https://github.com/awslabs/aws-s3-transfer-manager-rs/blob/main/docs/design/hedging.md), but it has no floor at 0 (see [The hedge budget](#the-hedge-budget)). The budget also follows the 5% limit of speculative load from Dean and Barroso, [*The Tail at Scale*](https://research.google/pubs/the-tail-at-scale/).
 
 ## What the timeout measures
 
@@ -41,13 +41,13 @@ The warmup sample shows the cost of a new attempt. For UploadPart, a new attempt
 
 ## The hedge budget
 
-The budget limits the number of hedges. The budget starts full with 10 tokens. A success adds 0.05 tokens, and a hedge removes 1 token. The client sets the timeout only while 1 token or more is available. The budget does not change the value of the timeout.
+The budget limits the number of hedges. The budget starts full with 10 tokens. A success adds 0.05 tokens, and a hedge removes 1 token, also if the budget becomes negative. The client sets the timeout only while 1 token or more is available. The budget does not change the value of the timeout.
 
-Thus, hedges stay below approximately 4.8% (0.05 / 1.05) of the requests. When few requests are slow, the budget stays almost full. When many requests are slow at the same time, the hedges remove tokens faster than the successes add them. The budget becomes empty, and the client sets no timeout until successes refill it. Successes, not time, refill the budget. Thus, a broad slowdown stops the hedges, and does not double the load.
+Thus, hedges stay below approximately 4.8% (0.05 / 1.05) of the requests. When few requests are slow, the budget stays almost full. When many requests are slow at the same time, the hedges remove tokens faster than the successes add them. The budget goes below 1 token, and the client sets no timeout until successes refill it. Successes, not time, refill the budget. Thus, a broad slowdown stops the hedges, and does not double the load.
 
-The timeout rate and the budget do different things. The timeout rate moves the timeout up until approximately 0.1% to 1% of the requests reach it. The budget stops a burst. Many requests that use the same timeout can reach it at the same time. After 10 hedges in sequence, the budget is empty. The next requests have no timeout until 20 successes refill 1 token.
+The timeout rate and the budget do different things. The timeout rate moves the timeout up until approximately 0.1% to 1% of the requests reach it. The budget stops a burst. Many requests that use the same timeout can reach it at the same time. After 10 hedges in sequence, the budget has no token. The next requests have no timeout until 20 successes refill 1 token.
 
-The client checks the budget when it sends a request, and removes a token only when a hedge occurs. Thus, a wave of slow requests can cause more hedges at the same time than the budget has tokens. After the wave, the budget is empty.
+The client checks the budget when it sends a request, and removes a token only when a hedge occurs. Thus, a wave of slow requests that are in flight at the same time can cause more hedges than the budget has tokens. Each hedge of the wave removes 1 token, and the budget becomes negative. Successes pay back all hedges of the wave before the client sets a timeout again. For example, after a wave of 25 hedges, the budget is -15 tokens, and the next timeout comes after 320 successes. Thus, the limit of approximately 4.8% also applies to a client with many connections. With a floor at 0, the hedges of a wave would refill 1 token when they succeed, the next wave would start at once, and approximately half of the requests would be hedges until the timeout rate moves the timeout above the slow responses, or stops the controller.
 
 ## Hedges and retries
 
@@ -61,7 +61,7 @@ The client checks the budget when it sends a request, and removes a token only w
 
 The request metrics of the `telemetry_callback` show each attempt:
 
-- `aws_s3_request_metrics_get_first_byte_timeout_ms()` gives the timeout of the attempt. The value is 0 during the warmup, after a stop, while the budget is empty, and for an attempt after a hedge.
+- `aws_s3_request_metrics_get_first_byte_timeout_ms()` gives the timeout of the attempt. The value is 0 during the warmup, after a stop, while the budget has less than 1 token, and for an attempt after a hedge.
 - `aws_s3_request_metrics_get_error_code()` gives `AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT` for an attempt that reached the timeout. For UploadPart and GetObject attempts, this error code identifies a hedge, unless the meta request is already finishing, for example after a cancel or a failed part. In that case, the client does not send the request again, but the controller counts the timeout. The next attempt of the same part has an `aws_s3_request_metrics_get_retry_attempt()` value that is 1 more.
 
 Useful values:
@@ -73,6 +73,6 @@ Useful values:
 The client also logs these events:
 
 - INFO: the end of the warmup, with the start value of the timeout, and the stop of a controller.
-- DEBUG: an empty budget that pauses the timeout, and the resume of the timeout.
+- DEBUG: a budget with less than 1 token that pauses the timeout, and the resume of the timeout.
 - WARN for UploadPart and INFO for GetObject: more than 1% of the requests reached the timeout, so the timeout increases.
 - aws-c-http logs each timeout at the INFO level, with the timeout (`Timed out waiting for first byte of HTTP response`).
