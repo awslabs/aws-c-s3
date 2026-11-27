@@ -3779,7 +3779,7 @@ static bool s_get_response_to_first_byte_time_ns(const struct aws_s3_request *re
  * Gives the result of an UploadPart request to the UploadPart first-byte timeout controller. See
  * `struct aws_s3_first_byte_timeout_controller` for the algorithm.
  *
- * Invoked from `s_s3_auto_ranged_put_send_request_finish`.
+ * Invoked from `s_s3_meta_request_send_request_finish`.
  */
 void aws_s3_client_update_upload_part_timeout(
     struct aws_s3_client *client,
@@ -3836,6 +3836,7 @@ bool aws_s3_client_upload_part_timeout_applies(
     const struct aws_s3_request *request) {
     AWS_PRECONDITION(meta_request);
     AWS_PRECONDITION(request);
+    /* TODO: the single part upload may also be improved from a timeout as multipart. */
     return request->request_type == AWS_S3_REQUEST_TYPE_UPLOAD_PART && !meta_request->is_express &&
            !meta_request->client->disable_retries;
 }

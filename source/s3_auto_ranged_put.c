@@ -119,11 +119,6 @@ struct aws_s3_prepare_complete_multipart_upload_job {
 
 static void s_s3_meta_request_auto_ranged_put_destroy(struct aws_s3_meta_request *meta_request);
 
-static void s_s3_auto_ranged_put_send_request_finish(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code);
-
 static bool s_s3_auto_ranged_put_update(
     struct aws_s3_meta_request *meta_request,
     uint32_t flags,
@@ -365,7 +360,7 @@ static int s_try_init_resume_state_from_persisted_data(
 
 static struct aws_s3_meta_request_vtable s_s3_auto_ranged_put_vtable = {
     .update = s_s3_auto_ranged_put_update,
-    .send_request_finish = s_s3_auto_ranged_put_send_request_finish,
+    .send_request_finish = aws_s3_meta_request_send_request_finish_default,
     .schedule_prepare_request = s_s3_auto_ranged_put_schedule_prepare_request,
     .prepare_request = s_s3_auto_ranged_put_prepare_request,
     .init_signing_date_time = aws_s3_meta_request_init_signing_date_time_default,
@@ -594,21 +589,6 @@ static bool s_should_skip_scheduling_more_parts_based_on_flags(
     /* In all other cases, cap the number of pending-reads to something reasonable */
     return auto_ranged_put->synced_data.num_parts_pending_read >=
            s_get_max_parts_pending_read(auto_ranged_put->base.allocator);
-}
-
-static void s_s3_auto_ranged_put_send_request_finish(
-    struct aws_s3_connection *connection,
-    struct aws_http_stream *stream,
-    int error_code) {
-    struct aws_s3_request *request = connection->request;
-    if (aws_s3_client_upload_part_timeout_applies(request->meta_request, request)) {
-        /* TODO: the single part upload may also be improved from a timeout as multipart. */
-        /* Note: For S3express, server responses random ETag. Killing the connection in the middle may cause server
-         * receive two same part and result in confusing during complete MPU with etag doesn't match.
-         * Disable the first byte timeout for s3 express.  */
-        aws_s3_client_update_upload_part_timeout(request->meta_request->client, request, error_code);
-    }
-    aws_s3_meta_request_send_request_finish_default(connection, stream, error_code);
 }
 
 static bool s_s3_auto_ranged_put_update(

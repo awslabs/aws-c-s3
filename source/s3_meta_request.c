@@ -2502,7 +2502,11 @@ static void s_s3_meta_request_send_request_finish(
     if (error_code == AWS_ERROR_HTTP_RESPONSE_FIRST_BYTE_TIMEOUT && request->first_byte_timeout_ms > 0) {
         request->hedge_fired = true;
     }
-    if (aws_s3_client_get_object_hedging_applies(meta_request, request)) {
+    /* Each request that can get a first-byte timeout gives its result to the controller of its type, so that each
+     * hedge uses the budget. */
+    if (aws_s3_client_upload_part_timeout_applies(meta_request, request)) {
+        aws_s3_client_update_upload_part_timeout(meta_request->client, request, error_code);
+    } else if (aws_s3_client_get_object_hedging_applies(meta_request, request)) {
         aws_s3_client_update_get_object_hedging(meta_request->client, request, error_code);
     }
 

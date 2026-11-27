@@ -503,6 +503,12 @@ static int s_put_object_with_hedging(
     ASSERT_SUCCESS(
         s_check_attempts(&tester, &out_results, AWS_S3_REQUEST_TYPE_UPLOAD_PART, out_num_part_2_first_byte_timeouts));
 
+    /* The UploadPart controller counted the hedge. */
+    aws_s3_client_lock_synced_data(client);
+    uint64_t num_timeouts = client->synced_data.upload_part_timeout.num_timeouts;
+    aws_s3_client_unlock_synced_data(client);
+    ASSERT_TRUE(num_timeouts >= 1);
+
     aws_s3_meta_request_test_results_clean_up(&out_results);
     aws_s3_client_release(client);
     aws_s3_tester_clean_up(&tester);
